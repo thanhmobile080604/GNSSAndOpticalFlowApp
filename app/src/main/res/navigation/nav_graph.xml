@@ -4,4 +4,17 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/nav_graph"
     app:startDestination="@id/homeFragment">
+
+    <fragment
+        android:id="@+id/homeFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.HomeFragment"
+        android:label="HomeFragment"
+        tools:layout="@layout/fragment_home" />
+
+    <fragment
+        android:id="@+id/opticalFlowFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.OpticalFlowFragment"
+        android:label="OpticalFlowFragment"
+        tools:layout="@layout/fragment_optical_flow" />
+
 </navigation>
