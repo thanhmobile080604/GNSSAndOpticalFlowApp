@@ -1,8 +1,8 @@
-package com.example.gnssandopticalflowapp.velocity_estimator.classes
+package com.example.gnssandopticalflowapp.optical_flow.classes
 
 import android.util.Log
 import android.widget.TextView
-import com.example.gnssandopticalflowapp.velocity_estimator.inter.OpticalFlow
+import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
 import com.example.gnssandopticalflowapp.model.OFOutput
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc

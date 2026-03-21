@@ -1,7 +1,7 @@
-package com.example.gnssandopticalflowapp.velocity_estimator.classes
+package com.example.gnssandopticalflowapp.optical_flow.classes
 
 import com.example.gnssandopticalflowapp.model.OFOutput
-import com.example.gnssandopticalflowapp.velocity_estimator.inter.OpticalFlow
+import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
 import org.opencv.core.Mat
 
 class BoofOF : OpticalFlow {

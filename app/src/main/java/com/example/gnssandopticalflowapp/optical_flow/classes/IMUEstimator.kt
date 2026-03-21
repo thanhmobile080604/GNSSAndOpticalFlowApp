@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.velocity_estimator.classes
+package com.example.gnssandopticalflowapp.optical_flow.classes
 
 import android.content.Context
 import android.hardware.Sensor

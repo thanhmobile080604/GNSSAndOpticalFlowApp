@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.velocity_estimator.inter
+package com.example.gnssandopticalflowapp.optical_flow.inter
 
 import com.example.gnssandopticalflowapp.model.OFOutput
 import org.opencv.core.Mat

@@ -1,5 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="blue">#FF6200EE</color>
+    <color name="gray">#ADB9C7</color>
+    <color name="black_60">#60000000</color>
+    <color name="color_957BFE">#957BFE</color>
+
+    <color name="transparent">#00000000</color>
+
+    <color name="color_FF7B82">#FF7B82</color>
+    <color name="color_FF5277">#FF5277</color>
+    <color name="color_464646">#464646</color>
+    <color name="color_909090">#909090</color>
+    <color name="color_66727E">#66727E</color>
+
+
+    <color name="gnt_red">#FF0000</color>
+    <color name="gnt_gray">#808080</color>
+
+    <color name="color_lg_selected_2">#FC7544</color>
+    <color name="color_text_title_setting">#8F9DAA</color>
+
+
+    <color name="primary">#C34EFE</color>
+    <color name="secondary">#4570FE</color>
+    <color name="text_800">#33393F</color>
+    <color name="text_700">#66727E</color>
+    <color name="text_900">#202026</color>
+    <color name="text_400">#B9C1CC</color>
+    <color name="text_500">#957BFE</color>
+
+    <color name="ripple_color_main">#2DE14EFE</color>
+    <color name="ripple_color_white">#4DFFFFFF</color>
+    <color name="main_gradient_start">#C34EFE</color>
+    <color name="main_gradient_end">#4570FE</color>
+    <color name="color_80B356F9">#80B356F9</color>
 </resources>
