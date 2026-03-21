@@ -1,4 +1,4 @@
-package com.example.opticalflowapp.model
+package com.example.gnssandopticalflowapp.model
 
 import org.opencv.core.Mat
 import org.opencv.core.Point

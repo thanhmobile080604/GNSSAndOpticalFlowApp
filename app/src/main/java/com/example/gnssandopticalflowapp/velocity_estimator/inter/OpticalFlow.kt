@@ -1,6 +1,6 @@
-package com.example.opticalflowapp.velocity_estimator.inter
+package com.example.gnssandopticalflowapp.velocity_estimator.inter
 
-import com.example.opticalflowapp.model.OFOutput
+import com.example.gnssandopticalflowapp.model.OFOutput
 import org.opencv.core.Mat
 
 interface OpticalFlow {

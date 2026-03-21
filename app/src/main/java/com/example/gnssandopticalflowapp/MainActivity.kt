@@ -1,4 +1,4 @@
-package com.example.opticalflowapp
+package com.example.gnssandopticalflowapp
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -15,14 +15,14 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.example.opticalflowapp.model.OFOutput
-import com.example.opticalflowapp.velocity_estimator.classes.BasicFusion
-import com.example.opticalflowapp.velocity_estimator.classes.FraneBack
-import com.example.opticalflowapp.velocity_estimator.classes.IMUEstimator
-import com.example.opticalflowapp.velocity_estimator.classes.KLT
-import com.example.opticalflowapp.velocity_estimator.classes.MotionVectorViz
-import com.example.opticalflowapp.velocity_estimator.inter.OpticalFlow
-import com.example.opticalflowapp.velocity_estimator.inter.SensorFusion
+import com.example.gnssandopticalflowapp.model.OFOutput
+import com.example.gnssandopticalflowapp.velocity_estimator.classes.BasicFusion
+import com.example.gnssandopticalflowapp.velocity_estimator.classes.FraneBack
+import com.example.gnssandopticalflowapp.velocity_estimator.classes.IMUEstimator
+import com.example.gnssandopticalflowapp.velocity_estimator.classes.KLT
+import com.example.gnssandopticalflowapp.velocity_estimator.classes.MotionVectorViz
+import com.example.gnssandopticalflowapp.velocity_estimator.inter.OpticalFlow
+import com.example.gnssandopticalflowapp.velocity_estimator.inter.SensorFusion
 import org.opencv.android.CameraBridgeViewBase
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils

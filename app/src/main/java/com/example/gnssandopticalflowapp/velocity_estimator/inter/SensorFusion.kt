@@ -1,4 +1,4 @@
-package com.example.opticalflowapp.velocity_estimator.inter
+package com.example.gnssandopticalflowapp.velocity_estimator.inter
 
 import org.opencv.core.Point
 
