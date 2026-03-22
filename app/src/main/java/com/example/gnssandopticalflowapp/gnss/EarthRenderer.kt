@@ -59,6 +59,13 @@ class EarthRenderer(private val context: Context) : Renderer {
     var theta = 0f
     var phi = 0f
 
+    private var earthTextureId = 0
+
+    private var satProgram = 0
+    private var satellites = listOf<com.example.gnssandopticalflowapp.model.SatelliteInfo>()
+    val satelliteCount: Int get() = satellites.size
+    private val satLock = Any()
+
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         val sphere = createSphere(radius = 0.1f, stacks = 62, slices = 62)
         sphereVertices = sphere.vertices
@@ -110,6 +117,11 @@ class EarthRenderer(private val context: Context) : Renderer {
         if (LoggerConfig.ON) {
             ShaderHelper.validateProgram(program)
         }
+        
+        val satVertexSrc = ShaderReader.readTextFileFromResource(context, R.raw.sat_vertex_shader)
+        val satFragSrc = ShaderReader.readTextFileFromResource(context, R.raw.sat_fragment_shader)
+        satProgram = ShaderHelper.buildProgram(satVertexSrc, satFragSrc)
+
         GLES32.glUseProgram(program)
 
         val vaoBuffer = IntBuffer.allocate(1)
@@ -147,10 +159,7 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glBindBuffer(GLES32.GL_ELEMENT_ARRAY_BUFFER, EBO)
         GLES32.glBufferData(GLES32.GL_ELEMENT_ARRAY_BUFFER, sphereIndices.size * Int.SIZE_BYTES, indicesBuffer, GLES32.GL_STATIC_DRAW)
 
-        val earthTexture = TextureLoader.loadTexture2D(context, R.drawable.earth_texture)
-        GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
-        GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, earthTexture)
-        GLES32.glUniform1i(glGetUniformLocation(program, "earthTexture"), 0)
+        earthTextureId = TextureLoader.loadTexture2D(context, R.drawable.earth_texture)
         
         GLES32.glBindBuffer(GLES32.GL_ARRAY_BUFFER, 0)
         GLES32.glBindVertexArray(0)
@@ -179,6 +188,10 @@ class EarthRenderer(private val context: Context) : Renderer {
 
         GLES32.glUseProgram(program)
 
+        GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
+        GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, earthTextureId)
+        GLES32.glUniform1i(glGetUniformLocation(program, "earthTexture"), 0)
+
         Matrix.setIdentityM(viewMatrix, 0)
 //        Matrix.setLookAtM(viewMatrix, 0,
 //            0f, 0f, -scaleFactor,
@@ -199,20 +212,30 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glUniformMatrix4fv(1, 1, false, viewMatrix, 0)
 
         Matrix.setIdentityM(modelMatrix, 0)
-//        Matrix.rotateM(modelMatrix, 0, xRotation, 1f, 0f, 0f)
-//        Matrix.rotateM(modelMatrix, 0, yRotation, 0f, 1f, 0f)
-
-        Matrix.setIdentityM(rotationMatrix, 0)
-        Matrix.setRotateM(rotationMatrix, 0, timeElapsed * 360.0f, 0.0f, 1.0f, 0.0f)
-        Matrix.multiplyMM(modelMatrix, 0, modelMatrix, 0, rotationMatrix, 0)
-
-        Matrix.multiplyMM(modelMatrix, 0, modelMatrix, 0, rotationMatrix, 0)
+        // Removed auto rotation to show true GMT lighting mapping
         GLES32.glUniformMatrix4fv(0, 1, false, modelMatrix, 0)
 
-        // Add light
+        // Add light based on GMT
+        val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("GMT"))
+        val hours = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+        val minutes = calendar.get(java.util.Calendar.MINUTE)
+        val timeInHours = hours + minutes / 60.0f
+        val dayOfYear = calendar.get(java.util.Calendar.DAY_OF_YEAR)
+
+        // Calculate sun position
+        // Declination (approx)
+        val decRad = Math.asin(0.39795 * Math.cos(0.2163108 + 2 * Math.atan(0.9671396 * Math.tan(0.00860 * (dayOfYear - 186)))))
+        // Longitude
+        val sunLonRaw = (12.0f - timeInHours) * 15.0f
+        val sunLonRad = Math.toRadians(sunLonRaw.toDouble())
+
+        val lightX = (Math.cos(decRad) * Math.sin(sunLonRad) * 10.0).toFloat()
+        val lightY = (Math.sin(decRad) * 10.0).toFloat()
+        val lightZ = (Math.cos(decRad) * Math.cos(sunLonRad) * 10.0).toFloat()
+
         glUniform3f(glGetUniformLocation(program, "lightColor"), 1f, 1f, 1f)
-        glUniform3f(glGetUniformLocation(program, "lightPos"), 1.0f, 0.0f, 1.0f)
-        glUniform3f(glGetUniformLocation(program, "viewPos"), 0f, 0f, 1f)
+        glUniform3f(glGetUniformLocation(program, "lightPos"), lightX, lightY, lightZ)
+        glUniform3f(glGetUniformLocation(program, "viewPos"), camX, camY, camZ)
 
         GLES32.glBindVertexArray(VAO)
         GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
@@ -248,5 +271,114 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glBindVertexArray(0)
         GLES32.glDepthMask(true)
         GLES32.glDepthFunc(GLES32.GL_LESS) // reset lại depth func mặc định
+
+        // Draw Satellites
+        GLES32.glUseProgram(satProgram)
+        GLES32.glBindVertexArray(VAO) // reuse sphere VAO
+
+        val projLocSat = glGetUniformLocation(satProgram, "projectionMatrix")
+        val viewLocSat = glGetUniformLocation(satProgram, "viewMatrix")
+        val modelLocSat = glGetUniformLocation(satProgram, "modelMatrix")
+        val colorLocSat = glGetUniformLocation(satProgram, "color")
+
+        GLES32.glUniformMatrix4fv(projLocSat, 1, false, projectionMatrix, 0)
+        GLES32.glUniformMatrix4fv(viewLocSat, 1, false, viewMatrix, 0)
+
+        synchronized(satLock) {
+            for (sat in satellites) {
+                val r = 0.15f // satellite orbit radius
+                val radAz = Math.toRadians(sat.azimuthDegrees.toDouble())
+                val radEl = Math.toRadians(sat.elevationDegrees.toDouble())
+                
+                // Map elevation & azimuth to a 3D position
+                sat.worldX = (r * cos(radEl) * sin(radAz)).toFloat()
+                sat.worldY = (r * Math.abs(sin(radEl))).toFloat() // keep above equator
+                sat.worldZ = (r * cos(radEl) * cos(radAz)).toFloat()
+
+                val satModelMatrix = FloatArray(16)
+                Matrix.setIdentityM(satModelMatrix, 0)
+                
+                // Translate
+                Matrix.translateM(satModelMatrix, 0, sat.worldX, sat.worldY, sat.worldZ)
+                // Scale down sphere
+                Matrix.scaleM(satModelMatrix, 0, 0.03f, 0.03f, 0.03f)
+
+                GLES32.glUniformMatrix4fv(modelLocSat, 1, false, satModelMatrix, 0)
+
+                // Set color based on constellation
+                val color = when (sat.constellationType) {
+                    android.location.GnssStatus.CONSTELLATION_GPS -> floatArrayOf(0.0f, 0.0f, 1.0f, 1.0f) // Blue
+                    android.location.GnssStatus.CONSTELLATION_GLONASS -> floatArrayOf(1.0f, 0.0f, 0.0f, 1.0f) // Red
+                    android.location.GnssStatus.CONSTELLATION_GALILEO -> floatArrayOf(0.0f, 1.0f, 0.0f, 1.0f) // Green
+                    android.location.GnssStatus.CONSTELLATION_BEIDOU -> floatArrayOf(1.0f, 1.0f, 0.0f, 1.0f) // Yellow
+                    else -> floatArrayOf(1.0f, 1.0f, 1.0f, 1.0f) // White
+                }
+                
+                // Dim if not used in fix
+                if (!sat.usedInFix) {
+                    color[3] = 0.3f // alpha (requires blending enabled, but we can just darken rgb)
+                    color[0] *= 0.3f; color[1] *= 0.3f; color[2] *= 0.3f
+                }
+
+                GLES32.glUniform4fv(colorLocSat, 1, color, 0)
+
+                GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
+            }
+        }
+        GLES32.glBindVertexArray(0)
+    }
+
+    fun updateSatellites(sats: List<com.example.gnssandopticalflowapp.model.SatelliteInfo>) {
+        synchronized(satLock) {
+            satellites = sats
+        }
+    }
+
+    fun handleTouch(x: Float, y: Float, width: Int, height: Int): com.example.gnssandopticalflowapp.model.SatelliteInfo? {
+        var closestSat: com.example.gnssandopticalflowapp.model.SatelliteInfo? = null
+        var minDistance = Float.MAX_VALUE
+        
+        // Touch threshold in pixels
+        val touchRadius = 50f 
+
+        val vpMatrix = FloatArray(16)
+        Matrix.multiplyMM(vpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
+
+        synchronized(satLock) {
+            for (sat in satellites) {
+                val satModelMatrix = FloatArray(16)
+                Matrix.setIdentityM(satModelMatrix, 0)
+                
+                val posVec = floatArrayOf(sat.worldX, sat.worldY, sat.worldZ, 1.0f)
+                val rotatedPos = FloatArray(4)
+                Matrix.multiplyMV(rotatedPos, 0, satModelMatrix, 0, posVec, 0)
+
+                val clipCoords = FloatArray(4)
+                Matrix.multiplyMV(clipCoords, 0, vpMatrix, 0, rotatedPos, 0)
+
+                if (clipCoords[3] <= 0) continue // Behind camera
+
+                val ndcX = clipCoords[0] / clipCoords[3]
+                val ndcY = clipCoords[1] / clipCoords[3]
+                val ndcZ = clipCoords[2] / clipCoords[3]
+
+                if (ndcZ < -1 || ndcZ > 1) continue // Clipped by depth
+                
+                // Convert NDC to screen coords
+                val screenX = (ndcX + 1.0f) / 2.0f * width
+                val screenY = (1.0f - ndcY) / 2.0f * height // OpenGL Y is bottom-up, touch Y is top-down
+
+                val dx = x - screenX
+                val dy = y - screenY
+                val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+
+                // If within touch radius, check depth (closer satellites prioritize)
+                if (dist < touchRadius && clipCoords[3] < minDistance) {
+                    minDistance = clipCoords[3]
+                    closestSat = sat
+                }
+            }
+        }
+        return closestSat
     }
 }
