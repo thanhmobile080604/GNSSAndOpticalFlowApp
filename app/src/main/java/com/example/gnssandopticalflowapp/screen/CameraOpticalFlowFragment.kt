@@ -23,7 +23,7 @@ import org.opencv.core.CvType
 import org.opencv.core.Mat
 import kotlin.math.sqrt
 
-class OpticalFlowFragment :
+class CameraOpticalFlowFragment :
     BaseFragment<FragmentOpticalFlowBinding>(FragmentOpticalFlowBinding::inflate),
     CameraBridgeViewBase.CvCameraViewListener2 {
 
@@ -42,7 +42,7 @@ class OpticalFlowFragment :
         cameraView.apply {
             setCameraIndex(CameraBridgeViewBase.CAMERA_ID_BACK)
             visibility = CameraBridgeViewBase.VISIBLE
-            setCvCameraViewListener(this@OpticalFlowFragment)
+            setCvCameraViewListener(this@CameraOpticalFlowFragment)
         }
 
         imuEstimator = IMUEstimator(requireContext().applicationContext)

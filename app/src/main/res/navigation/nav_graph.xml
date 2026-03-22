@@ -5,16 +5,19 @@
     android:id="@+id/nav_graph"
     app:startDestination="@id/homeFragment">
 
+
+    <fragment
+        android:id="@+id/gnssViewerFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.GnssViewerFragment"
+        android:label="GnssViewerFragment"
+        tools:layout="@layout/fragment_gnss_viewer" />
     <fragment
         android:id="@+id/homeFragment"
         android:name="com.example.gnssandopticalflowapp.screen.HomeFragment"
-        android:label="HomeFragment"
-        tools:layout="@layout/fragment_home" />
-
+        android:label="HomeFragment" />
     <fragment
-        android:id="@+id/opticalFlowFragment"
-        android:name="com.example.gnssandopticalflowapp.screen.OpticalFlowFragment"
-        android:label="OpticalFlowFragment"
-        tools:layout="@layout/fragment_optical_flow" />
+        android:id="@+id/cameraOpticalFlowFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.CameraOpticalFlowFragment"
+        android:label="CameraOpticalFlowFragment" />
 
 </navigation>
