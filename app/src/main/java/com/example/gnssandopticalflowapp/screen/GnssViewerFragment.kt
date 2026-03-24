@@ -254,27 +254,43 @@ class GnssViewerFragment :
 
         var previousX = 0f
         var previousY = 0f
+        var isMultiTouch = false
 
         binding.myGLSurfaceView.setOnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
             scaleGestureDetector.onTouchEvent(event)
 
+            if (event.pointerCount > 1) {
+                isMultiTouch = true
+            }
+
             if (event.pointerCount == 1) {
-                when (event.action) {
+                when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         previousX = event.x
                         previousY = event.y
+                        isMultiTouch = false
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        isMultiTouch = false
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val dx = event.x - previousX
-                        val dy = event.y - previousY
+                        if (isMultiTouch) {
+                            // Touch just became 1 pointer after zooming
+                            previousX = event.x
+                            previousY = event.y
+                            isMultiTouch = false
+                        } else {
+                            val dx = event.x - previousX
+                            val dy = event.y - previousY
 
-                        earthRenderer.theta += dx * 0.5f
-                        earthRenderer.phi -= dy * 0.5f
-                        earthRenderer.phi = earthRenderer.phi.coerceIn(-89f, 89f)
+                            earthRenderer.theta += dx * 0.5f
+                            earthRenderer.phi -= dy * 0.5f
+                            // Bỏ giới hạn góc quay phi
 
-                        previousX = event.x
-                        previousY = event.y
+                            previousX = event.x
+                            previousY = event.y
+                        }
                     }
                 }
             }
