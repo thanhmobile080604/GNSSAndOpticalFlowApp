@@ -27,8 +27,11 @@ import java.nio.FloatBuffer
 import java.nio.IntBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.asin
+import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.tan
 
 class EarthRenderer(private val context: Context) : Renderer {
     private lateinit var sphereVertices: FloatArray
@@ -58,6 +61,10 @@ class EarthRenderer(private val context: Context) : Renderer {
 
     var theta = 0f
     var phi = 0f
+
+    private var userLat: Double? = null
+    private var userLon: Double? = null
+    private var isCameraInitialized = false
 
     private var earthTextureId = 0
 
@@ -212,7 +219,9 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glUniformMatrix4fv(1, 1, false, viewMatrix, 0)
 
         Matrix.setIdentityM(modelMatrix, 0)
-        // Removed auto rotation to show true GMT lighting mapping
+        // Rotate the Earth 90 degrees counter-clockwise around Y-axis to fix texture alignment
+        Matrix.rotateM(modelMatrix, 0, 90f, 0f, 1f, 0f)
+        Matrix.rotateM(modelMatrix, 0, -90f, 1f, 0f, 0f)
         GLES32.glUniformMatrix4fv(0, 1, false, modelMatrix, 0)
 
         // Add light based on GMT
@@ -224,7 +233,8 @@ class EarthRenderer(private val context: Context) : Renderer {
 
         // Calculate sun position
         // Declination (approx)
-        val decRad = Math.asin(0.39795 * Math.cos(0.2163108 + 2 * Math.atan(0.9671396 * Math.tan(0.00860 * (dayOfYear - 186)))))
+        val decRad =
+            asin(0.39795 * cos(0.2163108 + 2 * atan(0.9671396 * tan(0.00860 * (dayOfYear - 186)))))
         // Longitude
         val sunLonRaw = (12.0f - timeInHours) * 15.0f
         val sunLonRad = Math.toRadians(sunLonRaw.toDouble())
@@ -325,7 +335,47 @@ class EarthRenderer(private val context: Context) : Renderer {
                 GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
             }
         }
+
+        // Draw user location marker
+        userLat?.let { lat ->
+            userLon?.let { lon ->
+                val rUser = 0.101f // Slightly above earth
+                // In OpenGL mapping, if Y is up and texture is standard equirectangular, 
+                // X = sin(lon)*cos(lat), Y = sin(lat), Z = cos(lon)*cos(lat)
+                // However, the Earth texture usually has Prime Meridian at center of X axis image.
+                // We'll use the same formula as the camera
+                val radLat = Math.toRadians(lat)
+                val radLon = Math.toRadians(lon)
+
+                val userX = (rUser * cos(radLat) * sin(radLon)).toFloat()
+                val userY = (rUser * sin(radLat)).toFloat()
+                val userZ = (rUser * cos(radLat) * cos(radLon)).toFloat()
+
+                val userModelMatrix = FloatArray(16)
+                Matrix.setIdentityM(userModelMatrix, 0)
+                Matrix.translateM(userModelMatrix, 0, userX, userY, userZ)
+                Matrix.scaleM(userModelMatrix, 0, 0.04f, 0.04f, 0.04f)
+
+                GLES32.glUniformMatrix4fv(modelLocSat, 1, false, userModelMatrix, 0)
+                // Cyan color for user
+                GLES32.glUniform4fv(colorLocSat, 1, floatArrayOf(0.0f, 1.0f, 1.0f, 1.0f), 0)
+
+                GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
+            }
+        }
+
         GLES32.glBindVertexArray(0)
+    }
+
+    fun updateUserLocation(lat: Double, lon: Double) {
+        userLat = lat
+        userLon = lon
+        if (!isCameraInitialized) {
+            // Set camera to look at user location
+            phi = lat.toFloat()
+            theta = lon.toFloat()
+            isCameraInitialized = true
+        }
     }
 
     fun updateSatellites(sats: List<com.example.gnssandopticalflowapp.model.SatelliteInfo>) {

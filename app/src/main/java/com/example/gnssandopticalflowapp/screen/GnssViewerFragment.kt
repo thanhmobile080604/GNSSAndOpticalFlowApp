@@ -158,6 +158,10 @@ class GnssViewerFragment :
         }
         userMarker?.position = point
         binding.mapView.invalidate()
+        
+        if (rendererSet) {
+            earthRenderer.updateUserLocation(loc.latitude, loc.longitude)
+        }
     }
 
     private fun showLocationDetailsDialog(loc: Location) {
