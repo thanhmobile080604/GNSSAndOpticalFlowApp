@@ -369,7 +369,7 @@ class EarthRenderer(private val context: Context) : Renderer {
         userLon = lon
         if (!isCameraInitialized) {
             // Set camera to look at user location
-            phi = lat.toFloat()
+            phi = lat.toFloat().coerceIn(-89.9f, 89.9f)
             theta = lon.toFloat()
             isCameraInitialized = true
         }

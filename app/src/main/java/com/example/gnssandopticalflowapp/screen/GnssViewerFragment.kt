@@ -286,7 +286,9 @@ class GnssViewerFragment :
 
                             earthRenderer.theta -= dx * 0.5f
                             earthRenderer.phi += dy * 0.5f
-                            // Bỏ giới hạn góc quay phi
+                            
+                            // Giới hạn phi để tránh nhảy ở cực (Gimbal lock/Up vector conflict)
+                            earthRenderer.phi = earthRenderer.phi.coerceIn(-89.9f, 89.9f)
 
                             previousX = event.x
                             previousY = event.y
