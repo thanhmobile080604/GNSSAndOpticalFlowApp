@@ -1,5 +1,8 @@
 package com.example.gnssandopticalflowapp.model
 
+import kotlin.math.cos
+import kotlin.math.sin
+
 data class SphereMesh(
     val vertices: FloatArray,
     val indices: IntArray
@@ -10,21 +13,23 @@ fun createSphere(radius: Float, stacks: Int, slices: Int): SphereMesh {
     val indices = mutableListOf<Int>()
 
     for (i in 0..stacks) {
-        val stackAngle = Math.PI / 2 - i * Math.PI / stacks
-        val xy = radius * Math.cos(stackAngle)
-        val z = radius * Math.sin(stackAngle)
+        val v = i.toFloat() / stacks
+        val radLat = Math.PI / 2.0 - i * Math.PI / stacks
+        val cosLat = cos(radLat)
+        val sinLat = sin(radLat)
 
         for (j in 0..slices) {
-            val sectorAngle = j * 2 * Math.PI / slices
-            val x = xy * Math.cos(sectorAngle)
-            val y = xy * Math.sin(sectorAngle)
+            val u = j.toFloat() / slices
+            val radLon = u * 2.0 * Math.PI - Math.PI
+
+            val x = radius * cosLat * sin(radLon)
+            val y = radius * sinLat
+            val z = radius * cosLat * cos(radLon)
 
             vertices.add(x.toFloat())
             vertices.add(y.toFloat())
             vertices.add(z.toFloat())
 
-            val u = j.toFloat() / slices
-            val v = i.toFloat() / stacks
             vertices.add(u)
             vertices.add(v)
 

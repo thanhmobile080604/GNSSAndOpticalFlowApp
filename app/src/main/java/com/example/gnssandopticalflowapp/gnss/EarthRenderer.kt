@@ -219,9 +219,6 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glUniformMatrix4fv(1, 1, false, viewMatrix, 0)
 
         Matrix.setIdentityM(modelMatrix, 0)
-        // Rotate the Earth 90 degrees counter-clockwise around Y-axis to fix texture alignment
-        Matrix.rotateM(modelMatrix, 0, 90f, 0f, 1f, 0f)
-        Matrix.rotateM(modelMatrix, 0, -90f, 1f, 0f, 0f)
         GLES32.glUniformMatrix4fv(0, 1, false, modelMatrix, 0)
 
         // Add light based on GMT
