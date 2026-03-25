@@ -245,7 +245,7 @@ class GnssViewerFragment :
         scaleGestureDetector = ScaleGestureDetector(requireContext(), object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 if (is3DMode && rendererSet) {
-                    earthRenderer.scaleFactor *= detector.scaleFactor
+                    earthRenderer.scaleFactor /= detector.scaleFactor
                     earthRenderer.scaleFactor = earthRenderer.scaleFactor.coerceIn(0.2f, 3.0f)
                 }
                 return true
@@ -284,8 +284,8 @@ class GnssViewerFragment :
                             val dx = event.x - previousX
                             val dy = event.y - previousY
 
-                            earthRenderer.theta += dx * 0.5f
-                            earthRenderer.phi -= dy * 0.5f
+                            earthRenderer.theta -= dx * 0.5f
+                            earthRenderer.phi += dy * 0.5f
                             // Bỏ giới hạn góc quay phi
 
                             previousX = event.x
