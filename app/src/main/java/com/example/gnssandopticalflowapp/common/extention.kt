@@ -15,6 +15,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.view.View
 import android.view.animation.LinearInterpolator
 import android.widget.ImageView
@@ -531,6 +532,21 @@ fun ImageView.loadImageFromAsset(path: String) {
         .into(this)
 }
 
+fun View.setSingleClick(
+    clickSpendTime: Long = 500L,
+    execution: () -> Unit
+) {
+    setOnClickListener(object : View.OnClickListener {
+        var lastClickTime: Long = 0
+        override fun onClick(p0: View?) {
+            if (SystemClock.elapsedRealtime() - lastClickTime < clickSpendTime) {
+                return
+            }
+            lastClickTime = SystemClock.elapsedRealtime()
+            execution.invoke()
+        }
+    })
+}
 
 
 

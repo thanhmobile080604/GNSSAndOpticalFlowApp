@@ -4,14 +4,25 @@ import android.os.Bundle
 import android.os.StrictMode
 import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.example.gnssandopticalflowapp.base.AndroidConnectivityObserver
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
+import kotlinx.coroutines.launch
+import kotlin.getValue
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private val network: AndroidConnectivityObserver by lazy {
+        AndroidConnectivityObserver(this)
+    }
+    private val viewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,5 +43,12 @@ class MainActivity : AppCompatActivity() {
             StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build()
         )
 
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                network.isConnected.collect { isConnected ->
+                    viewModel.isNetworkAvailable.value = isConnected
+                }
+            }
+        }
     }
 }
