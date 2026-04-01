@@ -2,6 +2,7 @@ package com.example.gnssandopticalflowapp
 
 import android.os.Bundle
 import android.os.StrictMode
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -14,9 +15,20 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.example.gnssandopticalflowapp.base.AndroidConnectivityObserver
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
+import org.opencv.android.OpenCVLoader
 import kotlin.getValue
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        init {
+            if (OpenCVLoader.initDebug()) {
+                Log.d("OpenCV", "OpenCV library found inside package. Using it!")
+            } else {
+                Log.e("OpenCV", "OpenCV library not found!")
+            }
+        }
+    }
 
     private lateinit var binding: ActivityMainBinding
     private val network: AndroidConnectivityObserver by lazy {

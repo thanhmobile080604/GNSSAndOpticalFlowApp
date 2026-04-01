@@ -44,8 +44,10 @@ object TextureLoader {
 
         GLES32.glBindTexture(GLES32.GL_TEXTURE_CUBE_MAP, textureId)
 
+        val options = BitmapFactory.Options().apply { inScaled = false }
+
         for (i in faces.indices) {
-            val bitmap = BitmapFactory.decodeResource(context.resources, faces[i])
+            val bitmap = BitmapFactory.decodeResource(context.resources, faces[i], options)
                 ?: throw RuntimeException("Failed to load bitmap for cubemap face: $i")
             GLUtils.texImage2D(GLES32.GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, bitmap, 0)
             bitmap.recycle()

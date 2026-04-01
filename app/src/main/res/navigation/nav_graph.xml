@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/nav_graph"
-    app:startDestination="@id/gnssViewerFragment">
+    app:startDestination="@id/homeFragment">
 
 
     <fragment
@@ -19,5 +19,15 @@
         android:name="com.example.gnssandopticalflowapp.screen.GnssViewerFragment"
         android:label="GnssViewerFragment"
         tools:targetApi="30" />
+    <fragment
+        android:id="@+id/homeOpticalFlowFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.HomeOpticalFlowFragment"
+        android:label="fragment_home_optical_flow"
+        tools:layout="@layout/fragment_home_optical_flow" />
+    <fragment
+        android:id="@+id/videoOpticalFlowFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.VideoOpticalFlowFragment"
+        android:label="fragment_video_optical_flow"
+        tools:layout="@layout/fragment_video_optical_flow" />
 
 </navigation>

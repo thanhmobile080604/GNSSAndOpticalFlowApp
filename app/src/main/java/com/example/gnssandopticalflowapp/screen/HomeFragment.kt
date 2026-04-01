@@ -3,7 +3,9 @@ package com.example.gnssandopticalflowapp.screen
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
+import android.graphics.drawable.TransitionDrawable
 import android.view.View
+import androidx.core.content.ContextCompat
 import androidx.viewpager2.widget.ViewPager2
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.adapter.HomePagerAdapter
@@ -21,6 +23,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
     override fun FragmentHomeBinding.initView() {
         pagerAdapter = HomePagerAdapter(this@HomeFragment)
         viewPager.adapter = pagerAdapter
+        viewPager.isUserInputEnabled = false
         viewPager.offscreenPageLimit = pagerAdapter.itemCount
         viewPager.registerOnPageChangeCallback(pageChangeCallback)
         view.post {
@@ -54,45 +57,23 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
     }
 
     private fun updateTabState(targetPosition: Int) = with(binding) {
-        val targetView = if (targetPosition == 0) earthButton else opticalFlowButton
         val movingToRight = targetPosition > currentTabPosition
 
-        view.post {
-            view.setBackgroundResource(
-                if (movingToRight) {
-                    R.drawable.bg_blue_gradient_40_right
-                } else {
-                    R.drawable.bg_blue_gradient_40_left
-                }
-            )
-
-            val targetCenterX = targetView.x + targetView.width / 2f
-            val targetTranslationX = (targetCenterX - view.width / 2f) - indicatorBaseX
-
-            AnimatorSet().apply {
-                playTogether(
-                    ObjectAnimator.ofFloat(
-                        view,
-                        View.TRANSLATION_X,
-                        view.translationX,
-                        targetTranslationX
-                    ),
-                    ObjectAnimator.ofFloat(
-                        view,
-                        View.SCALE_X,
-                        1f, 1.08f, 1f
-                    ),
-                    ObjectAnimator.ofFloat(
-                        view,
-                        View.ALPHA,
-                        0.88f, 1f, 0.9f
-                    )
-                )
-                duration = 320
-                interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-                start()
+        val newBg = ContextCompat.getDrawable(
+            root.context,
+            if (movingToRight) {
+                R.drawable.bg_blue_gradient_40_right
+            } else {
+                R.drawable.bg_blue_gradient_40_left
             }
-        }
+        )
+
+        val oldBg = view.background ?: newBg
+
+        val transitionDrawable = TransitionDrawable(arrayOf(oldBg, newBg))
+
+        view.background = transitionDrawable
+        transitionDrawable.startTransition(300) // 300ms mượt
     }
 
     override fun onBack() {

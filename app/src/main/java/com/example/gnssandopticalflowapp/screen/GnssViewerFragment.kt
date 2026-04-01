@@ -73,6 +73,14 @@ class GnssViewerFragment :
         override fun onProviderDisabled(provider: String) {}
     }
 
+    private fun hasLocationPermission(): Boolean {
+        val permissions = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        return permissions.all { ActivityCompat.checkSelfPermission(requireContext(), it) == PackageManager.PERMISSION_GRANTED }
+    }
+
     @SuppressLint("NewApi")
     private val gnssStatusCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
@@ -109,20 +117,28 @@ class GnssViewerFragment :
     }
 
     private fun checkPermissionsAndSetup() {
-        val permissions = arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-        if (permissions.all { ActivityCompat.checkSelfPermission(requireContext(), it) == PackageManager.PERMISSION_GRANTED }) {
-            setupLocationAndMap()
+        if (hasLocationPermission()) {
+            setupLocationManager()
+            startLocationUpdates()
         } else {
+            val permissions = arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
             permissionLauncher.launch(permissions)
         }
     }
 
+    private fun setupLocationManager() {
+        if (!::locationManager.isInitialized) {
+            locationManager = requireContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        }
+    }
+
     @SuppressLint("MissingPermission")
-    private fun setupLocationAndMap() {
-        locationManager = requireContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    private fun startLocationUpdates() {
+        if (!hasLocationPermission()) return
+        setupLocationManager()
         
         // Request Location
         locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, locationListener)
@@ -131,13 +147,30 @@ class GnssViewerFragment :
         // Request GNSS Status
         locationManager.registerGnssStatusCallback(requireContext().mainExecutor, gnssStatusCallback)
         
+        // Check last known location immediately
         val lastKnownMap = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) 
             ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
             
         if (lastKnownMap != null) {
             currentLocation = lastKnownMap
             updateMapLocation()
+            // Center map once on initialization/resume if needed
+            val point = GeoPoint(lastKnownMap.latitude, lastKnownMap.longitude)
+            binding.mapView.controller.animateTo(point)
         }
+    }
+
+    private fun stopLocationUpdates() {
+        if (::locationManager.isInitialized) {
+            locationManager.removeUpdates(locationListener)
+            locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun setupLocationAndMap() {
+        // This method is now legacy, replaced by startLocationUpdates and setupLocationManager
+        checkPermissionsAndSetup()
     }
 
     private fun updateMapLocation() {
@@ -165,14 +198,14 @@ class GnssViewerFragment :
     }
 
     private fun showLocationDetailsDialog(loc: Location) {
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
-        val utcTime = sdf.format(Date(loc.time))
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        sdf.timeZone = TimeZone.getDefault()
+        val localTime = sdf.format(Date(loc.time))
 
         val details = """
             Vĩ độ (Lat): ${loc.latitude}
             Kinh độ (Lon): ${loc.longitude}
-            Thời gian: $utcTime
+            Thời gian: $localTime
             Vận tốc: ${loc.speed} m/s
         """.trimIndent()
 
@@ -359,6 +392,9 @@ class GnssViewerFragment :
         if (rendererSet) {
             binding.myGLSurfaceView.onResume()
         }
+        if (hasLocationPermission()) {
+            startLocationUpdates()
+        }
     }
 
     override fun onPause() {
@@ -367,13 +403,12 @@ class GnssViewerFragment :
         if (rendererSet) {
             binding.myGLSurfaceView.onPause()
         }
+        stopLocationUpdates()
     }
     
     override fun onDestroyView() {
         super.onDestroyView()
-        if (::locationManager.isInitialized) {
-            locationManager.removeUpdates(locationListener)
-            locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
-        }
+        // Ensure updates are stopped even if pause wasn't called (though unlikely)
+        stopLocationUpdates()
     }
 }
