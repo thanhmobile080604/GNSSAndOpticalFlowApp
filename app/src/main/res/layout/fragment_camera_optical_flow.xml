@@ -29,7 +29,7 @@
         app:cardUseCompatPadding="false"
         app:layout_constraintDimensionRatio="398:430"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHeight_percent="0.5"
+        app:layout_constraintHeight_percent="0.48"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/ivBack">
 
