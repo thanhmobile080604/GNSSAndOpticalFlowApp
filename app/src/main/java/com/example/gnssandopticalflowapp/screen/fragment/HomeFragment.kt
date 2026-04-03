@@ -1,7 +1,5 @@
-package com.example.gnssandopticalflowapp.screen
+package com.example.gnssandopticalflowapp.screen.fragment
 
-import android.animation.AnimatorSet
-import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.graphics.drawable.TransitionDrawable
 import android.view.View

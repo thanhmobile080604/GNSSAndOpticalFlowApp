@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.screen
+package com.example.gnssandopticalflowapp.screen.fragment
 
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.databinding.FragmentVideoOpticalFlowBinding

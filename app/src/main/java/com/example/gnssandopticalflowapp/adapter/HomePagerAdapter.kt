@@ -4,8 +4,8 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.fragment.app.Fragment
 import androidx.viewpager2.adapter.FragmentStateAdapter
-import com.example.gnssandopticalflowapp.screen.GnssViewerFragment
-import com.example.gnssandopticalflowapp.screen.HomeOpticalFlowFragment
+import com.example.gnssandopticalflowapp.screen.fragment.GnssViewerFragment
+import com.example.gnssandopticalflowapp.screen.fragment.HomeOpticalFlowFragment
 
 class HomePagerAdapter(fragment: Fragment) : FragmentStateAdapter(fragment) {
 

@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.screen
+package com.example.gnssandopticalflowapp.screen.fragment
 
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment

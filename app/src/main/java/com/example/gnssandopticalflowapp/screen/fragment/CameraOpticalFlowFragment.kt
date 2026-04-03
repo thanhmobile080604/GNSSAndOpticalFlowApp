@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.screen
+package com.example.gnssandopticalflowapp.screen.fragment
 
 import android.Manifest
 import android.graphics.Bitmap

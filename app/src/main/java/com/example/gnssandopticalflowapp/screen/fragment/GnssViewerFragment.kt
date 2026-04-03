@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.screen
+package com.example.gnssandopticalflowapp.screen.fragment
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -18,13 +18,16 @@ import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
+import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
 import com.example.gnssandopticalflowapp.gnss.EarthRenderer
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
+import com.example.gnssandopticalflowapp.screen.dialog.NoLocationDialog
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
@@ -59,7 +62,7 @@ class GnssViewerFragment :
         if (granted) {
             setupLocationAndMap()
         } else {
-            Toast.makeText(requireContext(), "Location permission denied", Toast.LENGTH_SHORT).show()
+            showNoLocationDialog()
         }
     }
 
@@ -70,7 +73,11 @@ class GnssViewerFragment :
         }
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {
+            if (provider == LocationManager.GPS_PROVIDER) {
+                checkGpsStatus()
+            }
+        }
     }
 
     private fun hasLocationPermission(): Boolean {
@@ -105,7 +112,7 @@ class GnssViewerFragment :
 
     override fun FragmentGnssViewerBinding.initView() {
         Configuration.getInstance().load(requireActivity().applicationContext, requireContext().getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
-        
+
         binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
         binding.mapView.setMultiTouchControls(true)
         binding.mapView.controller.setZoom(18.0)
@@ -139,18 +146,18 @@ class GnssViewerFragment :
     private fun startLocationUpdates() {
         if (!hasLocationPermission()) return
         setupLocationManager()
-        
+
         // Request Location
         locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, locationListener)
         locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1000L, 1f, locationListener)
-        
+
         // Request GNSS Status
         locationManager.registerGnssStatusCallback(requireContext().mainExecutor, gnssStatusCallback)
-        
+
         // Check last known location immediately
-        val lastKnownMap = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) 
+        val lastKnownMap = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
             ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            
+
         if (lastKnownMap != null) {
             currentLocation = lastKnownMap
             updateMapLocation()
@@ -191,7 +198,7 @@ class GnssViewerFragment :
         }
         userMarker?.position = point
         binding.mapView.invalidate()
-        
+
         if (rendererSet) {
             earthRenderer.updateUserLocation(loc.latitude, loc.longitude)
         }
@@ -319,7 +326,7 @@ class GnssViewerFragment :
 
                             earthRenderer.theta -= dx * 0.5f
                             earthRenderer.phi += dy * 0.5f
-                            
+
                             // Giới hạn phi để tránh nhảy ở cực (Gimbal lock/Up vector conflict)
                             earthRenderer.phi = earthRenderer.phi.coerceIn(-89.9f, 89.9f)
 
@@ -331,8 +338,43 @@ class GnssViewerFragment :
             }
             true
         }
+
+        icPin.setSingleClick {
+            recenterMap()
+        }
     }
-    
+
+    @SuppressLint("MissingPermission")
+    private fun recenterMap() {
+        if (!hasLocationPermission()) return
+
+        val loc = currentLocation ?: if (::locationManager.isInitialized) {
+            (locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER))
+        } else null
+
+        if (loc == null) {
+            Toast.makeText(requireContext(), "Đang chờ vị trí...", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (is3DMode) {
+            if (rendererSet) {
+                // Reset to user location on the 3D globe
+                earthRenderer.phi = loc.latitude.toFloat().coerceIn(-89.9f, 89.9f)
+                earthRenderer.theta = loc.longitude.toFloat()
+                earthRenderer.scaleFactor = 1.0f // Reset zoom
+            }
+        } else {
+            // Animate to user location on 2D map
+            val point = GeoPoint(loc.latitude, loc.longitude)
+            binding.mapView.controller.animateTo(point)
+            if (binding.mapView.zoomLevelDouble < 15.0) {
+                binding.mapView.controller.setZoom(18.0)
+            }
+        }
+    }
+
     private fun showSatelliteDetailsDialog(sat: SatelliteInfo, totalSats: Int) {
         val constellation = when (sat.constellationType) {
             GnssStatus.CONSTELLATION_GPS -> "GPS"
@@ -344,11 +386,11 @@ class GnssViewerFragment :
             GnssStatus.CONSTELLATION_IRNSS -> "IRNSS"
             else -> "Unknown"
         }
-        
+
         // Approximate distance based on elevation (simplification)
         // Lat, Lon altitude would normally require knowing the satellite's exact ephemeris, but we can't get that from GnssStatus easily.
         // We will show NA if not available, since GnssStatus only gives Az, El. (User prompt asked for lat, lon, alt, speed, dist, but GnssStatus doesn't provide them. I'll mock NA or note limitation).
-        
+
         val details = """
             Tổng số vệ tinh: $totalSats
             SVID: ${sat.svid}
@@ -370,6 +412,25 @@ class GnssViewerFragment :
     }
 
     override fun initObserver() {}
+
+    private fun checkGpsStatus() {
+        if (!hasLocationPermission()) {
+            showNoLocationDialog()
+            return
+        }
+        if (::locationManager.isInitialized) {
+            val isGpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            if (!isGpsEnabled) {
+                showNoLocationDialog()
+            }
+        }
+    }
+
+    private fun showNoLocationDialog() {
+        if (childFragmentManager.findFragmentByTag("NoLocationDialog") == null) {
+            NoLocationDialog().show(childFragmentManager, "NoLocationDialog")
+        }
+    }
 
     private fun initOpenGLES() {
         val activityManager = requireContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -395,6 +456,7 @@ class GnssViewerFragment :
         if (hasLocationPermission()) {
             startLocationUpdates()
         }
+        checkGpsStatus()
     }
 
     override fun onPause() {
@@ -405,7 +467,7 @@ class GnssViewerFragment :
         }
         stopLocationUpdates()
     }
-    
+
     override fun onDestroyView() {
         super.onDestroyView()
         // Ensure updates are stopped even if pause wasn't called (though unlikely)

@@ -2,7 +2,8 @@
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@color/black">
 
     <org.osmdroid.views.MapView
         android:id="@+id/mapView"
@@ -22,5 +23,27 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
+
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:src="@color/white"
+        app:layout_constraintBottom_toBottomOf="@id/icPin"
+        app:layout_constraintEnd_toEndOf="@id/icPin"
+        app:layout_constraintStart_toStartOf="@id/icPin"
+        app:layout_constraintTop_toTopOf="@id/icPin"
+        app:round="40dp" />
+
+    <ImageView
+        android:id="@+id/icPin"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="40dp"
+        android:padding="4dp"
+        android:src="@drawable/ic_pin"
+        app:layout_constraintDimensionRatio="1"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintWidth_percent="0.1" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

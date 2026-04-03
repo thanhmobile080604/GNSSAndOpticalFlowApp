@@ -8,26 +8,26 @@
 
     <fragment
         android:id="@+id/homeFragment"
-        android:name="com.example.gnssandopticalflowapp.screen.HomeFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.HomeFragment"
         android:label="HomeFragment" />
     <fragment
         android:id="@+id/cameraOpticalFlowFragment"
-        android:name="com.example.gnssandopticalflowapp.screen.CameraOpticalFlowFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.CameraOpticalFlowFragment"
         android:label="CameraOpticalFlowFragment" />
     <fragment
-        android:id="@+id/gnssViewerFragment"
-        android:name="com.example.gnssandopticalflowapp.screen.GnssViewerFragment"
-        android:label="GnssViewerFragment"
-        tools:targetApi="30" />
-    <fragment
         android:id="@+id/homeOpticalFlowFragment"
-        android:name="com.example.gnssandopticalflowapp.screen.HomeOpticalFlowFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.HomeOpticalFlowFragment"
         android:label="fragment_home_optical_flow"
         tools:layout="@layout/fragment_home_optical_flow" />
     <fragment
         android:id="@+id/videoOpticalFlowFragment"
-        android:name="com.example.gnssandopticalflowapp.screen.VideoOpticalFlowFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.VideoOpticalFlowFragment"
         android:label="fragment_video_optical_flow"
         tools:layout="@layout/fragment_video_optical_flow" />
+    <fragment
+        android:id="@+id/gnssViewerFragment2"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.GnssViewerFragment"
+        android:label="GnssViewerFragment"
+        tools:ignore="NewApi" />
 
 </navigation>
