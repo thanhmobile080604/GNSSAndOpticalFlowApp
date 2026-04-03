@@ -5,16 +5,16 @@ import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
 import org.opencv.core.Mat
 
 class BoofOF : OpticalFlow {
-    override fun run(new_frame: Mat): OFOutput? {
+    override fun run(newFrame: Mat): OFOutput? {
         return null
     }
 
-    public override fun reset_motion_vector() {
+    public override fun resetMotionVector() {
     }
 
-    public override fun UpdateFeatures() {
+    public override fun updateFeatures() {
     }
 
-    public override fun set_sensitivity(value: Int) {
+    public override fun setSensitivity(value: Int) {
     }
 }

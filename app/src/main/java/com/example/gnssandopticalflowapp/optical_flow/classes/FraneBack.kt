@@ -14,23 +14,23 @@ import kotlin.math.roundToInt
 class FraneBack : OpticalFlow {
     private val prevFrame: Mat = Mat()
     private var currFrame: Mat = Mat()
-    private val flow_gray: Mat = Mat()
+    private val flowGray: Mat = Mat()
     private val prevGray: Mat = Mat()
     private val currGray: Mat = Mat()
-    private val flow_rgb: Mat = Mat()
-    private val motion_vector: Mat = Mat.zeros(400, 400, CvType.CV_8UC1)
-    private val pyr_scale = 0.5
+    private val flowRgb: Mat = Mat()
+    private val motionVector: Mat = Mat.zeros(400, 400, CvType.CV_8UC1)
+    private val pyrScale = 0.5
     private val levels = 3
     private val winSize = 15
     private val iterations = 3
-    private val poly_n = 5
-    private val poly_sigma = 1.2
+    private val polyN = 5
+    private val polySigma = 1.2
     private val flags = 0
-    private val of_output: OFOutput = OFOutput()
+    private val ofOutput: OFOutput = OFOutput()
 
-    override fun run(new_frame: Mat): OFOutput {
+    override fun run(newFrame: Mat): OFOutput {
         Log.d("RUN-OF", "started")
-        currFrame = new_frame
+        currFrame = newFrame
 
         // convert current frame to gray
         Imgproc.cvtColor(currFrame, currGray, Imgproc.COLOR_RGBA2GRAY)
@@ -44,38 +44,38 @@ class FraneBack : OpticalFlow {
         Video.calcOpticalFlowFarneback(
             prevGray,
             currGray,
-            flow_gray,
-            pyr_scale,
+            flowGray,
+            pyrScale,
             levels,
             winSize,
             iterations,
-            poly_n,
-            poly_sigma,
+            polyN,
+            polySigma,
             flags
         )
 
         // draw the optical flow
-        currFrame.copyTo(flow_rgb)
-        drawOptFlowMap(flow_gray, flow_rgb, 64, Scalar(0.0, 255.0, 0.0))
+        currFrame.copyTo(flowRgb)
+        drawOptFlowMap(flowGray, flowRgb, 64, Scalar(0.0, 255.0, 0.0))
 
         // update the variables for the next loop
         currGray.copyTo(prevGray)
 
         // create the output array
-        of_output.of_frame = flow_rgb
-        of_output.position = Point(0.0, 0.0)
-        return of_output
+        ofOutput.of_frame = flowRgb
+        ofOutput.position = Point(0.0, 0.0)
+        return ofOutput
     }
 
-    override fun reset_motion_vector() {
+    override fun resetMotionVector() {
         // TBD
     }
 
-    override fun UpdateFeatures() {
+    override fun updateFeatures() {
         // Do nothing
     }
 
-    override fun set_sensitivity(value: Int) {
+    override fun setSensitivity(value: Int) {
         // TBD
     }
 

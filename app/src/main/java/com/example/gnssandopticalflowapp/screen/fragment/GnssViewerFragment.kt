@@ -516,7 +516,6 @@ class GnssViewerFragment :
 
     override fun onDestroyView() {
         super.onDestroyView()
-        // Ensure updates are stopped even if pause wasn't called (though unlikely)
         stopLocationUpdates()
         userMarker = null
     }

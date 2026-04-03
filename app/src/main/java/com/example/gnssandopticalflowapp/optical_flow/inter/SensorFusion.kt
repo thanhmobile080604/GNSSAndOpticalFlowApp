@@ -6,10 +6,10 @@ interface SensorFusion {
     /**
      * This method perform Sensor fusion between the IMU and the Optical Flow sensor.
      * Eventually, it outputs an estimated position base on each sensor output.
-     * @param imu_velocity
-     * @param imu_position
-     * @param of_position
+     * @param imuVelocity
+     * @param imuPosition
+     * @param ofPosition
      * @return
      */
-    fun getPosition(imu_velocity: FloatArray, imu_position: FloatArray, of_position: Point): FloatArray
+    fun getPosition(imuVelocity: FloatArray, imuPosition: FloatArray, ofPosition: Point): FloatArray
 }

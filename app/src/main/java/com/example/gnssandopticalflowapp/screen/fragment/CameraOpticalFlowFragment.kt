@@ -86,19 +86,19 @@ class CameraOpticalFlowFragment :
 
     override fun FragmentCameraOpticalFlowBinding.initListener() {
         resetMV.setOnClickListener {
-            opticalFlow.reset_motion_vector()
-            mvViewer.reset_motion_vector()
+            opticalFlow.resetMotionVector()
+            mvViewer.resetMotionVector()
         }
 
         updateFeaturesButton.setOnClickListener {
-            opticalFlow.UpdateFeatures()
+            opticalFlow.updateFeatures()
         }
 
         ofType.setOnClickListener {
-            if (ofType.isChecked) {
-                opticalFlow = FraneBack()
+            opticalFlow = if (ofType.isChecked) {
+                FraneBack()
             } else {
-                opticalFlow = KLT(velPred)
+                KLT(velPred)
             }
         }
 
@@ -106,7 +106,7 @@ class CameraOpticalFlowFragment :
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 Log.d("SEEK", progress.toString())
                 if (::opticalFlow.isInitialized) {
-                    opticalFlow.set_sensitivity(progress)
+                    opticalFlow.setSensitivity(progress)
                 }
             }
 

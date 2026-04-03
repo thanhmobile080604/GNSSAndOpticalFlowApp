@@ -7,12 +7,16 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import java.util.concurrent.Semaphore
+import kotlin.math.roundToInt
 
 class IMUEstimator(context: Context) : SensorEventListener {
-    private val sensorManager: SensorManager
-    private val accelerometer: Sensor?
-    private val gyroscope: Sensor?
-    private val magnetometer: Sensor?
+    // Get a reference to the SensorManager
+    private val sensorManager: SensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+
+    // Get references to the accelerometer and gyroscope sensors
+    private val accelerometer: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    private val gyroscope: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+    private val magnetometer: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
 
 
     private var gravity = FloatArray(3)
@@ -23,19 +27,11 @@ class IMUEstimator(context: Context) : SensorEventListener {
     private val velocity = FloatArray(3)
     private val position = FloatArray(3)
     private var lastUpdateTime: Long
-    private val semaphore: Semaphore
+
+    // init binary Semaphore
+    private val semaphore: Semaphore = Semaphore(1)
 
     init {
-        // Get a reference to the SensorManager
-        sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-
-        // Get references to the accelerometer and gyroscope sensors
-        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
-        gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-
-        // init binary Semaphore
-        semaphore = Semaphore(1)
 
         // Initialize the last update time
         lastUpdateTime = System.currentTimeMillis()
@@ -62,7 +58,7 @@ class IMUEstimator(context: Context) : SensorEventListener {
         lastUpdateTime = currentTime
 
         // Handle the sensor data
-        when (event.sensor.getType()) {
+        when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER ->                 // Save the gravity vector
                 gravity = event.values.clone()
 
@@ -91,11 +87,11 @@ class IMUEstimator(context: Context) : SensorEventListener {
         velocity[2] = 0.8f * velocity[2] + 0.2f * angularVelocity[2]
 
         // orientation
-        val RotationMatrix = FloatArray(9)
-        SensorManager.getRotationMatrix(RotationMatrix, null, gravity, magnitude)
+        val rotationMatrix = FloatArray(9)
+        SensorManager.getRotationMatrix(rotationMatrix, null, gravity, magnitude)
         // Express the updated rotation matrix as three orientation angles.
         val orientationAngles = FloatArray(3)
-        SensorManager.getOrientation(RotationMatrix, orientationAngles)
+        SensorManager.getOrientation(rotationMatrix, orientationAngles)
         convertToDegrees(orientationAngles)
         Log.d(
             "ORIENTATION",
@@ -117,7 +113,7 @@ class IMUEstimator(context: Context) : SensorEventListener {
 
     private fun convertToDegrees(vector: FloatArray) {
         for (i in vector.indices) {
-            vector[i] = Math.round(Math.toDegrees(vector[i].toDouble())).toFloat()
+            vector[i] = Math.toDegrees(vector[i].toDouble()).roundToInt().toFloat()
         }
     }
 
