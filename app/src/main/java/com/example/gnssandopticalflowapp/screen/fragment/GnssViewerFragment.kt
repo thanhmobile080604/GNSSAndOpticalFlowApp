@@ -12,6 +12,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
@@ -95,14 +96,37 @@ class GnssViewerFragment :
 
     @SuppressLint("NewApi")
     private val gnssStatusCallback = object : GnssStatus.Callback() {
+        override fun onStarted() {
+            super.onStarted()
+            Log.d("GNSS_STATUS", "GNSS system started, searching for satellites...")
+        }
+
+        override fun onStopped() {
+            super.onStopped()
+            Log.d("GNSS_STATUS", "GNSS system stopped.")
+        }
+
+        override fun onFirstFix(ttffMillis: Int) {
+            super.onFirstFix(ttffMillis)
+            Log.d("GNSS_STATUS", "First GNSS fix acquired in ${ttffMillis}ms")
+        }
+
         override fun onSatelliteStatusChanged(status: GnssStatus) {
+            val satelliteCount = status.satelliteCount
+            Log.d("GNSS_STATUS", "Satellite status changed. Found $satelliteCount satellites.")
+            
             if (rendererSet) {
                 val satellites = mutableListOf<SatelliteInfo>()
-                for (i in 0 until status.satelliteCount) {
+                for (i in 0 until satelliteCount) {
                     val freq = if (status.hasCarrierFrequencyHz(i)) status.getCarrierFrequencyHz(i) else 0f
+                    val svid = status.getSvid(i)
+                    val constellation = status.getConstellationType(i)
+                    
+                    Log.v("GNSS_SAT", "Sat index $i: SVID=$svid, Constellation=$constellation, CN0=${status.getCn0DbHz(i)}, UsedInFix=${status.usedInFix(i)}")
+                    
                     satellites.add(SatelliteInfo(
-                        svid = status.getSvid(i),
-                        constellationType = status.getConstellationType(i),
+                        svid = svid,
+                        constellationType = constellation,
                         elevationDegrees = status.getElevationDegrees(i),
                         azimuthDegrees = status.getAzimuthDegrees(i),
                         cn0DbHz = status.getCn0DbHz(i),
@@ -151,6 +175,8 @@ class GnssViewerFragment :
     private fun startLocationUpdates() {
         if (!hasLocationPermission()) return
         setupLocationManager()
+
+        Log.d("LOCATION", "Starting location and GNSS updates...")
 
         // Request Location
         locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, locationListener)
