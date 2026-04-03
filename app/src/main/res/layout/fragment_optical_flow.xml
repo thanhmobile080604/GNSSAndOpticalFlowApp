@@ -3,23 +3,35 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_main">
+
+    <ImageView
+        android:id="@+id/ivBack"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@drawable/ic_arrow_right"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="40dp"
+        android:layout_marginStart="16dp"
+        android:scaleX="-1"
+        app:tint="@color/white" />
 
     <org.opencv.android.JavaCameraView
         android:id="@+id/camera_view"
-        android:layout_width="398dp"
-        android:layout_height="430dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.0" />
+        app:layout_constraintTop_toBottomOf="@id/ivBack"
+        app:layout_constraintDimensionRatio="398:430"
+        app:layout_constraintHeight_percent="0.5"/>
 
     <ImageView
         android:id="@+id/motion_vector"
         android:layout_width="320dp"
         android:layout_height="140dp"
-        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintHorizontal_bias="0.492"
         app:layout_constraintStart_toStartOf="parent"
@@ -56,6 +68,7 @@
         android:layout_width="94dp"
         android:layout_height="40dp"
         android:text="Velocity"
+        android:textColor="@color/white"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toStartOf="@+id/resetMV"
         app:layout_constraintHorizontal_bias="0.134"

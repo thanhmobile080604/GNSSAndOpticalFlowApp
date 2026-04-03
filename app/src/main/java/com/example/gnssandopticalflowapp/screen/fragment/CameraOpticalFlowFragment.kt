@@ -7,6 +7,7 @@ import android.widget.SeekBar
 import android.widget.Toast
 import androidx.core.graphics.createBitmap
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentOpticalFlowBinding
 import com.example.gnssandopticalflowapp.model.OFOutput
 import com.example.gnssandopticalflowapp.optical_flow.classes.BasicFusion
@@ -112,6 +113,9 @@ class CameraOpticalFlowFragment :
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+        ivBack.setSingleClick {
+            onBack()
+        }
     }
 
     override fun initObserver() {}
