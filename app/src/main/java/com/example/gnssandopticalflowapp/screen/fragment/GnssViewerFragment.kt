@@ -5,6 +5,9 @@ import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
 import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
@@ -20,9 +23,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.content.res.AppCompatResources.getDrawable
 import androidx.core.app.ActivityCompat
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.dp
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
 import com.example.gnssandopticalflowapp.gnss.EarthRenderer
@@ -41,6 +46,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.drawable.toDrawable
 
 @RequiresApi(Build.VERSION_CODES.R)
 class GnssViewerFragment :
@@ -185,8 +192,19 @@ class GnssViewerFragment :
         val point = GeoPoint(loc.latitude, loc.longitude)
         if (userMarker == null) {
             userMarker = Marker(binding.mapView).apply {
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                icon = requireContext().getDrawable(android.R.drawable.ic_menu_mylocation)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                // Resize icon to a fixed size
+                val iconSize = 40.dp
+                context?.let { ctx ->
+                    getDrawable(ctx, R.drawable.ic_position)?.let { drawable ->
+                        val bitmap = createBitmap(iconSize, iconSize)
+                        val canvas = Canvas(bitmap)
+                        drawable.setBounds(0, 0, canvas.width, canvas.height)
+                        drawable.draw(canvas)
+                        icon = bitmap.toDrawable(ctx.resources)
+                    }
+                }
+
                 title = "Vị trí của bạn"
                 setOnMarkerClickListener { _, _ ->
                     showLocationDetailsDialog(loc)
