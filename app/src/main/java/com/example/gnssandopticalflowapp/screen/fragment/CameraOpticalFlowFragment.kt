@@ -8,7 +8,7 @@ import android.widget.Toast
 import androidx.core.graphics.createBitmap
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
-import com.example.gnssandopticalflowapp.databinding.FragmentOpticalFlowBinding
+import com.example.gnssandopticalflowapp.databinding.FragmentCameraOpticalFlowBinding
 import com.example.gnssandopticalflowapp.model.OFOutput
 import com.example.gnssandopticalflowapp.optical_flow.classes.BasicFusion
 import com.example.gnssandopticalflowapp.optical_flow.classes.FraneBack
@@ -25,7 +25,7 @@ import org.opencv.core.Mat
 import kotlin.math.sqrt
 
 class CameraOpticalFlowFragment :
-    BaseFragment<FragmentOpticalFlowBinding>(FragmentOpticalFlowBinding::inflate),
+    BaseFragment<FragmentCameraOpticalFlowBinding>(FragmentCameraOpticalFlowBinding::inflate),
     CameraBridgeViewBase.CvCameraViewListener2 {
 
     private var currFrame: Mat? = null
@@ -37,7 +37,7 @@ class CameraOpticalFlowFragment :
     private var fuseOutput: FloatArray? = null
     private lateinit var mvViewer: MotionVectorViz
 
-    override fun FragmentOpticalFlowBinding.initView() {
+    override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
 
         cameraView.apply {
@@ -84,7 +84,7 @@ class CameraOpticalFlowFragment :
         )
     }
 
-    override fun FragmentOpticalFlowBinding.initListener() {
+    override fun FragmentCameraOpticalFlowBinding.initListener() {
         resetMV.setOnClickListener {
             opticalFlow.reset_motion_vector()
             mvViewer.reset_motion_vector()

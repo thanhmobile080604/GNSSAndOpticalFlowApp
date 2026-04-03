@@ -5,9 +5,7 @@ import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
 import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
@@ -21,10 +19,11 @@ import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
-import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.content.res.AppCompatResources.getDrawable
 import androidx.core.app.ActivityCompat
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.drawable.toDrawable
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.dp
@@ -46,8 +45,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import androidx.core.graphics.createBitmap
-import androidx.core.graphics.drawable.toDrawable
 
 @RequiresApi(Build.VERSION_CODES.R)
 class GnssViewerFragment :
@@ -78,6 +75,7 @@ class GnssViewerFragment :
             currentLocation = location
             updateMapLocation()
         }
+        @Deprecated("Deprecated in Java")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         override fun onProviderEnabled(provider: String) {}
         override fun onProviderDisabled(provider: String) {
@@ -161,16 +159,19 @@ class GnssViewerFragment :
         // Request GNSS Status
         locationManager.registerGnssStatusCallback(requireContext().mainExecutor, gnssStatusCallback)
 
-        // Check last known location immediately
+        // Check last known location immediately if it's fresh (within 2 minutes)
         val lastKnownMap = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
             ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
 
         if (lastKnownMap != null) {
-            currentLocation = lastKnownMap
-            updateMapLocation()
-            // Center map once on initialization/resume if needed
-            val point = GeoPoint(lastKnownMap.latitude, lastKnownMap.longitude)
-            binding.mapView.controller.animateTo(point)
+            val locationAge = System.currentTimeMillis() - lastKnownMap.time
+            if (locationAge < 120000) { // Fresh if less than 2 minutes old
+                currentLocation = lastKnownMap
+                updateMapLocation()
+                // Center map once on initialization/resume if needed
+                val point = GeoPoint(lastKnownMap.latitude, lastKnownMap.longitude)
+                binding.mapView.controller.animateTo(point)
+            }
         }
     }
 
@@ -484,11 +485,13 @@ class GnssViewerFragment :
             binding.myGLSurfaceView.onPause()
         }
         stopLocationUpdates()
+        currentLocation = null
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         // Ensure updates are stopped even if pause wasn't called (though unlikely)
         stopLocationUpdates()
+        userMarker = null
     }
 }
