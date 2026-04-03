@@ -285,6 +285,7 @@ class GnssViewerFragment :
         scaleGestureDetector = ScaleGestureDetector(requireContext(), object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 if (is3DMode && rendererSet) {
+                    earthRenderer.clearTargets()
                     earthRenderer.scaleFactor /= detector.scaleFactor
                     earthRenderer.scaleFactor = earthRenderer.scaleFactor.coerceIn(0.2f, 3.0f)
                 }
@@ -310,6 +311,7 @@ class GnssViewerFragment :
                         previousX = event.x
                         previousY = event.y
                         isMultiTouch = false
+                        if (rendererSet) earthRenderer.clearTargets()
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         isMultiTouch = false
@@ -360,10 +362,8 @@ class GnssViewerFragment :
 
         if (is3DMode) {
             if (rendererSet) {
-                // Reset to user location on the 3D globe
-                earthRenderer.phi = loc.latitude.toFloat().coerceIn(-89.9f, 89.9f)
-                earthRenderer.theta = loc.longitude.toFloat()
-                earthRenderer.scaleFactor = 1.0f // Reset zoom
+                // Reset to user location on the 3D globe with smooth animation
+                earthRenderer.smoothScrollTo(loc.latitude.toFloat(), loc.longitude.toFloat(), 1.0f)
             }
         } else {
             // Animate to user location on 2D map

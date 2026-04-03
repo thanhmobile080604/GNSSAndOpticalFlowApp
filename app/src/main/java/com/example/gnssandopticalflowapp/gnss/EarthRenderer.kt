@@ -62,6 +62,10 @@ class EarthRenderer(private val context: Context) : Renderer {
     var theta = 0f
     var phi = 0f
 
+    private var targetPhi: Float? = null
+    private var targetTheta: Float? = null
+    private var targetScale: Float? = null
+
     private var userLat: Double? = null
     private var userLon: Double? = null
     private var isCameraInitialized = false
@@ -185,6 +189,33 @@ class EarthRenderer(private val context: Context) : Renderer {
 
     override fun onDrawFrame(gl: GL10?) {
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+
+        // Smooth transition logic
+        targetPhi?.let { tPhi ->
+            phi += (tPhi - phi) * 0.1f
+            if (Math.abs(phi - tPhi) < 0.01f) {
+                phi = tPhi
+                targetPhi = null
+            }
+        }
+        targetTheta?.let { tTheta ->
+            var diff = tTheta - theta
+            while (diff > 180f) diff -= 360f
+            while (diff < -180f) diff += 360f
+
+            theta += diff * 0.1f
+            if (Math.abs(diff) < 0.01f) {
+                theta = tTheta
+                targetTheta = null
+            }
+        }
+        targetScale?.let { tScale ->
+            scaleFactor += (tScale - scaleFactor) * 0.1f
+            if (Math.abs(scaleFactor - tScale) < 0.001f) {
+                scaleFactor = tScale
+                targetScale = null
+            }
+        }
 
         timeElapsed += animationSpeed * 0.016f
         if (timeElapsed > 1.0f) {
@@ -373,6 +404,18 @@ class EarthRenderer(private val context: Context) : Renderer {
             theta = lon.toFloat()
             isCameraInitialized = true
         }
+    }
+
+    fun smoothScrollTo(lat: Float, lon: Float, scale: Float) {
+        targetPhi = lat.coerceIn(-89.9f, 89.9f)
+        targetTheta = lon
+        targetScale = scale
+    }
+
+    fun clearTargets() {
+        targetPhi = null
+        targetTheta = null
+        targetScale = null
     }
 
     fun updateSatellites(sats: List<com.example.gnssandopticalflowapp.model.SatelliteInfo>) {
