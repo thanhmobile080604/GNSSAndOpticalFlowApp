@@ -41,10 +41,6 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
     }
 
     override fun initObserver() {
-        mainViewModel.isNetworkAvailable.observe(viewLifecycleOwner) { isConnected ->
-            binding.loadingOverlay.visibility =
-                if (isConnected) View.GONE else View.VISIBLE
-        }
     }
 
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {

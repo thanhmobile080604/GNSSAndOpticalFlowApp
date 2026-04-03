@@ -54,13 +54,5 @@ class MainActivity : AppCompatActivity() {
         StrictMode.setThreadPolicy(
             StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build()
         )
-
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                network.isConnected.collect { isConnected ->
-                    viewModel.isNetworkAvailable.value = isConnected
-                }
-            }
-        }
     }
 }
