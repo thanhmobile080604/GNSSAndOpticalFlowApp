@@ -17,6 +17,8 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
@@ -28,7 +30,9 @@ import androidx.core.graphics.drawable.toDrawable
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.dp
+import com.example.gnssandopticalflowapp.common.hide
 import com.example.gnssandopticalflowapp.common.setSingleClick
+import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
 import com.example.gnssandopticalflowapp.gnss.EarthRenderer
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
@@ -270,20 +274,56 @@ class GnssViewerFragment :
 
     private fun toggle3DMode() {
         is3DMode = !is3DMode
+        
         if (is3DMode) {
-            binding.mapView.animate().alpha(0f).setDuration(300).withEndAction {
-                binding.mapView.visibility = View.GONE
-            }
-            binding.myGLSurfaceView.visibility = View.VISIBLE
-            binding.myGLSurfaceView.alpha = 0f
-            binding.myGLSurfaceView.animate().alpha(1f).setDuration(300).start()
+            binding.mapView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            binding.myGLSurfaceView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            binding.mapView.animate()
+                .alpha(0f)
+                .setDuration(300)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction {
+                    binding.mapView.hide()
+                    binding.mapView.setLayerType(View.LAYER_TYPE_NONE, null)
+
+                    binding.myGLSurfaceView.show()
+                    binding.myGLSurfaceView.alpha = 0f
+                    binding.myGLSurfaceView.animate()
+                        .alpha(1f)
+                        .setDuration(300)
+                        .setInterpolator(AccelerateDecelerateInterpolator())
+                        .withEndAction {
+                            binding.myGLSurfaceView.setLayerType(View.LAYER_TYPE_NONE, null)
+                        }
+                        .start()
+                }
+                .start()
+            
         } else {
-            binding.myGLSurfaceView.animate().alpha(0f).setDuration(300).withEndAction {
-                binding.myGLSurfaceView.visibility = View.GONE
-            }
-            binding.mapView.visibility = View.VISIBLE
-            binding.mapView.alpha = 0f
-            binding.mapView.animate().alpha(1f).setDuration(300).start()
+            binding.myGLSurfaceView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            binding.mapView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+            binding.myGLSurfaceView.animate()
+                .alpha(0f)
+                .setDuration(300)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction {
+                    binding.myGLSurfaceView.hide()
+                    binding.myGLSurfaceView.setLayerType(View.LAYER_TYPE_NONE, null)
+
+                    binding.mapView.show()
+                    binding.mapView.alpha = 0f
+                    binding.mapView.animate()
+                        .alpha(1f)
+                        .setDuration(300)
+                        .setInterpolator(AccelerateDecelerateInterpolator())
+                        .withEndAction {
+                            binding.mapView.setLayerType(View.LAYER_TYPE_NONE, null)
+                            binding.mapView.invalidate()
+                        }
+                        .start()
+                }
+                .start()
         }
     }
 
