@@ -27,10 +27,12 @@ import java.nio.FloatBuffer
 import java.nio.IntBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.math.tan
 
 class EarthRenderer(private val context: Context) : Renderer {
@@ -117,7 +119,7 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glVertexAttribPointer(0, 3, GLES32.GL_FLOAT, false, 3 * 4, 0)
         GLES32.glBindVertexArray(0)
 
-        val faces = listOf<Int>(
+        val faces = listOf(
             R.drawable.skybox_right,
             R.drawable.skybox_left,
             R.drawable.skybox_up,
@@ -200,7 +202,7 @@ class EarthRenderer(private val context: Context) : Renderer {
         // Smooth transition logic
         targetPhi?.let { tPhi ->
             phi += (tPhi - phi) * 0.1f
-            if (Math.abs(phi - tPhi) < 0.01f) {
+            if (abs(phi - tPhi) < 0.01f) {
                 phi = tPhi
                 targetPhi = null
             }
@@ -211,14 +213,14 @@ class EarthRenderer(private val context: Context) : Renderer {
             while (diff < -180f) diff += 360f
 
             theta += diff * 0.1f
-            if (Math.abs(diff) < 0.01f) {
+            if (abs(diff) < 0.01f) {
                 theta = tTheta
                 targetTheta = null
             }
         }
         targetScale?.let { tScale ->
             scaleFactor += (tScale - scaleFactor) * 0.1f
-            if (Math.abs(scaleFactor - tScale) < 0.001f) {
+            if (abs(scaleFactor - tScale) < 0.001f) {
                 scaleFactor = tScale
                 targetScale = null
             }
@@ -274,9 +276,9 @@ class EarthRenderer(private val context: Context) : Renderer {
         val sunLonRaw = (12.0f - timeInHours) * 15.0f
         val sunLonRad = Math.toRadians(sunLonRaw.toDouble())
 
-        val lightX = (Math.cos(decRad) * Math.sin(sunLonRad) * 10.0).toFloat()
-        val lightY = (Math.sin(decRad) * 10.0).toFloat()
-        val lightZ = (Math.cos(decRad) * Math.cos(sunLonRad) * 10.0).toFloat()
+        val lightX = (cos(decRad) * sin(sunLonRad) * 10.0).toFloat()
+        val lightY = (sin(decRad) * 10.0).toFloat()
+        val lightZ = (cos(decRad) * cos(sunLonRad) * 10.0).toFloat()
 
         glUniform3f(glGetUniformLocation(program, "lightColor"), 1f, 1f, 1f)
         glUniform3f(glGetUniformLocation(program, "lightPos"), lightX, lightY, lightZ)
@@ -332,11 +334,10 @@ class EarthRenderer(private val context: Context) : Renderer {
         synchronized(satLock) {
             for (state in renderSatellites.values) {
                 val sat = state.info
-                
-                // LERP (flying effect)
-                state.rX += (state.tX - state.rX) * 0.05f
-                state.rY += (state.tY - state.rY) * 0.05f
-                state.rZ += (state.tZ - state.rZ) * 0.05f
+                // Instant update (removed LERP flying effect)
+                state.rX = state.tX
+                state.rY = state.tY
+                state.rZ = state.tZ
 
                 // update for touch handling later
                 sat.worldX = state.rX
@@ -349,7 +350,7 @@ class EarthRenderer(private val context: Context) : Renderer {
                 // Translate
                 Matrix.translateM(satModelMatrix, 0, state.rX, state.rY, state.rZ)
                 // Scale down sphere
-                val scale = 0.008f // slightly smaller as we are rendering many more in wider space
+                val scale = 0.04f // increased to 0.04f for better visibility
                 Matrix.scaleM(satModelMatrix, 0, scale, scale, scale)
 
                 GLES32.glUniformMatrix4fv(modelLocSat, 1, false, satModelMatrix, 0)
@@ -438,8 +439,9 @@ class EarthRenderer(private val context: Context) : Renderer {
                 val key = "${sat.constellationType}_${sat.svid}"
                 newKeys.add(key)
                 
-                // True proportion: Earth is 0.1f. Orbit is scaled by (R_E + Alt) / R_E
-                val rSat = 0.1f * (1.0f + sat.altitude.toFloat() / 6378137.0f)
+                // Close proportion: Earth is 0.1f. We pull orbits much closer (0.15f - 0.17f) instead of physically correct 0.41f
+                val normalizedAlt = (sat.altitude / 35786000.0).coerceIn(0.0, 1.0)
+                val rSat = 0.15f + (0.02f * normalizedAlt).toFloat()
                 val latRad = Math.toRadians(sat.latitude)
                 val lonRad = Math.toRadians(sat.longitude)
                 
@@ -511,7 +513,7 @@ class EarthRenderer(private val context: Context) : Renderer {
 
                 val dx = x - screenX
                 val dy = y - screenY
-                val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                val dist = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
 
                 // If within touch radius, check depth (closer satellites prioritize)
                 if (dist < touchRadius && clipCoords[3] < minDistance) {
