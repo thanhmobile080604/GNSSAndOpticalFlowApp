@@ -2,37 +2,30 @@ package com.example.gnssandopticalflowapp.screen.fragment
 
 import android.app.AlertDialog
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.util.Log
 import android.view.LayoutInflater
 import android.widget.Button
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.lifecycleScope
-import com.example.gnssandopticalflowapp.MainViewModel
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentHomeOpticalFlowBinding
+import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.util.VideoStorageUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import android.media.MediaMetadataRetriever
-import android.util.Log
-import android.widget.TextView
-import android.widget.Toast
-import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import org.opencv.android.Utils
 import org.opencv.core.Mat
-import org.opencv.core.Size
-import org.opencv.imgproc.Imgproc
-import org.opencv.videoio.VideoWriter
 import java.io.File
 import java.io.FileOutputStream
-import androidx.core.graphics.drawable.toDrawable
-import org.opencv.core.Point
-import org.opencv.core.Scalar
 
 class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(FragmentHomeOpticalFlowBinding::inflate) {
     private var copyJob: Job? = null
@@ -65,12 +58,12 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         showLoadingDialog("Copying video...")
         copyJob = lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val cacheDir = requireContext().cacheDir
+                val cacheDir = safeContext().cacheDir
                 val videosDir = File(cacheDir, "videos")
                 if (!videosDir.exists()) videosDir.mkdirs()
                 
                 val sourceFile = File(videosDir, "temp_source_${System.currentTimeMillis()}.mp4")
-                requireContext().contentResolver.openInputStream(uri)?.use { input ->
+                safeContext().contentResolver.openInputStream(uri)?.use { input ->
                     FileOutputStream(sourceFile).use { output ->
                         input.copyTo(output)
                     }
@@ -179,11 +172,11 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
         if (copyJob?.isActive == true) {
             // Scan file to ensure it's ready
-            android.media.MediaScannerConnection.scanFile(requireContext(), arrayOf(outputFile.absolutePath), null) { _, _ -> }
+            android.media.MediaScannerConnection.scanFile(safeContext(), arrayOf(outputFile.absolutePath), null) { _, _ -> }
             
             withContext(Dispatchers.Main) {
                 loadingDialog?.dismiss()
-                VideoStorageUtil.addVideo(requireContext(), outputFile.absolutePath)
+                VideoStorageUtil.addVideo(safeContext(), outputFile.absolutePath)
                 
                 // delay slightly
                 kotlinx.coroutines.delay(500)
@@ -199,8 +192,8 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
     private fun showLoadingDialog(message: String) {
         if (loadingDialog == null || !loadingDialog!!.isShowing) {
-            val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_loading, null)
-            loadingDialog = AlertDialog.Builder(requireContext())
+            val dialogView = LayoutInflater.from(safeContext()).inflate(R.layout.dialog_loading, null)
+            loadingDialog = AlertDialog.Builder(safeContext())
                 .setView(dialogView)
                 .setCancelable(false)
                 .create()

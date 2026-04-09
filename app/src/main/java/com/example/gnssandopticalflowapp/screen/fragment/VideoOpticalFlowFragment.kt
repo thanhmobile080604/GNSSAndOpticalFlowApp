@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.checkIfFragmentAttached
+import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.databinding.FragmentVideoOpticalFlowBinding
 import kotlinx.coroutines.Runnable
 import java.io.File
@@ -86,7 +87,7 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 Log.e("VIDEO-PLAYER", "ExoPlayer Error: ${error.message}", error)
                 checkIfFragmentAttached {
-                    Toast.makeText(requireContext(), "Playback Error: ${error.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(safeContext(), "Playback Error: ${error.message}", Toast.LENGTH_LONG).show()
                 }
             }
         })

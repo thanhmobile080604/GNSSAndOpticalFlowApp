@@ -6,6 +6,7 @@ import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.adapter.VideoListAdapter
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.hide
+import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentVideoListBinding
@@ -21,13 +22,13 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
             if(selectedVideo != null) ivVideoCheck.show()
             else ivVideoCheck.hide()
         }
-        rcvAllPhoto.layoutManager = GridLayoutManager(requireContext(), 3)
+        rcvAllPhoto.layoutManager = GridLayoutManager(safeContext(), 3)
         rcvAllPhoto.adapter = adapter
         loadVideos()
     }
 
     private fun loadVideos() {
-        val videos = VideoStorageUtil.getVideos(requireContext())
+        val videos = VideoStorageUtil.getVideos(safeContext())
         adapter.setData(videos)
     }
 

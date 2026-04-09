@@ -31,6 +31,7 @@ import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.dp
 import com.example.gnssandopticalflowapp.common.hide
+import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
@@ -95,7 +96,7 @@ class GnssViewerFragment :
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
-        return permissions.all { ActivityCompat.checkSelfPermission(requireContext(), it) == PackageManager.PERMISSION_GRANTED }
+        return permissions.all { ActivityCompat.checkSelfPermission(safeContext(), it) == PackageManager.PERMISSION_GRANTED }
     }
 
     @SuppressLint("NewApi")
@@ -172,7 +173,7 @@ class GnssViewerFragment :
     }
 
     override fun FragmentGnssViewerBinding.initView() {
-        Configuration.getInstance().load(requireActivity().applicationContext, requireContext().getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+        Configuration.getInstance().load(requireActivity().applicationContext, safeContext().getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
 
         binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
         binding.mapView.setMultiTouchControls(true)
@@ -200,7 +201,7 @@ class GnssViewerFragment :
 
     private fun setupLocationManager() {
         if (!::locationManager.isInitialized) {
-            locationManager = requireContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            locationManager = safeContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
         }
     }
 
@@ -216,7 +217,7 @@ class GnssViewerFragment :
         locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1000L, 1f, locationListener)
 
         // Request GNSS Status
-        locationManager.registerGnssStatusCallback(requireContext().mainExecutor, gnssStatusCallback)
+        locationManager.registerGnssStatusCallback(safeContext().mainExecutor, gnssStatusCallback)
 
         // Check last known location immediately if it's fresh (within 2 minutes)
         val lastKnownMap = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
@@ -294,7 +295,7 @@ class GnssViewerFragment :
             Vận tốc: ${loc.speed} m/s
         """.trimIndent()
 
-        AlertDialog.Builder(requireContext())
+        AlertDialog.Builder(safeContext())
             .setTitle("Thông tin vị trí")
             .setMessage(details)
             .setPositiveButton("Đóng", null)
@@ -392,7 +393,7 @@ class GnssViewerFragment :
         })
 
         // GestureDetector for 3D GLSurfaceView
-        gestureDetector = GestureDetector(requireContext(), object : GestureDetector.SimpleOnGestureListener() {
+        gestureDetector = GestureDetector(safeContext(), object : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 if (is3DMode) toggle3DMode()
                 return true
@@ -408,7 +409,7 @@ class GnssViewerFragment :
             }
         })
 
-        scaleGestureDetector = ScaleGestureDetector(requireContext(), object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        scaleGestureDetector = ScaleGestureDetector(safeContext(), object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 if (is3DMode && rendererSet) {
                     earthRenderer.clearTargets()
@@ -482,7 +483,7 @@ class GnssViewerFragment :
         } else null
 
         if (loc == null) {
-            Toast.makeText(requireContext(), "Đang chờ vị trí...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(safeContext(), "Đang chờ vị trí...", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -535,7 +536,7 @@ class GnssViewerFragment :
             Tốc độ: $formattedSpeedSpeed
         """.trimIndent()
 
-        AlertDialog.Builder(requireContext())
+        AlertDialog.Builder(safeContext())
             .setTitle("Vệ tinh $constellation SVID: ${sat.svid}")
             .setMessage(details)
             .setPositiveButton("Đóng", null)
@@ -574,18 +575,18 @@ class GnssViewerFragment :
     }
 
     private fun initOpenGLES() {
-        val activityManager = requireContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val activityManager = safeContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val configurationInfo = activityManager.deviceConfigurationInfo
         val supportsEs32 = configurationInfo.reqGlEsVersion >= 0x30002
 
         if (supportsEs32) {
-            earthRenderer = EarthRenderer(requireContext())
+            earthRenderer = EarthRenderer(safeContext())
             binding.myGLSurfaceView.setEGLContextClientVersion(3)
             binding.myGLSurfaceView.setZOrderMediaOverlay(true) // Fix overlap in ViewPager2
             binding.myGLSurfaceView.setRenderer(earthRenderer)
             rendererSet = true
         } else {
-            Toast.makeText(requireContext(), "This device doesn't support OpenGL ES 3.2", Toast.LENGTH_SHORT).show()
+            Toast.makeText(safeContext(), "This device doesn't support OpenGL ES 3.2", Toast.LENGTH_SHORT).show()
         }
     }
 

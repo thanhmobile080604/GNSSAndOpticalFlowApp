@@ -321,6 +321,23 @@ fun Fragment.checkIfFragmentAttached(operation: Context.() -> Unit) {
     }
 }
 
+fun Fragment.safeContext(): Context {
+    return if (isAdded && context != null) {
+        requireContext()
+    } else {
+        throw IllegalStateException("Fragment not attached to context")
+    }
+}
+
+// Extension function để sử dụng context một cách an toàn với fallback
+fun Fragment.getContextSafely(): Context? {
+    return if (isAdded && context != null) {
+        context
+    } else {
+        null
+    }
+}
+
 val Int.dp: Int
     get() = (this * Resources.getSystem().displayMetrics.density + 0.5f).toInt()
 

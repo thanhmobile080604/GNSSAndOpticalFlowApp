@@ -11,6 +11,7 @@ import androidx.core.graphics.createBitmap
 import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentCameraOpticalFlowBinding
 import com.example.gnssandopticalflowapp.model.OFOutput
@@ -64,7 +65,7 @@ class CameraOpticalFlowFragment :
             setCvCameraViewListener(this@CameraOpticalFlowFragment)
         }
 
-        imuEstimator = IMUEstimator(requireContext().applicationContext)
+        imuEstimator = IMUEstimator(safeContext().applicationContext)
 
         checkPermissions()
     }
@@ -92,11 +93,11 @@ class CameraOpticalFlowFragment :
                 }
 
                 override fun onDenied() {
-                    Toast.makeText(requireContext(), "Camera permission is required for this app", Toast.LENGTH_LONG).show()
+                    Toast.makeText(safeContext(), "Camera permission is required for this app", Toast.LENGTH_LONG).show()
                 }
 
                 override fun onNeverAskAgain(permission: String) {
-                    Toast.makeText(requireContext(), "Camera permission is required. Please enable it in settings.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(safeContext(), "Camera permission is required. Please enable it in settings.", Toast.LENGTH_LONG).show()
                 }
             }
         )
@@ -186,7 +187,7 @@ class CameraOpticalFlowFragment :
             Log.e("CAMERA-RECORD", "No current frame to start recording")
             return
         }
-        val cacheDir = requireContext().cacheDir
+        val cacheDir = safeContext().cacheDir
         val videosDir = java.io.File(cacheDir, "videos")
         if (!videosDir.exists()) videosDir.mkdirs()
         
@@ -200,11 +201,11 @@ class CameraOpticalFlowFragment :
             videoEncoder?.start()
             isRecording = true
             binding.ivVideRecord.setImageResource(R.drawable.ic_stop_record_purple)
-            Toast.makeText(requireContext(), "Recording started", Toast.LENGTH_SHORT).show()
+            Toast.makeText(safeContext(), "Recording started", Toast.LENGTH_SHORT).show()
             Log.d("CAMERA-RECORD", "Encoder started")
         } catch (e: Exception) {
             Log.e("CAMERA-RECORD", "Failed to start encoder: ${e.message}")
-            Toast.makeText(requireContext(), "Failed to start recording", Toast.LENGTH_SHORT).show()
+            Toast.makeText(safeContext(), "Failed to start recording", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -219,13 +220,13 @@ class CameraOpticalFlowFragment :
         Log.d("CAMERA-RECORD", "Stopping. Final size: $size bytes")
 
         binding.ivVideRecord.setImageResource(R.drawable.ic_start_record_purple)
-        Toast.makeText(requireContext(), "Recording saved", Toast.LENGTH_SHORT).show()
+        Toast.makeText(safeContext(), "Recording saved", Toast.LENGTH_SHORT).show()
         
         if (recordedFilePath.isNotEmpty() && size > 100) {
             // Scan file to ensure it's ready for general use
-            android.media.MediaScannerConnection.scanFile(requireContext(), arrayOf(recordedFilePath), null) { _, _ -> }
+            android.media.MediaScannerConnection.scanFile(safeContext(), arrayOf(recordedFilePath), null) { _, _ -> }
             
-            VideoStorageUtil.addVideo(requireContext(), recordedFilePath)
+            VideoStorageUtil.addVideo(safeContext(), recordedFilePath)
             
             // Brief delay to ensure file lock is released
             binding.root.postDelayed({
