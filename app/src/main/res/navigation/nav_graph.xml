@@ -29,5 +29,9 @@
         android:name="com.example.gnssandopticalflowapp.screen.fragment.GnssViewerFragment"
         android:label="GnssViewerFragment"
         tools:ignore="NewApi" />
+    <fragment
+        android:id="@+id/videoListFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.VideoListFragment"
+        android:label="VideoListFragment" />
 
 </navigation>

@@ -16,7 +16,6 @@
         android:text="Optical Flow"
         android:textColor="@color/white"
         android:textSize="40sp"
-        app:layout_constraintDimensionRatio="687:228"
         app:layout_constraintHorizontal_bias="0"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
@@ -32,7 +31,7 @@
         android:focusable="true"
         android:clickable="true"
         android:src="@drawable/bg_black_purple_gradient"
-        app:layout_constraintDimensionRatio="760:348"
+        app:layout_constraintDimensionRatio="760:248"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/imgTitle" />
@@ -75,7 +74,7 @@
         android:focusable="true"
         android:clickable="true"
         android:src="@drawable/bg_black_purple_gradient"
-        app:layout_constraintDimensionRatio="760:348"
+        app:layout_constraintDimensionRatio="760:248"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/btnFunc1" />
@@ -106,5 +105,48 @@
         app:layout_constraintBottom_toBottomOf="@id/btnFunc2"
         app:layout_constraintStart_toStartOf="@id/btnFunc2"
         app:layout_constraintTop_toTopOf="@id/btnFunc2" />
+
+    <ImageView
+        android:id="@+id/btnFunc3"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="16dp"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:focusable="true"
+        android:clickable="true"
+        android:src="@drawable/bg_black_purple_gradient"
+        app:layout_constraintDimensionRatio="760:248"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/btnFunc2" />
+
+    <ImageView
+        android:id="@+id/ivStorage"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="6dp"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop"
+        android:src="@drawable/ic_storage"
+        app:layout_constraintBottom_toBottomOf="@id/btnFunc3"
+        app:layout_constraintDimensionRatio="1"
+        app:layout_constraintStart_toStartOf="@id/btnFunc3"
+        app:layout_constraintTop_toTopOf="@id/btnFunc3" />
+
+    <TextView
+        android:id="@+id/tvStorage"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:text="Storage"
+        android:fontFamily="@font/inter_bold"
+        android:textColor="@color/white"
+        android:textSize="20sp"
+        app:layout_constraintStart_toEndOf="@id/ivStorage"
+        app:layout_constraintBottom_toBottomOf="@id/btnFunc3"
+        app:layout_constraintEnd_toEndOf="@id/btnFunc3"
+        app:layout_constraintTop_toTopOf="@id/btnFunc3" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

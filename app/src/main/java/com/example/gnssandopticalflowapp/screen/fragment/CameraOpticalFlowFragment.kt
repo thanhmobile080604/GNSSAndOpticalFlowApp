@@ -37,6 +37,10 @@ class CameraOpticalFlowFragment :
     private var fuseOutput: FloatArray? = null
     private lateinit var mvViewer: MotionVectorViz
 
+    private var videoWriter: org.opencv.videoio.VideoWriter? = null
+    private var isRecording = false
+    private var recordedFilePath = ""
+
     override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
 
@@ -113,7 +117,16 @@ class CameraOpticalFlowFragment :
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+        ivVideRecord.setOnClickListener {
+            if (isRecording) {
+                stopRecording()
+            } else {
+                startRecording()
+            }
+        }
+
         ivBack.setSingleClick {
+            if (isRecording) stopRecording()
             onBack()
         }
     }
@@ -135,6 +148,9 @@ class CameraOpticalFlowFragment :
 
     override fun onPause() {
         super.onPause()
+        if (isRecording) {
+            stopRecording()
+        }
         binding.cameraView.disableView()
         if (::imuEstimator.isInitialized) {
             imuEstimator.unregister()
@@ -142,8 +158,46 @@ class CameraOpticalFlowFragment :
     }
 
     override fun onDestroyView() {
+        if (isRecording) {
+            stopRecording()
+        }
         binding.cameraView.disableView()
         super.onDestroyView()
+    }
+
+    private fun startRecording() {
+        if (currFrame == null) return
+        val cacheDir = requireContext().cacheDir
+        val videosDir = java.io.File(cacheDir, "videos")
+        if (!videosDir.exists()) videosDir.mkdirs()
+        
+        val outputFile = java.io.File(videosDir, "recorded_${System.currentTimeMillis()}.avi")
+        recordedFilePath = outputFile.absolutePath
+        
+        val fourcc = org.opencv.videoio.VideoWriter.fourcc('M', 'J', 'P', 'G')
+        videoWriter = org.opencv.videoio.VideoWriter(recordedFilePath, fourcc, 30.0, org.opencv.core.Size(currFrame!!.cols().toDouble(), currFrame!!.rows().toDouble()), true)
+        
+        if (videoWriter?.isOpened == true) {
+            isRecording = true
+            binding.ivVideRecord.setImageResource(com.example.gnssandopticalflowapp.R.drawable.ic_stop_record_purple)
+            Toast.makeText(requireContext(), "Recording started", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(requireContext(), "Failed to start recording. Codec issue?", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun stopRecording() {
+        isRecording = false
+        videoWriter?.release()
+        videoWriter = null
+        binding.ivVideRecord.setImageResource(com.example.gnssandopticalflowapp.R.drawable.ic_start_record_purple)
+        Toast.makeText(requireContext(), "Recording saved", Toast.LENGTH_SHORT).show()
+        
+        if (recordedFilePath.isNotEmpty()) {
+            com.example.gnssandopticalflowapp.util.VideoStorageUtil.addVideo(requireContext(), recordedFilePath)
+            mainViewModel.selectedVideoPath.value = recordedFilePath
+            navigateTo(com.example.gnssandopticalflowapp.R.id.videoOpticalFlowFragment)
+        }
     }
 
     override fun onCameraViewStarted(width: Int, height: Int) {
@@ -195,8 +249,20 @@ class CameraOpticalFlowFragment :
                     binding.motionVector.setImageBitmap(dst)
                 }
             }
-            return currentOutput.of_frame
+            val outFrame = currentOutput.of_frame ?: frame
+            writeToVideoWriter(outFrame)
+            return outFrame
         }
+        writeToVideoWriter(frame)
         return frame
+    }
+
+    private fun writeToVideoWriter(matFrame: Mat) {
+        if (isRecording && videoWriter?.isOpened == true) {
+            val bgrFrame = Mat()
+            org.opencv.imgproc.Imgproc.cvtColor(matFrame, bgrFrame, org.opencv.imgproc.Imgproc.COLOR_RGBA2BGR)
+            videoWriter?.write(bgrFrame)
+            bgrFrame.release()
+        }
     }
 }

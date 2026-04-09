@@ -56,35 +56,35 @@
         android:id="@+id/resetMV"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginStart="12dp"
+        android:layout_marginStart="6dp"
         android:background="@drawable/bg_blue_gradient_40_left"
         android:fontFamily="@font/inter_bold"
         android:gravity="center"
         android:text="Reset"
         android:textColor="@color/white"
-        android:textSize="20sp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintDimensionRatio="186:56"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/update_features_button"
-        app:layout_constraintWidth_percent="0.4" />
+        android:textSize="14sp"
+        app:layout_constraintBottom_toBottomOf="@id/update_features_button"
+        app:layout_constraintDimensionRatio="86:56"
+        app:layout_constraintStart_toEndOf="@id/update_features_button"
+        app:layout_constraintTop_toTopOf="@+id/update_features_button"
+        app:layout_constraintWidth_percent="0.2" />
 
     <TextView
         android:id="@+id/update_features_button"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_marginStart="12dp"
+        android:layout_marginTop="6dp"
         android:background="@drawable/bg_blue_gradient_40_left"
         android:fontFamily="@font/inter_bold"
         android:gravity="center"
         android:text="Update"
         android:textColor="@color/white"
-        android:textSize="20sp"
-        android:layout_marginTop="6dp"
-        app:layout_constraintDimensionRatio="186:56"
+        android:textSize="14sp"
+        app:layout_constraintDimensionRatio="86:56"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/motion_vector"
-        app:layout_constraintWidth_percent="0.4" />
+        app:layout_constraintWidth_percent="0.2" />
 
     <TextView
         android:id="@+id/vel_pred"
@@ -101,21 +101,21 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        app:layout_constraintBottom_toTopOf="@id/ofType"
-        app:layout_constraintStart_toStartOf="@id/ofType"
-        app:layout_constraintEnd_toEndOf="@id/ofType"
+        android:fontFamily="@font/inter_regular"
         android:text="Mode"
         android:textColor="@color/white"
-        android:fontFamily="@font/inter_regular"/>
+        app:layout_constraintBottom_toTopOf="@id/ofType"
+        app:layout_constraintEnd_toEndOf="@id/ofType"
+        app:layout_constraintStart_toStartOf="@id/ofType" />
 
     <androidx.appcompat.widget.SwitchCompat
         android:id="@+id/ofType"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:splitTrack="false"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@id/update_features_button"
         app:layout_constraintBottom_toBottomOf="@id/update_features_button"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@id/resetMV"
         app:switchMinWidth="48dp"
         app:thumbTint="@android:color/white"
         app:trackTint="@color/switch_track_selector" />
@@ -123,12 +123,12 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="2dp"
+        android:fontFamily="@font/inter_regular"
+        android:text="Sensitivity"
+        android:textColor="@color/white"
         app:layout_constraintBottom_toTopOf="@id/sensitivity_bar"
         app:layout_constraintEnd_toEndOf="parent"
-        android:text="Sensitivity"
-        android:fontFamily="@font/inter_regular"
-        android:textColor="@color/white"
-        android:layout_marginBottom="2dp"
         app:layout_constraintStart_toEndOf="@+id/resetMV" />
 
     <SeekBar
@@ -145,8 +145,18 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toEndOf="@+id/resetMV"
         app:layout_constraintTop_toBottomOf="@+id/update_features_button"
-        app:layout_constraintWidth_percent="0.4"
-        app:layout_constraintVertical_bias="0.6"/>
+        app:layout_constraintVertical_bias="0.6"
+        app:layout_constraintWidth_percent="0.4" />
+
+    <ImageView
+        android:id="@+id/ivVideRecord"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:src="@drawable/ic_start_record_purple"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="@id/resetMV"
+        app:layout_constraintStart_toStartOf="@id/update_features_button"
+        app:layout_constraintTop_toBottomOf="@id/update_features_button" />
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>

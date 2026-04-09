@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="10sp"
+    android:padding="2dp">
+
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/thumb_gallery"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/transparent"
+        android:scaleType="centerCrop"
+        android:src="@color/black"
+        app:layout_constraintDimensionRatio="1:1"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:round="20dp" />
+
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/blackOverlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:src="@color/black_60"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/thumb_gallery"
+        app:layout_constraintEnd_toEndOf="@id/thumb_gallery"
+        app:layout_constraintStart_toStartOf="@id/thumb_gallery"
+        app:layout_constraintTop_toTopOf="@id/thumb_gallery"
+        app:round="20dp" />
+
+    <ImageView
+        android:id="@+id/check"
+        android:layout_width="20sp"
+        android:layout_height="20sp"
+        android:layout_margin="10sp"
+        android:src="@drawable/ic_tick_blue_shadow"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="@id/thumb_gallery"
+        app:layout_constraintTop_toTopOf="@id/thumb_gallery" />
+
+
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="5dp"
+        android:gravity="center"
+        android:textColor="@color/white"
+        android:textSize="12sp"
+        android:text="Date Title"
+        app:layout_constraintTop_toBottomOf="@id/thumb_gallery"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
