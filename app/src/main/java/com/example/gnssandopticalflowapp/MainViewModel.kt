@@ -5,5 +5,5 @@ import androidx.lifecycle.ViewModel
 
 class MainViewModel :
     ViewModel() {
-
+    val currentTab = MutableLiveData<Int>(0)
 }
