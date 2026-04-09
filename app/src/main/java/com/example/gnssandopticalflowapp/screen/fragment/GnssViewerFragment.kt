@@ -181,6 +181,18 @@ class GnssViewerFragment :
         binding.mapView.controller.setCenter(GeoPoint(21.028511, 105.804817)) // Hanoi fallback
 
         initOpenGLES()
+        
+        // Restore 3D mode state if previously enabled
+        if (is3DMode) {
+            binding.mapView.hide()
+            binding.myGLSurfaceView.show()
+            binding.myGLSurfaceView.alpha = 1f
+        } else {
+            binding.mapView.show()
+            binding.mapView.alpha = 1f
+            binding.myGLSurfaceView.hide()
+        }
+
         checkPermissionsAndSetup()
     }
 
@@ -558,6 +570,7 @@ class GnssViewerFragment :
         if (supportsEs32) {
             earthRenderer = EarthRenderer(requireContext())
             binding.myGLSurfaceView.setEGLContextClientVersion(3)
+            binding.myGLSurfaceView.setZOrderMediaOverlay(true) // Fix overlap in ViewPager2
             binding.myGLSurfaceView.setRenderer(earthRenderer)
             rendererSet = true
         } else {
