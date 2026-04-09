@@ -9,7 +9,19 @@ class LoadingDialog() :
 
     var cancelCallback: (() -> Unit)? = null
 
-    override fun DialogLoadingBinding.initView() = Unit
+    private var initialMessage: String? = null
+
+    override fun DialogLoadingBinding.initView() {
+        initialMessage?.let { tvLoadingMessage.text = it }
+    }
+
+    fun setMessage(message: String) {
+        if (::binding.isInitialized) {
+            binding.tvLoadingMessage.text = message
+        } else {
+            initialMessage = message
+        }
+    }
 
     override fun DialogLoadingBinding.initListener() {
         btnCancel.setSingleClick {

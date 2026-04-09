@@ -29,7 +29,6 @@ import java.io.FileOutputStream
 
 class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(FragmentHomeOpticalFlowBinding::inflate) {
     private var copyJob: Job? = null
-    private var loadingDialog: AlertDialog? = null
 
     private val videoPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
@@ -55,7 +54,10 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     }
 
     private fun handleVideoSelection(uri: Uri) {
-        showLoadingDialog("Copying video...")
+        showLoadingDialog("Copying video...") {
+            copyJob?.cancel()
+        }
+        
         copyJob = lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val cacheDir = safeContext().cacheDir
@@ -74,7 +76,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    loadingDialog?.dismiss()
+                    dismissLoadingDialog()
                 }
             }
         }
@@ -82,7 +84,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
     private suspend fun processVideoOffline(sourceFile: File) {
         withContext(Dispatchers.Main) {
-            loadingDialog?.findViewById<TextView>(R.id.tvLoadingMessage)?.text = "Processing Optical Flow..."
+            showLoadingDialog("Processing Optical Flow...")
         }
 
         val retriever = MediaMetadataRetriever()
@@ -96,7 +98,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
         val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
         val durationMs = durationStr?.toLong() ?: 0L
-        Log.d("VIDEO-PROCESS", "Duration: $durationMs ms")
         
         val firstFrame = retriever.getFrameAtTime(0)
         if (firstFrame == null) {
@@ -107,14 +108,12 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         
         val width = firstFrame.width
         val height = firstFrame.height
-        Log.d("VIDEO-PROCESS", "Frame size: ${width}x${height}")
         
         val outputFile = File(sourceFile.parentFile, "processed_${System.currentTimeMillis()}.mp4")
         val encoder = com.example.gnssandopticalflowapp.util.VideoEncoder(outputFile.absolutePath, width, height)
         
         try {
             encoder.start()
-            Log.d("VIDEO-PROCESS", "VideoEncoder started for ${outputFile.name}")
         } catch (e: Exception) {
             Log.e("VIDEO-PROCESS", "Encoder failed to start: ${e.message}")
             retriever.release()
@@ -138,11 +137,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                     Utils.bitmapToMat(bitmap, rgbaMat)
                     
                     if (!rgbaMat.empty()) {
-                        if (framesProcessed % 30 == 0) {
-                            val mean = org.opencv.core.Core.mean(rgbaMat)
-                            Log.d("VIDEO-PROCESS", "Frame $framesProcessed, mean: $mean")
-                        }
-
                         val output = klt.run(rgbaMat)
                         val outFrame = output.of_frame ?: rgbaMat
                         
@@ -159,7 +153,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 if (currentTimeUs % (frameDurationUs * 10) <= frameDurationUs) {
                     val progress = ((currentTimeUs / 1000).toFloat() / durationMs * 100).toInt()
                     withContext(Dispatchers.Main) {
-                        loadingDialog?.findViewById<TextView>(R.id.tvLoadingMessage)?.text = "Processing: $progress%"
+                        showLoadingDialog("Processing: $progress%")
                     }
                 }
             }
@@ -167,7 +161,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             encoder.release()
             retriever.release()
             sourceFile.delete() 
-            Log.d("VIDEO-PROCESS", "Processing finished. Frames: $framesProcessed. File size: ${outputFile.length()} bytes")
         }
 
         if (copyJob?.isActive == true) {
@@ -175,7 +168,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             android.media.MediaScannerConnection.scanFile(safeContext(), arrayOf(outputFile.absolutePath), null) { _, _ -> }
             
             withContext(Dispatchers.Main) {
-                loadingDialog?.dismiss()
+                dismissLoadingDialog()
                 VideoStorageUtil.addVideo(safeContext(), outputFile.absolutePath)
                 
                 // delay slightly
@@ -190,29 +183,9 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         }
     }
 
-    private fun showLoadingDialog(message: String) {
-        if (loadingDialog == null || !loadingDialog!!.isShowing) {
-            val dialogView = LayoutInflater.from(safeContext()).inflate(R.layout.dialog_loading, null)
-            loadingDialog = AlertDialog.Builder(safeContext())
-                .setView(dialogView)
-                .setCancelable(false)
-                .create()
-                
-            loadingDialog?.window?.setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
-            
-            dialogView.findViewById<Button>(R.id.btnCancel).setOnClickListener {
-                copyJob?.cancel()
-                loadingDialog?.dismiss()
-            }
-        }
-        loadingDialog?.findViewById<TextView>(R.id.tvLoadingMessage)?.text = message
-        loadingDialog?.show()
-    }
-
     override fun onDestroyView() {
         super.onDestroyView()
         copyJob?.cancel()
-        loadingDialog?.dismiss()
     }
 
     override fun initObserver() {
