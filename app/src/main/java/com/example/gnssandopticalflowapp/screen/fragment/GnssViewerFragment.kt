@@ -128,14 +128,42 @@ class GnssViewerFragment :
                     
                     Log.v("GNSS_SAT", "Sat index $i: SVID=$svid, Constellation=$constellation, CN0=${status.getCn0DbHz(i)}, UsedInFix=${status.usedInFix(i)}")
                     
+                    val elevationDegrees = status.getElevationDegrees(i)
+                    val azimuthDegrees = status.getAzimuthDegrees(i)
+                    
+                    var lat = 0.0
+                    var lon = 0.0
+                    var alt = 0.0
+                    var spd = 0.0
+                    
+                    val (orbitRadius, orbitSpeed) = com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadiusAndSpeed(constellation, svid)
+                    spd = orbitSpeed
+                    
+                    currentLocation?.let { loc ->
+                        val pos = com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePosition(
+                            observerLat = loc.latitude,
+                            observerLon = loc.longitude,
+                            azimuthDegrees = azimuthDegrees,
+                            elevationDegrees = elevationDegrees,
+                            orbitRadius = orbitRadius
+                        )
+                        lat = pos.latitude
+                        lon = pos.longitude
+                        alt = pos.altitude
+                    }
+                    
                     satellites.add(SatelliteInfo(
                         svid = svid,
                         constellationType = constellation,
-                        elevationDegrees = status.getElevationDegrees(i),
-                        azimuthDegrees = status.getAzimuthDegrees(i),
+                        elevationDegrees = elevationDegrees,
+                        azimuthDegrees = azimuthDegrees,
                         cn0DbHz = status.getCn0DbHz(i),
                         usedInFix = status.usedInFix(i),
-                        carrierFrequencyHz = freq
+                        carrierFrequencyHz = freq,
+                        latitude = lat,
+                        longitude = lon,
+                        altitude = alt,
+                        speed = spd
                     ))
                 }
                 earthRenderer.updateSatellites(satellites)
@@ -472,9 +500,10 @@ class GnssViewerFragment :
             else -> "Unknown"
         }
 
-        // Approximate distance based on elevation (simplification)
-        // Lat, Lon altitude would normally require knowing the satellite's exact ephemeris, but we can't get that from GnssStatus easily.
-        // We will show NA if not available, since GnssStatus only gives Az, El. (User prompt asked for lat, lon, alt, speed, dist, but GnssStatus doesn't provide them. I'll mock NA or note limitation).
+        val formattedLat = String.format(Locale.getDefault(), "%.4f", sat.latitude)
+        val formattedLon = String.format(Locale.getDefault(), "%.4f", sat.longitude)
+        val formattedAlt = String.format(Locale.getDefault(), "%,d", sat.altitude.toLong())
+        val formattedSpeedSpeed = String.format(Locale.getDefault(), "%,.1f km/s (%,.0f km/h)", sat.speed / 1000.0, sat.speed * 3.6)
 
         val details = """
             Tổng số vệ tinh: $totalSats
@@ -486,7 +515,11 @@ class GnssViewerFragment :
             Tần số sóng mang: ${if (sat.carrierFrequencyHz > 0) "${sat.carrierFrequencyHz} Hz" else "N/A"}
             Trạng thái sử dụng: ${if (sat.usedInFix) "Đang sử dụng" else "Không"}
             
-            Vĩ độ, Kinh độ, Độ cao, Tốc độ, Khoảng cách: Không có sẵn từ GnssStatus API.
+            [Dữ liệu ước tính từ quỹ đạo]
+            Vĩ độ: $formattedLat°
+            Kinh độ: $formattedLon°
+            Độ cao: $formattedAlt mét
+            Tốc độ: $formattedSpeedSpeed
         """.trimIndent()
 
         AlertDialog.Builder(requireContext())

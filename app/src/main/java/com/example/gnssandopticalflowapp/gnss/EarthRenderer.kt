@@ -74,6 +74,13 @@ class EarthRenderer(private val context: Context) : Renderer {
 
     private var satProgram = 0
     private var satellites = listOf<com.example.gnssandopticalflowapp.model.SatelliteInfo>()
+    
+    private inner class SatRenderState(
+        var rX: Float, var rY: Float, var rZ: Float,
+        var tX: Float, var tY: Float, var tZ: Float,
+        var info: com.example.gnssandopticalflowapp.model.SatelliteInfo
+    )
+    private var renderSatellites = mutableMapOf<String, SatRenderState>()
     val satelliteCount: Int get() = satellites.size
     private val satLock = Any()
 
@@ -323,38 +330,43 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glUniformMatrix4fv(viewLocSat, 1, false, viewMatrix, 0)
 
         synchronized(satLock) {
-            for (sat in satellites) {
-                val r = 0.15f // satellite orbit radius
-                val radAz = Math.toRadians(sat.azimuthDegrees.toDouble())
-                val radEl = Math.toRadians(sat.elevationDegrees.toDouble())
+            for (state in renderSatellites.values) {
+                val sat = state.info
                 
-                // Map elevation & azimuth to a 3D position
-                sat.worldX = (r * cos(radEl) * sin(radAz)).toFloat()
-                sat.worldY = (r * Math.abs(sin(radEl))).toFloat() // keep above equator
-                sat.worldZ = (r * cos(radEl) * cos(radAz)).toFloat()
+                // LERP (flying effect)
+                state.rX += (state.tX - state.rX) * 0.05f
+                state.rY += (state.tY - state.rY) * 0.05f
+                state.rZ += (state.tZ - state.rZ) * 0.05f
+
+                // update for touch handling later
+                sat.worldX = state.rX
+                sat.worldY = state.rY
+                sat.worldZ = state.rZ
 
                 val satModelMatrix = FloatArray(16)
                 Matrix.setIdentityM(satModelMatrix, 0)
                 
                 // Translate
-                Matrix.translateM(satModelMatrix, 0, sat.worldX, sat.worldY, sat.worldZ)
+                Matrix.translateM(satModelMatrix, 0, state.rX, state.rY, state.rZ)
                 // Scale down sphere
-                Matrix.scaleM(satModelMatrix, 0, 0.03f, 0.03f, 0.03f)
+                val scale = 0.008f // slightly smaller as we are rendering many more in wider space
+                Matrix.scaleM(satModelMatrix, 0, scale, scale, scale)
 
                 GLES32.glUniformMatrix4fv(modelLocSat, 1, false, satModelMatrix, 0)
 
                 // Set color based on constellation
                 val color = when (sat.constellationType) {
-                    android.location.GnssStatus.CONSTELLATION_GPS -> floatArrayOf(0.0f, 0.0f, 1.0f, 1.0f) // Blue
-                    android.location.GnssStatus.CONSTELLATION_GLONASS -> floatArrayOf(1.0f, 0.0f, 0.0f, 1.0f) // Red
-                    android.location.GnssStatus.CONSTELLATION_GALILEO -> floatArrayOf(0.0f, 1.0f, 0.0f, 1.0f) // Green
-                    android.location.GnssStatus.CONSTELLATION_BEIDOU -> floatArrayOf(1.0f, 1.0f, 0.0f, 1.0f) // Yellow
+                    android.location.GnssStatus.CONSTELLATION_GPS -> floatArrayOf(0.0f, 0.5f, 1.0f, 1.0f) // Blue
+                    android.location.GnssStatus.CONSTELLATION_GLONASS -> floatArrayOf(1.0f, 0.2f, 0.2f, 1.0f) // Red
+                    android.location.GnssStatus.CONSTELLATION_GALILEO -> floatArrayOf(0.2f, 1.0f, 0.2f, 1.0f) // Green
+                    android.location.GnssStatus.CONSTELLATION_BEIDOU -> floatArrayOf(1.0f, 0.8f, 0.0f, 1.0f) // Yellow
+                    android.location.GnssStatus.CONSTELLATION_QZSS -> floatArrayOf(1.0f, 0.5f, 0.0f, 1.0f) // Orange
+                    android.location.GnssStatus.CONSTELLATION_IRNSS -> floatArrayOf(0.8f, 0.0f, 0.8f, 1.0f) // Purple
                     else -> floatArrayOf(1.0f, 1.0f, 1.0f, 1.0f) // White
                 }
                 
                 // Dim if not used in fix
                 if (!sat.usedInFix) {
-                    color[3] = 0.3f // alpha (requires blending enabled, but we can just darken rgb)
                     color[0] *= 0.3f; color[1] *= 0.3f; color[2] *= 0.3f
                 }
 
@@ -421,6 +433,44 @@ class EarthRenderer(private val context: Context) : Renderer {
     fun updateSatellites(sats: List<com.example.gnssandopticalflowapp.model.SatelliteInfo>) {
         synchronized(satLock) {
             satellites = sats
+            val newKeys = mutableSetOf<String>()
+            for (sat in sats) {
+                val key = "${sat.constellationType}_${sat.svid}"
+                newKeys.add(key)
+                
+                // True proportion: Earth is 0.1f. Orbit is scaled by (R_E + Alt) / R_E
+                val rSat = 0.1f * (1.0f + sat.altitude.toFloat() / 6378137.0f)
+                val latRad = Math.toRadians(sat.latitude)
+                val lonRad = Math.toRadians(sat.longitude)
+                
+                val tx = (rSat * cos(latRad) * sin(lonRad)).toFloat()
+                val ty = (rSat * sin(latRad)).toFloat()
+                val tz = (rSat * cos(latRad) * cos(lonRad)).toFloat()
+                
+                // Set these as final fallback, though they update in render loop
+                sat.worldX = tx
+                sat.worldY = ty
+                sat.worldZ = tz
+                
+                if (renderSatellites.containsKey(key)) {
+                    val state = renderSatellites[key]!!
+                    state.tX = tx
+                    state.tY = ty
+                    state.tZ = tz
+                    state.info = sat
+                } else {
+                    renderSatellites[key] = SatRenderState(tx, ty, tz, tx, ty, tz, sat)
+                }
+            }
+            
+            // Remove old sats
+            val it = renderSatellites.iterator()
+            while (it.hasNext()) {
+                val entry = it.next()
+                if (!newKeys.contains(entry.key)) {
+                    it.remove()
+                }
+            }
         }
     }
 
@@ -435,11 +485,12 @@ class EarthRenderer(private val context: Context) : Renderer {
         Matrix.multiplyMM(vpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
 
         synchronized(satLock) {
-            for (sat in satellites) {
+            for (state in renderSatellites.values) {
+                val sat = state.info
                 val satModelMatrix = FloatArray(16)
                 Matrix.setIdentityM(satModelMatrix, 0)
                 
-                val posVec = floatArrayOf(sat.worldX, sat.worldY, sat.worldZ, 1.0f)
+                val posVec = floatArrayOf(state.rX, state.rY, state.rZ, 1.0f)
                 val rotatedPos = FloatArray(4)
                 Matrix.multiplyMV(rotatedPos, 0, satModelMatrix, 0, posVec, 0)
 

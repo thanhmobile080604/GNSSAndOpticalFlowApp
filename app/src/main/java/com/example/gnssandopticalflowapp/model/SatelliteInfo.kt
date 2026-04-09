@@ -10,5 +10,9 @@ data class SatelliteInfo(
     val carrierFrequencyHz: Float,
     var worldX: Float = 0f, // 3D mapped positions
     var worldY: Float = 0f,
-    var worldZ: Float = 0f
+    var worldZ: Float = 0f,
+    var latitude: Double = 0.0,
+    var longitude: Double = 0.0,
+    var altitude: Double = 0.0,
+    var speed: Double = 0.0
 )

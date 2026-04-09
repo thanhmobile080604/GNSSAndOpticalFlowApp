@@ -98,6 +98,16 @@
         app:layout_constraintStart_toEndOf="@id/motion_vector"
         app:layout_constraintTop_toBottomOf="@+id/cvCamera" />
 
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:layout_constraintBottom_toTopOf="@id/ofType"
+        app:layout_constraintStart_toStartOf="@id/ofType"
+        app:layout_constraintEnd_toEndOf="@id/ofType"
+        android:text="Mode"
+        android:textColor="@color/white"
+        android:fontFamily="@font/inter_regular"/>
+
     <androidx.appcompat.widget.SwitchCompat
         android:id="@+id/ofType"
         android:layout_width="wrap_content"
@@ -106,10 +116,21 @@
         android:splitTrack="false"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toEndOf="@id/update_features_button"
-        app:layout_constraintTop_toBottomOf="@id/motion_vector"
+        app:layout_constraintBottom_toBottomOf="@id/update_features_button"
         app:switchMinWidth="48dp"
         app:thumbTint="@android:color/white"
         app:trackTint="@color/switch_track_selector" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:layout_constraintBottom_toTopOf="@id/sensitivity_bar"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:text="Sensitivity"
+        android:fontFamily="@font/inter_regular"
+        android:textColor="@color/white"
+        android:layout_marginBottom="2dp"
+        app:layout_constraintStart_toEndOf="@+id/resetMV" />
 
     <SeekBar
         android:id="@+id/sensitivity_bar"
@@ -125,7 +146,8 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toEndOf="@+id/resetMV"
         app:layout_constraintTop_toBottomOf="@+id/update_features_button"
-        app:layout_constraintWidth_percent="0.4" />
+        app:layout_constraintWidth_percent="0.4"
+        app:layout_constraintVertical_bias="0.6"/>
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>
