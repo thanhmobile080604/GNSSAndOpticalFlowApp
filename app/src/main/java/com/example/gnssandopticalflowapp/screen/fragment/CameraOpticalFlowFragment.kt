@@ -37,7 +37,7 @@ class CameraOpticalFlowFragment :
     private var fuseOutput: FloatArray? = null
     private lateinit var mvViewer: MotionVectorViz
 
-    private var videoWriter: org.opencv.videoio.VideoWriter? = null
+    private var videoEncoder: com.example.gnssandopticalflowapp.util.VideoEncoder? = null
     private var isRecording = false
     private var recordedFilePath = ""
 
@@ -166,37 +166,58 @@ class CameraOpticalFlowFragment :
     }
 
     private fun startRecording() {
-        if (currFrame == null) return
+        if (currFrame == null) {
+            Log.e("CAMERA-RECORD", "No current frame to start recording")
+            return
+        }
         val cacheDir = requireContext().cacheDir
         val videosDir = java.io.File(cacheDir, "videos")
         if (!videosDir.exists()) videosDir.mkdirs()
         
-        val outputFile = java.io.File(videosDir, "recorded_${System.currentTimeMillis()}.avi")
+        val outputFile = java.io.File(videosDir, "recorded_${System.currentTimeMillis()}.mp4")
         recordedFilePath = outputFile.absolutePath
+        Log.d("CAMERA-RECORD", "Target path: $recordedFilePath")
         
-        val fourcc = org.opencv.videoio.VideoWriter.fourcc('M', 'J', 'P', 'G')
-        videoWriter = org.opencv.videoio.VideoWriter(recordedFilePath, fourcc, 30.0, org.opencv.core.Size(currFrame!!.cols().toDouble(), currFrame!!.rows().toDouble()), true)
+        videoEncoder = com.example.gnssandopticalflowapp.util.VideoEncoder(recordedFilePath, currFrame!!.cols(), currFrame!!.rows())
         
-        if (videoWriter?.isOpened == true) {
+        try {
+            videoEncoder?.start()
             isRecording = true
             binding.ivVideRecord.setImageResource(com.example.gnssandopticalflowapp.R.drawable.ic_stop_record_purple)
             Toast.makeText(requireContext(), "Recording started", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(requireContext(), "Failed to start recording. Codec issue?", Toast.LENGTH_SHORT).show()
+            Log.d("CAMERA-RECORD", "Encoder started")
+        } catch (e: Exception) {
+            Log.e("CAMERA-RECORD", "Failed to start encoder: ${e.message}")
+            Toast.makeText(requireContext(), "Failed to start recording", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun stopRecording() {
         isRecording = false
-        videoWriter?.release()
-        videoWriter = null
+        val file = java.io.File(recordedFilePath)
+        
+        videoEncoder?.release()
+        videoEncoder = null
+        
+        val size = if (file.exists()) file.length() else 0
+        Log.d("CAMERA-RECORD", "Stopping. Final size: $size bytes")
+
         binding.ivVideRecord.setImageResource(com.example.gnssandopticalflowapp.R.drawable.ic_start_record_purple)
         Toast.makeText(requireContext(), "Recording saved", Toast.LENGTH_SHORT).show()
         
-        if (recordedFilePath.isNotEmpty()) {
+        if (recordedFilePath.isNotEmpty() && size > 100) {
+            // Scan file to ensure it's ready for general use
+            android.media.MediaScannerConnection.scanFile(requireContext(), arrayOf(recordedFilePath), null) { _, _ -> }
+            
             com.example.gnssandopticalflowapp.util.VideoStorageUtil.addVideo(requireContext(), recordedFilePath)
-            mainViewModel.selectedVideoPath.value = recordedFilePath
-            navigateTo(com.example.gnssandopticalflowapp.R.id.videoOpticalFlowFragment)
+            
+            // Brief delay to ensure file lock is released
+            binding.root.postDelayed({
+                mainViewModel.selectedVideoPath.value = recordedFilePath
+                navigateTo(com.example.gnssandopticalflowapp.R.id.videoOpticalFlowFragment)
+            }, 500)
+        } else {
+            Log.e("CAMERA-RECORD", "Record resulted in empty or invalid file.")
         }
     }
 
@@ -258,11 +279,14 @@ class CameraOpticalFlowFragment :
     }
 
     private fun writeToVideoWriter(matFrame: Mat) {
-        if (isRecording && videoWriter?.isOpened == true) {
-            val bgrFrame = Mat()
-            org.opencv.imgproc.Imgproc.cvtColor(matFrame, bgrFrame, org.opencv.imgproc.Imgproc.COLOR_RGBA2BGR)
-            videoWriter?.write(bgrFrame)
-            bgrFrame.release()
+        if (isRecording && videoEncoder != null) {
+            // Log mean occasionally
+            if (System.currentTimeMillis() % 2000 < 100) {
+                val mean = org.opencv.core.Core.mean(matFrame)
+                Log.d("CAMERA-RECORD", "Recording frame mean: $mean")
+            }
+
+            videoEncoder?.encodeFrame(matFrame)
         }
     }
 }

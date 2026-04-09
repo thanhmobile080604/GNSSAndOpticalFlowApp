@@ -14,7 +14,7 @@ import java.util.Date
 import java.util.Locale
 
 class VideoListAdapter(
-    private val onVideoSelected: (VideoInfo) -> Unit
+    private val onVideoSelected: (VideoInfo?) -> Unit
 ) : RecyclerView.Adapter<VideoListAdapter.VideoViewHolder>() {
 
     private var videos: List<VideoInfo> = emptyList()
@@ -22,52 +22,66 @@ class VideoListAdapter(
 
     fun setData(newVideos: List<VideoInfo>) {
         videos = newVideos
+        selectedPosition = -1
         notifyDataSetChanged()
     }
 
     fun getSelectedVideo(): VideoInfo? {
-        return if (selectedPosition != -1) videos[selectedPosition] else null
+        return if (selectedPosition in videos.indices) videos[selectedPosition] else null
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VideoViewHolder {
-        val binding = ItemVideoThumbBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+        val binding = ItemVideoThumbBinding.inflate(
+            LayoutInflater.from(parent.context),
+            parent,
+            false
+        )
         return VideoViewHolder(binding)
     }
 
     override fun onBindViewHolder(holder: VideoViewHolder, position: Int) {
         val video = videos[position]
         holder.bind(video, position == selectedPosition)
-        
+
         holder.itemView.setOnClickListener {
             val previousSelected = selectedPosition
-            selectedPosition = position
-            notifyItemChanged(previousSelected)
-            notifyItemChanged(selectedPosition)
-            onVideoSelected(video)
+
+            if (selectedPosition == position) {
+                selectedPosition = -1
+            } else {
+                selectedPosition = position
+            }
+
+            if (previousSelected != -1) {
+                notifyItemChanged(previousSelected)
+            }
+            if (selectedPosition != -1) {
+                notifyItemChanged(selectedPosition)
+            }
+
+            onVideoSelected(getSelectedVideo())
         }
     }
 
     override fun getItemCount(): Int = videos.size
 
-    class VideoViewHolder(private val binding: ItemVideoThumbBinding) : RecyclerView.ViewHolder(binding.root) {
+    class VideoViewHolder(
+        private val binding: ItemVideoThumbBinding
+    ) : RecyclerView.ViewHolder(binding.root) {
+
         fun bind(video: VideoInfo, isSelected: Boolean) {
-            // Load thumbnail using Glide
             Glide.with(binding.thumbGallery.context)
                 .load(video.path)
                 .centerCrop()
                 .into(binding.thumbGallery)
 
-            // Show/hide selection overlay
             binding.blackOverlay.visibility = if (isSelected) View.VISIBLE else View.GONE
             binding.check.visibility = if (isSelected) View.VISIBLE else View.GONE
-            
-            // Format timestamp
-            val sdf = SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault())
-            val dateStr = sdf.format(Date(video.timestamp))
-            
-            // Assuming we added tvTitle to item_video_thumb.xml
-            val tvTitle = binding.root.findViewById<TextView>(R.id.tvTitle)
-            tvTitle?.text = dateStr
+
+            val simpleDateFormat = SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault())
+            val formattedDate = simpleDateFormat.format(Date(video.timestamp))
+
+            binding.root.findViewById<TextView>(R.id.tvTitle)?.text = formattedDate
         }
     }
 }

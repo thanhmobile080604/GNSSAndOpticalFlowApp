@@ -19,7 +19,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.media.MediaMetadataRetriever
+import android.util.Log
 import android.widget.TextView
+import android.widget.Toast
 import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import org.opencv.android.Utils
 import org.opencv.core.Mat
@@ -28,6 +30,9 @@ import org.opencv.imgproc.Imgproc
 import org.opencv.videoio.VideoWriter
 import java.io.File
 import java.io.FileOutputStream
+import androidx.core.graphics.drawable.toDrawable
+import org.opencv.core.Point
+import org.opencv.core.Scalar
 
 class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(FragmentHomeOpticalFlowBinding::inflate) {
     private var copyJob: Job? = null
@@ -91,27 +96,34 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         try {
             retriever.setDataSource(sourceFile.absolutePath)
         } catch (e: Exception) {
+            Log.e("VIDEO-PROCESS", "Failed to set data source: ${e.message}")
             retriever.release()
             throw e
         }
 
         val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
         val durationMs = durationStr?.toLong() ?: 0L
+        Log.d("VIDEO-PROCESS", "Duration: $durationMs ms")
         
         val firstFrame = retriever.getFrameAtTime(0)
         if (firstFrame == null) {
+            Log.e("VIDEO-PROCESS", "Failed to get first frame")
             retriever.release()
             return
         }
         
         val width = firstFrame.width
         val height = firstFrame.height
+        Log.d("VIDEO-PROCESS", "Frame size: ${width}x${height}")
         
-        val outputFile = File(sourceFile.parentFile, "processed_${System.currentTimeMillis()}.avi")
-        val fourcc = VideoWriter.fourcc('M', 'J', 'P', 'G')
-        val videoWriter = VideoWriter(outputFile.absolutePath, fourcc, 30.0, Size(width.toDouble(), height.toDouble()), true)
+        val outputFile = File(sourceFile.parentFile, "processed_${System.currentTimeMillis()}.mp4")
+        val encoder = com.example.gnssandopticalflowapp.util.VideoEncoder(outputFile.absolutePath, width, height)
         
-        if (!videoWriter.isOpened) {
+        try {
+            encoder.start()
+            Log.d("VIDEO-PROCESS", "VideoEncoder started for ${outputFile.name}")
+        } catch (e: Exception) {
+            Log.e("VIDEO-PROCESS", "Encoder failed to start: ${e.message}")
             retriever.release()
             return
         }
@@ -119,52 +131,69 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val klt = KLT(null)
         val frameDurationUs = 1000000L / 30 // 30 FPS
         var currentTimeUs = 0L
+        var framesProcessed = 0
 
         try {
             while (currentTimeUs < durationMs * 1000) {
-                if (!copyJob!!.isActive) break
+                if (copyJob?.isActive != true) break
 
-                val bitmap = retriever.getFrameAtTime(currentTimeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                if (bitmap != null) {
+                val originalBitmap = retriever.getFrameAtTime(currentTimeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                if (originalBitmap != null) {
+                    val bitmap = originalBitmap.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    
                     val rgbaMat = Mat()
                     Utils.bitmapToMat(bitmap, rgbaMat)
                     
-                    val output = klt.run(rgbaMat)
-                    val outFrame = output.of_frame ?: rgbaMat
-                    
-                    val bgrFrame = Mat()
-                    Imgproc.cvtColor(outFrame, bgrFrame, Imgproc.COLOR_RGBA2BGR)
-                    videoWriter.write(bgrFrame)
-                    
+                    if (!rgbaMat.empty()) {
+                        if (framesProcessed % 30 == 0) {
+                            val mean = org.opencv.core.Core.mean(rgbaMat)
+                            Log.d("VIDEO-PROCESS", "Frame $framesProcessed, mean: $mean")
+                        }
+
+                        val output = klt.run(rgbaMat)
+                        val outFrame = output.of_frame ?: rgbaMat
+                        
+                        encoder.encodeFrame(outFrame)
+                        framesProcessed++
+                    }
                     rgbaMat.release()
-                    bgrFrame.release()
+                    bitmap.recycle()
+                    originalBitmap.recycle()
                 }
                 
                 currentTimeUs += frameDurationUs
                 
-                // Update progress occasionally
-                if (currentTimeUs % (frameDurationUs * 10) == 0L) {
-                    val progress = (currentTimeUs / 1000).toFloat() / durationMs * 100
+                if (currentTimeUs % (frameDurationUs * 10) <= frameDurationUs) {
+                    val progress = ((currentTimeUs / 1000).toFloat() / durationMs * 100).toInt()
                     withContext(Dispatchers.Main) {
-                        loadingDialog?.findViewById<TextView>(R.id.tvLoadingMessage)?.text = "Processing: ${progress.toInt()}%"
+                        loadingDialog?.findViewById<TextView>(R.id.tvLoadingMessage)?.text = "Processing: $progress%"
                     }
                 }
             }
         } finally {
-            videoWriter.release()
+            encoder.release()
             retriever.release()
-            sourceFile.delete() // Clean up temp source
+            sourceFile.delete() 
+            Log.d("VIDEO-PROCESS", "Processing finished. Frames: $framesProcessed. File size: ${outputFile.length()} bytes")
         }
 
-        if (copyJob!!.isActive) {
+        if (copyJob?.isActive == true) {
+            // Scan file to ensure it's ready
+            android.media.MediaScannerConnection.scanFile(requireContext(), arrayOf(outputFile.absolutePath), null) { _, _ -> }
+            
             withContext(Dispatchers.Main) {
                 loadingDialog?.dismiss()
                 VideoStorageUtil.addVideo(requireContext(), outputFile.absolutePath)
+                
+                // delay slightly
+                kotlinx.coroutines.delay(500)
+                
                 mainViewModel.selectedVideoPath.value = outputFile.absolutePath
                 navigateTo(R.id.videoOpticalFlowFragment)
             }
         } else {
-            outputFile.delete() // Clean up partial if cancelled
+            Log.d("VIDEO-PROCESS", "Processing cancelled.")
+            outputFile.delete() 
         }
     }
 
@@ -176,7 +205,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 .setCancelable(false)
                 .create()
                 
-            loadingDialog?.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            loadingDialog?.window?.setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
             
             dialogView.findViewById<Button>(R.id.btnCancel).setOnClickListener {
                 copyJob?.cancel()

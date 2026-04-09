@@ -4,9 +4,11 @@ import android.graphics.SurfaceTexture
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Surface
 import android.view.TextureView
 import android.widget.SeekBar
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
@@ -39,6 +41,7 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         player = context?.let { ExoPlayer.Builder(it).build() }
+        player?.playWhenReady = true
     }
 
     override fun FragmentVideoOpticalFlowBinding.initView() {
@@ -64,6 +67,7 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
         player?.addListener(object : Player.Listener {
             @OptIn(UnstableApi::class)
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                Log.d("VIDEO-PLAYER", "Video size changed: ${videoSize.width}x${videoSize.height}")
                 checkIfFragmentAttached {
                     val aspectRatio = if (videoSize.height == 0) 1f 
                         else (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height
@@ -72,9 +76,17 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                Log.d("VIDEO-PLAYER", "Playback state changed: $playbackState")
                 if (playbackState == Player.STATE_READY) {
                     binding.videoProgress.max = player?.duration?.toInt() ?: 100
                     handler.post(updateProgressAction)
+                }
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                Log.e("VIDEO-PLAYER", "ExoPlayer Error: ${error.message}", error)
+                checkIfFragmentAttached {
+                    Toast.makeText(requireContext(), "Playback Error: ${error.message}", Toast.LENGTH_LONG).show()
                 }
             }
         })
