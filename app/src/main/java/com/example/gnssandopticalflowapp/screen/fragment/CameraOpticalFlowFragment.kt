@@ -2,10 +2,14 @@ package com.example.gnssandopticalflowapp.screen.fragment
 
 import android.Manifest
 import android.graphics.Bitmap
+import android.os.SystemClock
+import android.text.format.DateUtils.formatElapsedTime
 import android.util.Log
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.core.graphics.createBitmap
+import androidx.lifecycle.lifecycleScope
+import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentCameraOpticalFlowBinding
@@ -17,6 +21,12 @@ import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.optical_flow.classes.MotionVectorViz
 import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
 import com.example.gnssandopticalflowapp.optical_flow.inter.SensorFusion
+import com.example.gnssandopticalflowapp.util.VideoEncoder
+import com.example.gnssandopticalflowapp.util.VideoStorageUtil
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import org.opencv.android.CameraBridgeViewBase
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
@@ -37,9 +47,13 @@ class CameraOpticalFlowFragment :
     private var fuseOutput: FloatArray? = null
     private lateinit var mvViewer: MotionVectorViz
 
-    private var videoEncoder: com.example.gnssandopticalflowapp.util.VideoEncoder? = null
+    private var videoEncoder: VideoEncoder? = null
     private var isRecording = false
     private var recordedFilePath = ""
+
+    private var timerJob: Job? = null
+    private var timerStartTime: Long = 0L
+    private var elapsedBeforePause: Long = 0L
 
     override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
@@ -120,8 +134,10 @@ class CameraOpticalFlowFragment :
         ivVideRecord.setOnClickListener {
             if (isRecording) {
                 stopRecording()
+                stopTimer()
             } else {
                 startRecording()
+                startTimer()
             }
         }
 
@@ -178,12 +194,12 @@ class CameraOpticalFlowFragment :
         recordedFilePath = outputFile.absolutePath
         Log.d("CAMERA-RECORD", "Target path: $recordedFilePath")
         
-        videoEncoder = com.example.gnssandopticalflowapp.util.VideoEncoder(recordedFilePath, currFrame!!.cols(), currFrame!!.rows())
+        videoEncoder = VideoEncoder(recordedFilePath, currFrame!!.cols(), currFrame!!.rows())
         
         try {
             videoEncoder?.start()
             isRecording = true
-            binding.ivVideRecord.setImageResource(com.example.gnssandopticalflowapp.R.drawable.ic_stop_record_purple)
+            binding.ivVideRecord.setImageResource(R.drawable.ic_stop_record_purple)
             Toast.makeText(requireContext(), "Recording started", Toast.LENGTH_SHORT).show()
             Log.d("CAMERA-RECORD", "Encoder started")
         } catch (e: Exception) {
@@ -202,22 +218,56 @@ class CameraOpticalFlowFragment :
         val size = if (file.exists()) file.length() else 0
         Log.d("CAMERA-RECORD", "Stopping. Final size: $size bytes")
 
-        binding.ivVideRecord.setImageResource(com.example.gnssandopticalflowapp.R.drawable.ic_start_record_purple)
+        binding.ivVideRecord.setImageResource(R.drawable.ic_start_record_purple)
         Toast.makeText(requireContext(), "Recording saved", Toast.LENGTH_SHORT).show()
         
         if (recordedFilePath.isNotEmpty() && size > 100) {
             // Scan file to ensure it's ready for general use
             android.media.MediaScannerConnection.scanFile(requireContext(), arrayOf(recordedFilePath), null) { _, _ -> }
             
-            com.example.gnssandopticalflowapp.util.VideoStorageUtil.addVideo(requireContext(), recordedFilePath)
+            VideoStorageUtil.addVideo(requireContext(), recordedFilePath)
             
             // Brief delay to ensure file lock is released
             binding.root.postDelayed({
                 mainViewModel.selectedVideoPath.value = recordedFilePath
-                navigateTo(com.example.gnssandopticalflowapp.R.id.videoOpticalFlowFragment)
+                navigateTo(R.id.videoOpticalFlowFragment)
             }, 500)
         } else {
             Log.e("CAMERA-RECORD", "Record resulted in empty or invalid file.")
+        }
+    }
+
+    private fun startTimer() {
+        if (timerJob != null) return
+
+        timerStartTime = SystemClock.elapsedRealtime()
+
+        timerJob = lifecycleScope.launch {
+            while (isActive) {
+                val elapsedMillis = elapsedBeforePause + (SystemClock.elapsedRealtime() - timerStartTime)
+                binding.tvTimer.text = formatElapsedTime(elapsedMillis)
+                delay(1000L)
+            }
+        }
+    }
+
+    private fun stopTimer() {
+        timerJob?.cancel()
+        timerJob = null
+
+        elapsedBeforePause += SystemClock.elapsedRealtime() - timerStartTime
+        binding.tvTimer.text = formatElapsedTime(elapsedBeforePause)
+    }
+    private fun formatElapsedTime(elapsedMillis: Long): String {
+        val totalSeconds = elapsedMillis / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+
+        return if (hours > 0) {
+            String.format("%02d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format("%02d:%02d", minutes, seconds)
         }
     }
 

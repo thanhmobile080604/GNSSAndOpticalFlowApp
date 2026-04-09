@@ -26,6 +26,8 @@ class VideoEncoder(
     private var frameIndex = 0L
     private var colorFormat = -1
 
+    private var isReleased = false
+
     fun start() {
         Log.d("VideoEncoder", "Starting encoder for $width x $height")
         
@@ -51,6 +53,7 @@ class VideoEncoder(
         }
 
         mediaMuxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        isReleased = false
     }
 
     private fun selectSupportedColorFormat(mimeType: String): Int {
@@ -64,7 +67,10 @@ class VideoEncoder(
         return capabilities.colorFormats[0] // Fallback
     }
 
+    @Synchronized
     fun encodeFrame(rgbaMat: Mat) {
+        if (isReleased) return
+
         // Ensure frame size matches encoder exactly
         val preparedMat = if (rgbaMat.cols() != width || rgbaMat.rows() != height) {
             val resized = Mat()
@@ -78,26 +84,26 @@ class VideoEncoder(
         if (colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar) {
             Imgproc.cvtColor(preparedMat, yuvMat, Imgproc.COLOR_RGBA2YUV_I420)
         } else {
-            // SemiPlanar (NV12 like) - OpenCV doesn't have direct RGBA to NV12 
-            // but we can convert to I420 and then shuffle if needed, 
-            // or just use I420 and hope the decoder handles it or we manually shuffle bits.
-            // For now, let's use I420 as it's the most common "Planar" format.
             Imgproc.cvtColor(preparedMat, yuvMat, Imgproc.COLOR_RGBA2YUV_I420)
         }
         
-        val inputBufferIndex = mediaCodec?.dequeueInputBuffer(10000) ?: -1
-        if (inputBufferIndex >= 0) {
-            val inputBuffer = mediaCodec?.getInputBuffer(inputBufferIndex)
-            inputBuffer?.clear()
-            
-            val size = (yuvMat.total() * yuvMat.channels()).toInt()
-            val bytes = ByteArray(size)
-            yuvMat.get(0, 0, bytes)
-            inputBuffer?.put(bytes)
-            
-            val presentationTimeUs = frameIndex * 1000000L / 30
-            mediaCodec?.queueInputBuffer(inputBufferIndex, 0, size, presentationTimeUs, 0)
-            frameIndex++
+        try {
+            val inputBufferIndex = mediaCodec?.dequeueInputBuffer(10000) ?: -1
+            if (inputBufferIndex >= 0) {
+                val inputBuffer = mediaCodec?.getInputBuffer(inputBufferIndex)
+                inputBuffer?.clear()
+                
+                val size = (yuvMat.total() * yuvMat.channels()).toInt()
+                val bytes = ByteArray(size)
+                yuvMat.get(0, 0, bytes)
+                inputBuffer?.put(bytes)
+                
+                val presentationTimeUs = frameIndex * 1000000L / 30
+                mediaCodec?.queueInputBuffer(inputBufferIndex, 0, size, presentationTimeUs, 0)
+                frameIndex++
+            }
+        } catch (e: Exception) {
+            Log.e("VideoEncoder", "Error in encodeFrame: ${e.message}")
         }
         
         if (preparedMat != rgbaMat) preparedMat.release()
@@ -106,60 +112,64 @@ class VideoEncoder(
     }
 
     private fun drainEncoder(endOfStream: Boolean) {
-        if (endOfStream) {
-            // Properly signal EOS for ByteBuffer input - loop until successful
-            var eosQueued = false
-            var attempts = 0
-            while (!eosQueued && attempts < 10) {
-                val inputBufferIndex = mediaCodec?.dequeueInputBuffer(10000) ?: -1
-                if (inputBufferIndex >= 0) {
-                    mediaCodec?.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                    eosQueued = true
-                    Log.d("VideoEncoder", "EOS signal queued")
-                } else {
-                    attempts++
-                    Thread.sleep(10) // Brief wait
-                }
-            }
-        }
-
-        while (true) {
-            val outputBufferIndex = mediaCodec?.dequeueOutputBuffer(bufferInfo, 10000) ?: -1
-            if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                if (!endOfStream) break
-            } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                if (isMuxerStarted) throw RuntimeException("Format changed twice")
-                val newFormat = mediaCodec?.outputFormat
-                trackIndex = mediaMuxer?.addTrack(newFormat!!) ?: -1
-                mediaMuxer?.start()
-                isMuxerStarted = true
-            } else if (outputBufferIndex >= 0) {
-                val outputBuffer = mediaCodec?.getOutputBuffer(outputBufferIndex)
-                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-                    bufferInfo.size = 0
-                }
-
-                if (bufferInfo.size != 0) {
-                    if (!isMuxerStarted) {
-                        // This shouldn't happen as INFO_OUTPUT_FORMAT_CHANGED comes first
-                        Log.w("VideoEncoder", "Muxer not started, ignoring frame")
+        try {
+            if (endOfStream) {
+                // Properly signal EOS for ByteBuffer input - loop until successful
+                var eosQueued = false
+                var attempts = 0
+                while (!eosQueued && attempts < 10) {
+                    val inputBufferIndex = mediaCodec?.dequeueInputBuffer(10000) ?: -1
+                    if (inputBufferIndex >= 0) {
+                        mediaCodec?.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        eosQueued = true
+                        Log.d("VideoEncoder", "EOS signal queued")
                     } else {
-                        outputBuffer?.position(bufferInfo.offset)
-                        outputBuffer?.limit(bufferInfo.offset + bufferInfo.size)
-                        mediaMuxer?.writeSampleData(trackIndex, outputBuffer!!, bufferInfo)
+                        attempts++
+                        Thread.sleep(10) // Brief wait
                     }
                 }
+            }
 
-                mediaCodec?.releaseOutputBuffer(outputBufferIndex, false)
-                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                    Log.d("VideoEncoder", "End of stream reached")
-                    break
+            while (true) {
+                val outputBufferIndex = mediaCodec?.dequeueOutputBuffer(bufferInfo, 10000) ?: -1
+                if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    if (!endOfStream) break
+                } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    if (isMuxerStarted) break
+                    val newFormat = mediaCodec?.outputFormat
+                    trackIndex = mediaMuxer?.addTrack(newFormat!!) ?: -1
+                    mediaMuxer?.start()
+                    isMuxerStarted = true
+                } else if (outputBufferIndex >= 0) {
+                    val outputBuffer = mediaCodec?.getOutputBuffer(outputBufferIndex)
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                        bufferInfo.size = 0
+                    }
+
+                    if (bufferInfo.size != 0) {
+                        if (isMuxerStarted) {
+                            outputBuffer?.position(bufferInfo.offset)
+                            outputBuffer?.limit(bufferInfo.offset + bufferInfo.size)
+                            mediaMuxer?.writeSampleData(trackIndex, outputBuffer!!, bufferInfo)
+                        }
+                    }
+
+                    mediaCodec?.releaseOutputBuffer(outputBufferIndex, false)
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        Log.d("VideoEncoder", "End of stream reached")
+                        break
+                    }
                 }
             }
+        } catch (e: Exception) {
+            Log.e("VideoEncoder", "Error in drainEncoder: ${e.message}")
         }
     }
 
+    @Synchronized
     fun release() {
+        if (isReleased) return
+        isReleased = true
         try {
             Log.d("VideoEncoder", "Releasing encoder...")
             drainEncoder(true)
