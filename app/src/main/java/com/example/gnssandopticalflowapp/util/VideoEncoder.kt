@@ -16,7 +16,7 @@ class VideoEncoder(
     // Aligned dimensions (even numbers)
     private val width = if (originalWidth % 2 == 0) originalWidth else originalWidth - 1
     private val height = if (originalHeight % 2 == 0) originalHeight else originalHeight - 1
-    
+
     private var mediaCodec: MediaCodec? = null
     private var mediaMuxer: MediaMuxer? = null
     private var trackIndex = -1
@@ -29,13 +29,13 @@ class VideoEncoder(
 
     fun start() {
         Log.d("VideoEncoder", "Starting encoder for $width x $height")
-        
+
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height)
-        
+
         // Find supported color format
         colorFormat = selectSupportedColorFormat(MediaFormat.MIMETYPE_VIDEO_AVC)
         Log.d("VideoEncoder", "Using color format: $colorFormat")
-        
+
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
         format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000)
         format.setInteger(MediaFormat.KEY_FRAME_RATE, 30)
@@ -79,35 +79,60 @@ class VideoEncoder(
             rgbaMat
         }
 
-        val yuvMat = Mat()
-        if (colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar) {
-            Imgproc.cvtColor(preparedMat, yuvMat, Imgproc.COLOR_RGBA2YUV_I420)
-        } else {
-            Imgproc.cvtColor(preparedMat, yuvMat, Imgproc.COLOR_RGBA2YUV_I420)
-        }
-        
+        // Convert RGBA to the required YUV format
+        val yuvBytes = rgbaToYuv(preparedMat, colorFormat)
+
         try {
             val inputBufferIndex = mediaCodec?.dequeueInputBuffer(10000) ?: -1
             if (inputBufferIndex >= 0) {
                 val inputBuffer = mediaCodec?.getInputBuffer(inputBufferIndex)
                 inputBuffer?.clear()
-                
-                val size = (yuvMat.total() * yuvMat.channels()).toInt()
-                val bytes = ByteArray(size)
-                yuvMat.get(0, 0, bytes)
-                inputBuffer?.put(bytes)
-                
+
+                inputBuffer?.put(yuvBytes)
+
                 val presentationTimeUs = frameIndex * 1000000L / 30
-                mediaCodec?.queueInputBuffer(inputBufferIndex, 0, size, presentationTimeUs, 0)
+                mediaCodec?.queueInputBuffer(inputBufferIndex, 0, yuvBytes.size, presentationTimeUs, 0)
                 frameIndex++
             }
         } catch (e: Exception) {
             Log.e("VideoEncoder", "Error in encodeFrame: ${e.message}")
         }
-        
+
         if (preparedMat != rgbaMat) preparedMat.release()
-        yuvMat.release()
         drainEncoder(false)
+    }
+
+    private fun rgbaToYuv(rgbaMat: Mat, format: Int): ByteArray {
+        val i420Mat = Mat()
+        // OpenCV's COLOR_RGBA2YUV_I420 produces YUV Planar (I420)
+        Imgproc.cvtColor(rgbaMat, i420Mat, Imgproc.COLOR_RGBA2YUV_I420)
+
+        val size = (i420Mat.total() * i420Mat.channels()).toInt()
+        val i420Bytes = ByteArray(size)
+        i420Mat.get(0, 0, i420Bytes)
+        i420Mat.release()
+
+        return if (format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) {
+            // Convert I420 (Planar: YYYY... UU... VV...) to NV12 (Semi-Planar: YYYY... UVUV...)
+            val ySize = width * height
+            val nv12Bytes = ByteArray(ySize * 3 / 2)
+
+            // Y plane is identical
+            System.arraycopy(i420Bytes, 0, nv12Bytes, 0, ySize)
+
+            // Interleave U and V planes
+            val uOffset = ySize
+            val vOffset = ySize + (ySize / 4)
+            var nvIndex = ySize
+            for (i in 0 until ySize / 4) {
+                nv12Bytes[nvIndex++] = i420Bytes[uOffset + i] // U
+                nv12Bytes[nvIndex++] = i420Bytes[vOffset + i] // V
+            }
+            nv12Bytes
+        } else {
+            // For COLOR_FormatYUV420Planar or others, assume I420 Planar for now
+            i420Bytes
+        }
     }
 
     private fun drainEncoder(endOfStream: Boolean) {
