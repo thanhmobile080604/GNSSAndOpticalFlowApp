@@ -4,7 +4,7 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.fragment.app.Fragment
 import androidx.viewpager2.adapter.FragmentStateAdapter
-import com.example.gnssandopticalflowapp.screen.fragment.GnssViewerFragment
+import com.example.gnssandopticalflowapp.screen.fragment.GNSSViewerFragment
 import com.example.gnssandopticalflowapp.screen.fragment.HomeOpticalFlowFragment
 
 class HomePagerAdapter(fragment: Fragment) : FragmentStateAdapter(fragment) {
@@ -14,7 +14,7 @@ class HomePagerAdapter(fragment: Fragment) : FragmentStateAdapter(fragment) {
     @RequiresApi(Build.VERSION_CODES.R)
     override fun createFragment(position: Int): Fragment {
         return when (position) {
-            0 -> GnssViewerFragment()
+            0 -> GNSSViewerFragment()
             else -> HomeOpticalFlowFragment()
         }
     }

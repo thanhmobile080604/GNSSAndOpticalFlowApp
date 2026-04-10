@@ -142,7 +142,7 @@ abstract class BaseFragment<T : ViewBinding>(private val bindingInflater: (Layou
 
     protected fun dismissLoadingDialog() {
         if (loadingDialog?.isAdded == true) {
-            loadingDialog?.dismiss()
+            loadingDialog?.dismissAllowingStateLoss()
         }
         loadingDialog = null
     }

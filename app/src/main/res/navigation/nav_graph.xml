@@ -26,7 +26,7 @@
         tools:layout="@layout/fragment_video_optical_flow" />
     <fragment
         android:id="@+id/gnssViewerFragment2"
-        android:name="com.example.gnssandopticalflowapp.screen.fragment.GnssViewerFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.GNSSViewerFragment"
         android:label="GnssViewerFragment"
         tools:ignore="NewApi" />
     <fragment

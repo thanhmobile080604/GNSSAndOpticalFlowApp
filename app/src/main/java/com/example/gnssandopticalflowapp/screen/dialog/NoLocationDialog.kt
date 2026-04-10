@@ -2,6 +2,7 @@ package com.example.gnssandopticalflowapp.screen.dialog
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.fragment.app.FragmentActivity
 import com.example.gnssandopticalflowapp.base.BaseDialogFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.DialogNoLocationBinding
@@ -36,6 +37,25 @@ class NoLocationDialog :
             runCatching {
                 startActivity(fallbackIntent)
                 dismissAllowingStateLoss()
+            }
+        }
+    }
+
+    companion object {
+        private const val TAG = "NoLocationDialog"
+
+        fun show(activity: FragmentActivity) {
+            val fm = activity.supportFragmentManager
+            if (fm.findFragmentByTag(TAG) == null) {
+                NoLocationDialog().show(fm, TAG)
+            }
+        }
+
+        fun dismiss(activity: FragmentActivity) {
+            val fm = activity.supportFragmentManager
+            val fragment = fm.findFragmentByTag(TAG)
+            if (fragment is NoLocationDialog) {
+                fragment.dismissAllowingStateLoss()
             }
         }
     }

@@ -9,8 +9,15 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.gnssandopticalflowapp.base.AndroidConnectivityObserver
+import com.example.gnssandopticalflowapp.base.AndroidLocationObserver
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
+import com.example.gnssandopticalflowapp.screen.dialog.NoGPSDialog
+import com.example.gnssandopticalflowapp.screen.dialog.NoLocationDialog
+import kotlinx.coroutines.launch
 import org.opencv.android.OpenCVLoader
 
 class MainActivity : AppCompatActivity() {
@@ -29,6 +36,11 @@ class MainActivity : AppCompatActivity() {
     private val network: AndroidConnectivityObserver by lazy {
         AndroidConnectivityObserver(this)
     }
+
+    private val locationObserver: AndroidLocationObserver by lazy {
+        AndroidLocationObserver(applicationContext)
+    }
+
     private val viewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,5 +61,29 @@ class MainActivity : AppCompatActivity() {
         StrictMode.setThreadPolicy(
             StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build()
         )
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    locationObserver.isLocationPermitted.collect { isPermitted ->
+                        if (isPermitted) {
+                            NoLocationDialog.dismiss(this@MainActivity)
+                        } else {
+                            NoLocationDialog.show(this@MainActivity)
+                        }
+                    }
+                }
+
+                launch {
+                    locationObserver.isGpsEnabled.collect { isGpsEnabled ->
+                        if (isGpsEnabled) {
+                            NoGPSDialog.dismiss(this@MainActivity)
+                        } else {
+                            NoGPSDialog.show(this@MainActivity)
+                        }
+                    }
+                }
+            }
+        }
     }
 }

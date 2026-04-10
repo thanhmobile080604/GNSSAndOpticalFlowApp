@@ -1,0 +1,89 @@
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:animateLayoutChanges="true"
+    android:background="@color/black_60">
+
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/bg_parent"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:src="@color/white"
+        app:round="40dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintDimensionRatio="344:266"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintWidth_percent="0.84" />
+
+    <ImageView
+        android:id="@+id/ivThumb"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="14dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_map"
+        app:layout_constraintDimensionRatio="1"
+        app:layout_constraintEnd_toEndOf="@+id/bg_parent"
+        app:layout_constraintStart_toStartOf="@+id/bg_parent"
+        app:layout_constraintTop_toTopOf="@id/bg_parent"
+        app:layout_constraintWidth_percent="0.2" />
+
+    <TextView
+        android:id="@+id/tvDeleteItem"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:fontFamily="@font/inter_bold"
+        android:text="No GPS Permission"
+        android:textColor="@color/black"
+        android:textSize="20sp"
+        app:layout_constraintEnd_toEndOf="@id/bg_parent"
+        app:layout_constraintStart_toStartOf="@id/bg_parent"
+        app:layout_constraintTop_toBottomOf="@id/ivThumb" />
+
+    <TextView
+        android:id="@+id/tvAreYouSure"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="28dp"
+        android:layout_marginTop="12dp"
+        android:fontFamily="@font/inter_medium"
+        android:gravity="center"
+        android:text="Please grant gps permission to use app"
+        android:textColor="#33393F"
+        android:textSize="16sp"
+        app:layout_constraintEnd_toEndOf="@id/bg_parent"
+        app:layout_constraintStart_toStartOf="@id/bg_parent"
+        app:layout_constraintTop_toBottomOf="@id/tvDeleteItem" />
+
+
+    <TextView
+        android:id="@+id/tvOpenSetting"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="22dp"
+        android:background="@drawable/bg_black_purple_gradient"
+        android:fontFamily="@font/inter_bold"
+        android:gravity="center"
+        android:text="Open Setting"
+        android:textColor="@color/white"
+        android:paddingHorizontal="10dp"
+        android:singleLine="true"
+        android:maxLines="1"
+        android:ellipsize="marquee"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginBottom="16dp"
+        android:marqueeRepeatLimit="marquee_forever"
+        android:textSize="16sp"
+        app:layout_constraintBottom_toBottomOf="@id/bg_parent"
+        app:layout_constraintEnd_toEndOf="@id/bg_parent"
+        app:layout_constraintHorizontal_chainStyle="packed"
+        app:layout_constraintStart_toStartOf="@id/bg_parent"
+        app:layout_constraintTop_toBottomOf="@id/tvAreYouSure" />
+
+
+</androidx.constraintlayout.widget.ConstraintLayout>

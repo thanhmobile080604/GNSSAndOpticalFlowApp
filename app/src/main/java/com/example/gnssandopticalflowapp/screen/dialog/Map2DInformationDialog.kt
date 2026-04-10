@@ -1,12 +1,13 @@
 package com.example.gnssandopticalflowapp.screen.dialog
 
+import android.annotation.SuppressLint
 import android.location.Location
 import android.os.Bundle
 import androidx.fragment.app.FragmentManager
 import com.example.gnssandopticalflowapp.base.BaseDialogFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.DialogMap2dInformationBinding
-
+@SuppressLint("SetTextI18n")
 class Map2DInformationDialog() :
     BaseDialogFragment<DialogMap2dInformationBinding>(DialogMap2dInformationBinding::inflate) {
 
@@ -24,11 +25,11 @@ class Map2DInformationDialog() :
 
     override fun DialogMap2dInformationBinding.initListener() {
         ivCLose.setSingleClick {
-            dismiss()
+            dismissAllowingStateLoss()
         }
 
         root.setSingleClick {
-            dismiss()
+            dismissAllowingStateLoss()
         }
 
         bgParent.setSingleClick {

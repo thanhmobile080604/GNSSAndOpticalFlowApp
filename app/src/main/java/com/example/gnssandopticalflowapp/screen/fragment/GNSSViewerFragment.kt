@@ -42,7 +42,6 @@ import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadius
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog
 import com.example.gnssandopticalflowapp.screen.dialog.Map3DInformationDialog
-import com.example.gnssandopticalflowapp.screen.dialog.NoLocationDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -61,7 +60,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 @RequiresApi(Build.VERSION_CODES.R)
-class GnssViewerFragment :
+class GNSSViewerFragment :
     BaseFragment<FragmentGnssViewerBinding>(FragmentGnssViewerBinding::inflate) {
     private var rendererSet = false
     private lateinit var earthRenderer: EarthRenderer
@@ -79,8 +78,6 @@ class GnssViewerFragment :
         val granted = permissions.entries.all { it.value }
         if (granted) {
             setupLocationAndMap()
-        } else {
-            showNoLocationDialog()
         }
     }
 
@@ -95,11 +92,7 @@ class GnssViewerFragment :
         }
 
         override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {
-            if (provider == LocationManager.GPS_PROVIDER) {
-                checkGpsStatus()
-            }
-        }
+        override fun onProviderDisabled(provider: String) {}
     }
 
     private fun hasLocationPermission(): Boolean {
@@ -577,26 +570,6 @@ class GnssViewerFragment :
             }
         }
     }
-
-    private fun checkGpsStatus() {
-        if (!hasLocationPermission()) {
-            showNoLocationDialog()
-            return
-        }
-        if (::locationManager.isInitialized) {
-            val isGpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
-            if (!isGpsEnabled) {
-                showNoLocationDialog()
-            }
-        }
-    }
-
-    private fun showNoLocationDialog() {
-        if (childFragmentManager.findFragmentByTag("NoLocationDialog") == null) {
-            NoLocationDialog().show(childFragmentManager, "NoLocationDialog")
-        }
-    }
-
     private fun initOpenGLES() {
         val activityManager =
             safeContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -627,7 +600,6 @@ class GnssViewerFragment :
         if (hasLocationPermission()) {
             startLocationUpdates()
         }
-        checkGpsStatus()
         startRealTimeTicker()
     }
 

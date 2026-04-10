@@ -1,11 +1,11 @@
 package com.example.gnssandopticalflowapp.screen.dialog
 
+import android.annotation.SuppressLint
 import android.location.GnssStatus
 import android.os.Bundle
 import androidx.fragment.app.FragmentManager
 import com.example.gnssandopticalflowapp.base.BaseDialogFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
-import com.example.gnssandopticalflowapp.databinding.DialogMap2dInformationBinding
 import com.example.gnssandopticalflowapp.databinding.DialogMap3dInformationBinding
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import java.util.Locale
@@ -30,6 +30,7 @@ class Map3DInformationDialog :
         }
     }
 
+    @SuppressLint("SetTextI18n")
     private fun DialogMap3dInformationBinding.bindSatelliteInformation(
         satellite: SatelliteInfo,
         totalSats: Int
@@ -79,11 +80,11 @@ class Map3DInformationDialog :
 
     override fun DialogMap3dInformationBinding.initListener() {
         ivCLose.setSingleClick {
-            dismiss()
+            dismissAllowingStateLoss()
         }
 
         root.setSingleClick {
-            dismiss()
+            dismissAllowingStateLoss()
         }
 
         bgParent.setSingleClick {
