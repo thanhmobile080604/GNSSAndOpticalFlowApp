@@ -22,7 +22,6 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.content.res.AppCompatResources.getDrawable
 import androidx.core.app.ActivityCompat
 import androidx.core.graphics.createBitmap
@@ -38,6 +37,8 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
 import com.example.gnssandopticalflowapp.gnss.EarthRenderer
+import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePosition
+import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadiusAndSpeed
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog
 import com.example.gnssandopticalflowapp.screen.dialog.Map3DInformationDialog
@@ -158,15 +159,14 @@ class GnssViewerFragment :
                     var alt = 0.0
                     var spd = 0.0
 
-                    val (orbitRadius, orbitSpeed) = com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadiusAndSpeed(
+                    val (orbitRadius, orbitSpeed) = getOrbitRadiusAndSpeed(
                         constellation,
                         svid
                     )
                     spd = orbitSpeed
 
                     currentLocation?.let { loc ->
-                        val pos =
-                            com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePosition(
+                        val pos = calculateSatellitePosition(
                                 observerLat = loc.latitude,
                                 observerLon = loc.longitude,
                                 azimuthDegrees = azimuthDegrees,

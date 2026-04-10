@@ -1,7 +1,11 @@
 package com.example.gnssandopticalflowapp.gnss
 
 import android.location.GnssStatus
-import kotlin.math.*
+import com.example.gnssandopticalflowapp.model.SatellitePositionResult
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 object SatelliteCalculator {
     private const val EARTH_RADIUS_M = 6378137.0
@@ -104,12 +108,3 @@ object SatelliteCalculator {
         )
     }
 }
-
-data class SatellitePositionResult(
-    val latitude: Double,
-    val longitude: Double,
-    val altitude: Double,
-    val ecefX: Double,
-    val ecefY: Double,
-    val ecefZ: Double
-)
