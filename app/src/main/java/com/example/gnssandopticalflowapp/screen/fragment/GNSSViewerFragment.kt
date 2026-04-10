@@ -42,7 +42,14 @@ import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadius
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog
 import com.example.gnssandopticalflowapp.screen.dialog.Map3DInformationDialog
+import com.google.android.gms.common.api.ResolvableApiException
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.LocationSettingsRequest
+import com.google.android.gms.location.Priority
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
@@ -71,15 +78,6 @@ class GNSSViewerFragment :
     private lateinit var locationManager: LocationManager
     private var currentLocation: Location? = null
     private var userMarker: Marker? = null
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val granted = permissions.entries.all { it.value }
-        if (granted) {
-            setupLocationAndMap()
-        }
-    }
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -208,11 +206,63 @@ class GNSSViewerFragment :
 
         initOpenGLES()
         applyVisibilityState() // Restore UI state from is3DMode
+        startResolutionSequence()
+    }
+
+    private val gpsResolutionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { _ ->
+        // After GPS resolution (Success or Cancel), proceed to Step 2: Permissions
         checkPermissionsAndSetup()
+    }
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        // Step 2 Finished: Close resolve state and let MainActivity handle any missing items
+        mainViewModel.isResolvingDeviceSettings.value = false
+        setupLocationAndMap()
+    }
+
+    private fun startResolutionSequence() {
+        mainViewModel.isResolvingDeviceSettings.value = true
+        requestGpsResolution()
+    }
+
+    private fun requestGpsResolution() {
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000).build()
+
+        val builder = LocationSettingsRequest.Builder()
+            .addLocationRequest(locationRequest)
+            .setAlwaysShow(true)
+
+        val client = LocationServices.getSettingsClient(requireActivity())
+        val task = client.checkLocationSettings(builder.build())
+
+        task.addOnSuccessListener {
+            // GPS already OK, proceed to Permissions
+            checkPermissionsAndSetup()
+        }
+
+        task.addOnFailureListener { exception ->
+            if (exception is ResolvableApiException) {
+                runCatching {
+                    val intentSenderRequest =
+                        androidx.activity.result.IntentSenderRequest.Builder(exception.resolution.intentSender)
+                            .build()
+                    gpsResolutionLauncher.launch(intentSenderRequest)
+                }
+            } else {
+                // If not resolvable, just proceed to permissions
+                checkPermissionsAndSetup()
+            }
+        }
     }
 
     private fun checkPermissionsAndSetup() {
         if (hasLocationPermission()) {
+            // Both GPS and Permissions done
+            mainViewModel.isResolvingDeviceSettings.value = false
             setupLocationManager()
             startLocationUpdates()
         } else {
@@ -613,7 +663,7 @@ class GNSSViewerFragment :
                     if (age < 5000) loc.time else System.currentTimeMillis()
                 } ?: System.currentTimeMillis()
                 
-                mainViewModel.currentTime.postValue(sdf.format(Date(displayTime)))
+                mainViewModel.currentTime.value = sdf.format(Date(displayTime))
                 delay(1000)
             }
         }

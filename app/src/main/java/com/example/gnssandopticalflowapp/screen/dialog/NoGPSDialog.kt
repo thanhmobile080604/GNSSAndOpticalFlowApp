@@ -18,14 +18,6 @@ class NoGPSDialog :
         tvOpenSetting.setSingleClick {
             openGpsSetting()
         }
-
-        root.setSingleClick {
-            dismissAllowingStateLoss()
-        }
-
-        bgParent.setSingleClick {
-            // chặn click xuyên xuống dưới, không làm gì
-        }
     }
 
     override fun initObserver() = Unit

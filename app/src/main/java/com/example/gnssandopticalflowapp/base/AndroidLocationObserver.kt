@@ -31,6 +31,14 @@ class AndroidLocationObserver(
         gpsEnabledState.value = checkGpsEnabled()
     }
 
+    fun getCurrentPermissionState(): Boolean {
+        return locationPermissionState.value
+    }
+
+    fun getCurrentGpsState(): Boolean {
+        return gpsEnabledState.value
+    }
+
     private fun checkLocationPermission(): Boolean {
         val fineLocationGranted = ContextCompat.checkSelfPermission(
             context,

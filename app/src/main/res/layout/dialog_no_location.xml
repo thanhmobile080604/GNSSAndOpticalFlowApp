@@ -70,6 +70,8 @@
         android:fontFamily="@font/inter_bold"
         android:gravity="center"
         android:text="Open Setting"
+        android:focusable="true"
+        android:clickable="true"
         android:textColor="@color/white"
         android:paddingHorizontal="10dp"
         android:singleLine="true"

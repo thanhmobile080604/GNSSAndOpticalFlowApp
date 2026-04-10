@@ -64,22 +64,58 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Collect permissions status
                 launch {
                     locationObserver.isLocationPermitted.collect { isPermitted ->
-                        if (isPermitted) {
-                            NoLocationDialog.dismiss(this@MainActivity)
-                        } else {
-                            NoLocationDialog.show(this@MainActivity)
+                        if (!viewModel.isResolvingDeviceSettings.value) {
+                            if (isPermitted) {
+                                NoLocationDialog.dismiss(this@MainActivity)
+                            } else {
+                                NoLocationDialog.show(this@MainActivity)
+                            }
                         }
                     }
                 }
 
+                // Collect GPS status
                 launch {
                     locationObserver.isGpsEnabled.collect { isGpsEnabled ->
-                        if (isGpsEnabled) {
-                            NoGPSDialog.dismiss(this@MainActivity)
-                        } else {
-                            NoGPSDialog.show(this@MainActivity)
+                        if (!viewModel.isResolvingDeviceSettings.value) {
+                            if (isGpsEnabled) {
+                                NoGPSDialog.dismiss(this@MainActivity)
+                            } else {
+                                NoGPSDialog.show(this@MainActivity)
+                            }
+                        }
+                    }
+                }
+
+                // Monitor suppression flag cleanup
+                launch {
+                    viewModel.isResolvingDeviceSettings.collect { isResolving ->
+                        if (!isResolving) {
+                            // When resolution ends, force a check of current states
+                            locationObserver.refreshPermissionState()
+                            locationObserver.refreshGpsState()
+                            
+                            // Use a small delay to ensure states are updated
+                            kotlinx.coroutines.delay(100)
+                            
+                            // Check current states using the new helper methods
+                            val isPermitted = locationObserver.getCurrentPermissionState()
+                            val isGpsOn = locationObserver.getCurrentGpsState()
+                            
+                            if (isPermitted) {
+                                NoLocationDialog.dismiss(this@MainActivity)
+                            } else {
+                                NoLocationDialog.show(this@MainActivity)
+                            }
+
+                            if (isGpsOn) {
+                                NoGPSDialog.dismiss(this@MainActivity)
+                            } else {
+                                NoGPSDialog.show(this@MainActivity)
+                            }
                         }
                     }
                 }
