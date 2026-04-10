@@ -9,14 +9,9 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import com.example.gnssandopticalflowapp.base.AndroidConnectivityObserver
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
-import kotlinx.coroutines.launch
 import org.opencv.android.OpenCVLoader
-import kotlin.getValue
 
 class MainActivity : AppCompatActivity() {
 

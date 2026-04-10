@@ -10,9 +10,11 @@ import android.view.ViewGroup
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.IdRes
 import androidx.fragment.app.DialogFragment
+import androidx.fragment.app.activityViewModels
 import androidx.navigation.NavOptions
 import androidx.navigation.fragment.findNavController
 import androidx.viewbinding.ViewBinding
+import com.example.gnssandopticalflowapp.MainViewModel
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.common.checkIfFragmentAttached
 
@@ -22,6 +24,7 @@ abstract class BaseDialogFragment<DialogBinding : ViewBinding>(private val bindi
 
     protected lateinit var binding: DialogBinding
     protected val navController by lazy { findNavController() }
+    protected val mainViewModel by activityViewModels<MainViewModel>()
     protected open val isFullscreen: Boolean = true
 
     protected open val backPressedCallback = object : OnBackPressedCallback(true) {

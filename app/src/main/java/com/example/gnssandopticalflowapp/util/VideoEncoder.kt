@@ -7,7 +7,6 @@ import android.media.MediaMuxer
 import android.util.Log
 import org.opencv.core.Mat
 import org.opencv.imgproc.Imgproc
-import java.nio.ByteBuffer
 
 class VideoEncoder(
     private val outputPath: String,

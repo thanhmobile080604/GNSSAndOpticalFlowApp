@@ -27,8 +27,10 @@ import androidx.appcompat.content.res.AppCompatResources.getDrawable
 import androidx.core.app.ActivityCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toDrawable
+import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.checkIfFragmentAttached
 import com.example.gnssandopticalflowapp.common.dp
 import com.example.gnssandopticalflowapp.common.hide
 import com.example.gnssandopticalflowapp.common.safeContext
@@ -37,7 +39,12 @@ import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
 import com.example.gnssandopticalflowapp.gnss.EarthRenderer
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
+import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog
+import com.example.gnssandopticalflowapp.screen.dialog.Map3DInformationDialog
 import com.example.gnssandopticalflowapp.screen.dialog.NoLocationDialog
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
@@ -81,8 +88,11 @@ class GnssViewerFragment :
             currentLocation = location
             updateMapLocation()
         }
+
         @Deprecated("Deprecated in Java")
-        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
+        }
+
         override fun onProviderEnabled(provider: String) {}
         override fun onProviderDisabled(provider: String) {
             if (provider == LocationManager.GPS_PROVIDER) {
@@ -96,7 +106,12 @@ class GnssViewerFragment :
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
-        return permissions.all { ActivityCompat.checkSelfPermission(safeContext(), it) == PackageManager.PERMISSION_GRANTED }
+        return permissions.all {
+            ActivityCompat.checkSelfPermission(
+                safeContext(),
+                it
+            ) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     @SuppressLint("NewApi")
@@ -119,53 +134,65 @@ class GnssViewerFragment :
         override fun onSatelliteStatusChanged(status: GnssStatus) {
             val satelliteCount = status.satelliteCount
             Log.d("GNSS_STATUS", "Satellite status changed. Found $satelliteCount satellites.")
-            
+
             if (rendererSet) {
                 val satellites = mutableListOf<SatelliteInfo>()
                 for (i in 0 until satelliteCount) {
-                    val freq = if (status.hasCarrierFrequencyHz(i)) status.getCarrierFrequencyHz(i) else 0f
+                    val freq =
+                        if (status.hasCarrierFrequencyHz(i)) status.getCarrierFrequencyHz(i) else 0f
                     val svid = status.getSvid(i)
                     val constellation = status.getConstellationType(i)
-                    
-                    Log.v("GNSS_SAT", "Sat index $i: SVID=$svid, Constellation=$constellation, CN0=${status.getCn0DbHz(i)}, UsedInFix=${status.usedInFix(i)}")
-                    
+
+                    Log.v(
+                        "GNSS_SAT",
+                        "Sat index $i: SVID=$svid, Constellation=$constellation, CN0=${
+                            status.getCn0DbHz(i)
+                        }, UsedInFix=${status.usedInFix(i)}"
+                    )
+
                     val elevationDegrees = status.getElevationDegrees(i)
                     val azimuthDegrees = status.getAzimuthDegrees(i)
-                    
+
                     var lat = 0.0
                     var lon = 0.0
                     var alt = 0.0
                     var spd = 0.0
-                    
-                    val (orbitRadius, orbitSpeed) = com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadiusAndSpeed(constellation, svid)
+
+                    val (orbitRadius, orbitSpeed) = com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadiusAndSpeed(
+                        constellation,
+                        svid
+                    )
                     spd = orbitSpeed
-                    
+
                     currentLocation?.let { loc ->
-                        val pos = com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePosition(
-                            observerLat = loc.latitude,
-                            observerLon = loc.longitude,
-                            azimuthDegrees = azimuthDegrees,
-                            elevationDegrees = elevationDegrees,
-                            orbitRadius = orbitRadius
-                        )
+                        val pos =
+                            com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePosition(
+                                observerLat = loc.latitude,
+                                observerLon = loc.longitude,
+                                azimuthDegrees = azimuthDegrees,
+                                elevationDegrees = elevationDegrees,
+                                orbitRadius = orbitRadius
+                            )
                         lat = pos.latitude
                         lon = pos.longitude
                         alt = pos.altitude
                     }
-                    
-                    satellites.add(SatelliteInfo(
-                        svid = svid,
-                        constellationType = constellation,
-                        elevationDegrees = elevationDegrees,
-                        azimuthDegrees = azimuthDegrees,
-                        cn0DbHz = status.getCn0DbHz(i),
-                        usedInFix = status.usedInFix(i),
-                        carrierFrequencyHz = freq,
-                        latitude = lat,
-                        longitude = lon,
-                        altitude = alt,
-                        speed = spd
-                    ))
+
+                    satellites.add(
+                        SatelliteInfo(
+                            svid = svid,
+                            constellationType = constellation,
+                            elevationDegrees = elevationDegrees,
+                            azimuthDegrees = azimuthDegrees,
+                            cn0DbHz = status.getCn0DbHz(i),
+                            usedInFix = status.usedInFix(i),
+                            carrierFrequencyHz = freq,
+                            latitude = lat,
+                            longitude = lon,
+                            altitude = alt,
+                            speed = spd
+                        )
+                    )
                 }
                 earthRenderer.updateSatellites(satellites)
             }
@@ -173,7 +200,12 @@ class GnssViewerFragment :
     }
 
     override fun FragmentGnssViewerBinding.initView() {
-        Configuration.getInstance().load(requireActivity().applicationContext, safeContext().getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+        val ctx = safeContext()
+        Configuration.getInstance().userAgentValue = ctx.packageName
+        Configuration.getInstance().load(
+            requireActivity().applicationContext,
+            ctx.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
+        )
 
         binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
         binding.mapView.setMultiTouchControls(true)
@@ -201,7 +233,8 @@ class GnssViewerFragment :
 
     private fun setupLocationManager() {
         if (!::locationManager.isInitialized) {
-            locationManager = safeContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            locationManager =
+                safeContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
         }
     }
 
@@ -213,8 +246,18 @@ class GnssViewerFragment :
         Log.d("LOCATION", "Starting location and GNSS updates...")
 
         // Request Location
-        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, locationListener)
-        locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1000L, 1f, locationListener)
+        locationManager.requestLocationUpdates(
+            LocationManager.GPS_PROVIDER,
+            1000L,
+            1f,
+            locationListener
+        )
+        locationManager.requestLocationUpdates(
+            LocationManager.NETWORK_PROVIDER,
+            1000L,
+            1f,
+            locationListener
+        )
 
         // Request GNSS Status
         locationManager.registerGnssStatusCallback(safeContext().mainExecutor, gnssStatusCallback)
@@ -250,6 +293,12 @@ class GnssViewerFragment :
 
     private fun updateMapLocation() {
         val loc = currentLocation ?: return
+        
+        // Update ViewModel for real-time dialog updates
+        mainViewModel.currentLocation.postValue(loc)
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        mainViewModel.currentTime.postValue(sdf.format(Date(loc.time)))
+
         val point = GeoPoint(loc.latitude, loc.longitude)
         if (userMarker == null) {
             userMarker = Marker(binding.mapView).apply {
@@ -287,19 +336,13 @@ class GnssViewerFragment :
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         sdf.timeZone = TimeZone.getDefault()
         val localTime = sdf.format(Date(loc.time))
-
-        val details = """
-            Vĩ độ (Lat): ${loc.latitude}
-            Kinh độ (Lon): ${loc.longitude}
-            Thời gian: $localTime
-            Vận tốc: ${loc.speed} m/s
-        """.trimIndent()
-
-        AlertDialog.Builder(safeContext())
-            .setTitle("Thông tin vị trí")
-            .setMessage(details)
-            .setPositiveButton("Đóng", null)
-            .show()
+        checkIfFragmentAttached {
+            Map2DInformationDialog.showDialog(
+                fragmentManager = parentFragmentManager,
+                loc = loc,
+                time = localTime
+            )
+        }
     }
 
     private fun applyVisibilityState() {
@@ -316,7 +359,7 @@ class GnssViewerFragment :
 
     private fun toggle3DMode() {
         is3DMode = !is3DMode
-        
+
         if (is3DMode) {
             binding.mapView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             binding.myGLSurfaceView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
@@ -340,7 +383,7 @@ class GnssViewerFragment :
                         .start()
                 }
                 .start()
-            
+
         } else {
             binding.myGLSurfaceView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             binding.mapView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
@@ -393,32 +436,41 @@ class GnssViewerFragment :
         })
 
         // GestureDetector for 3D GLSurfaceView
-        gestureDetector = GestureDetector(safeContext(), object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDoubleTap(e: MotionEvent): Boolean {
-                if (is3DMode) toggle3DMode()
-                return true
-            }
-            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                if (is3DMode && rendererSet) {
-                    val tappedSat = earthRenderer.handleTouch(e.x, e.y, binding.myGLSurfaceView.width, binding.myGLSurfaceView.height)
-                    if (tappedSat != null) {
-                        showSatelliteDetailsDialog(tappedSat, earthRenderer.satelliteCount)
-                    }
+        gestureDetector =
+            GestureDetector(safeContext(), object : GestureDetector.SimpleOnGestureListener() {
+                override fun onDoubleTap(e: MotionEvent): Boolean {
+                    if (is3DMode) toggle3DMode()
+                    return true
                 }
-                return super.onSingleTapConfirmed(e)
-            }
-        })
 
-        scaleGestureDetector = ScaleGestureDetector(safeContext(), object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                if (is3DMode && rendererSet) {
-                    earthRenderer.clearTargets()
-                    earthRenderer.scaleFactor /= detector.scaleFactor
-                    earthRenderer.scaleFactor = earthRenderer.scaleFactor.coerceIn(0.2f, 3.0f)
+                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                    if (is3DMode && rendererSet) {
+                        val tappedSat = earthRenderer.handleTouch(
+                            e.x,
+                            e.y,
+                            binding.myGLSurfaceView.width,
+                            binding.myGLSurfaceView.height
+                        )
+                        if (tappedSat != null) {
+                            showSatelliteDetailsDialog(tappedSat, earthRenderer.satelliteCount)
+                        }
+                    }
+                    return super.onSingleTapConfirmed(e)
                 }
-                return true
-            }
-        })
+            })
+
+        scaleGestureDetector = ScaleGestureDetector(
+            safeContext(),
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    if (is3DMode && rendererSet) {
+                        earthRenderer.clearTargets()
+                        earthRenderer.scaleFactor /= detector.scaleFactor
+                        earthRenderer.scaleFactor = earthRenderer.scaleFactor.coerceIn(0.2f, 3.0f)
+                    }
+                    return true
+                }
+            })
 
         var previousX = 0f
         var previousY = 0f
@@ -440,9 +492,11 @@ class GnssViewerFragment :
                         isMultiTouch = false
                         if (rendererSet) earthRenderer.clearTargets()
                     }
+
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         isMultiTouch = false
                     }
+
                     MotionEvent.ACTION_MOVE -> {
                         if (isMultiTouch) {
                             // Touch just became 1 pointer after zooming
@@ -503,44 +557,13 @@ class GnssViewerFragment :
     }
 
     private fun showSatelliteDetailsDialog(sat: SatelliteInfo, totalSats: Int) {
-        val constellation = when (sat.constellationType) {
-            GnssStatus.CONSTELLATION_GPS -> "GPS"
-            GnssStatus.CONSTELLATION_SBAS -> "SBAS"
-            GnssStatus.CONSTELLATION_GLONASS -> "GLONASS"
-            GnssStatus.CONSTELLATION_QZSS -> "QZSS"
-            GnssStatus.CONSTELLATION_BEIDOU -> "BeiDou"
-            GnssStatus.CONSTELLATION_GALILEO -> "Galileo"
-            GnssStatus.CONSTELLATION_IRNSS -> "IRNSS"
-            else -> "Unknown"
+        checkIfFragmentAttached {
+            Map3DInformationDialog.showDialog(
+                fragmentManager = parentFragmentManager,
+                sat = sat,
+                totalSats = totalSats
+            )
         }
-
-        val formattedLat = String.format(Locale.getDefault(), "%.4f", sat.latitude)
-        val formattedLon = String.format(Locale.getDefault(), "%.4f", sat.longitude)
-        val formattedAlt = String.format(Locale.getDefault(), "%,d", sat.altitude.toLong())
-        val formattedSpeedSpeed = String.format(Locale.getDefault(), "%,.1f km/s (%,.0f km/h)", sat.speed / 1000.0, sat.speed * 3.6)
-
-        val details = """
-            Tổng số vệ tinh: $totalSats
-            SVID: ${sat.svid}
-            Chòm sao: $constellation
-            Cường độ tín hiệu (Cn0DbHz): ${sat.cn0DbHz}
-            Góc ngẩng: ${sat.elevationDegrees}°
-            Phương vị: ${sat.azimuthDegrees}°
-            Tần số sóng mang: ${if (sat.carrierFrequencyHz > 0) "${sat.carrierFrequencyHz} Hz" else "N/A"}
-            Trạng thái sử dụng: ${if (sat.usedInFix) "Đang sử dụng" else "Không"}
-            
-            [Dữ liệu ước tính từ quỹ đạo]
-            Vĩ độ: $formattedLat°
-            Kinh độ: $formattedLon°
-            Độ cao: $formattedAlt mét
-            Tốc độ: $formattedSpeedSpeed
-        """.trimIndent()
-
-        AlertDialog.Builder(safeContext())
-            .setTitle("Vệ tinh $constellation SVID: ${sat.svid}")
-            .setMessage(details)
-            .setPositiveButton("Đóng", null)
-            .show()
     }
 
     override fun initObserver() {
@@ -575,7 +598,8 @@ class GnssViewerFragment :
     }
 
     private fun initOpenGLES() {
-        val activityManager = safeContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val activityManager =
+            safeContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val configurationInfo = activityManager.deviceConfigurationInfo
         val supportsEs32 = configurationInfo.reqGlEsVersion >= 0x30002
 
@@ -586,7 +610,11 @@ class GnssViewerFragment :
             binding.myGLSurfaceView.setRenderer(earthRenderer)
             rendererSet = true
         } else {
-            Toast.makeText(safeContext(), "This device doesn't support OpenGL ES 3.2", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                safeContext(),
+                "This device doesn't support OpenGL ES 3.2",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -600,6 +628,23 @@ class GnssViewerFragment :
             startLocationUpdates()
         }
         checkGpsStatus()
+        startRealTimeTicker()
+    }
+
+    private fun startRealTimeTicker() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            while (isActive) {
+                val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                // Use system time for ticking, or location time if one is available and fresh
+                val displayTime = currentLocation?.let { loc ->
+                    val age = System.currentTimeMillis() - loc.time
+                    if (age < 5000) loc.time else System.currentTimeMillis()
+                } ?: System.currentTimeMillis()
+                
+                mainViewModel.currentTime.postValue(sdf.format(Date(displayTime)))
+                delay(1000)
+            }
+        }
     }
 
     override fun onPause() {

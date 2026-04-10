@@ -1,5 +1,7 @@
 package com.example.gnssandopticalflowapp.model
 
+import java.io.Serializable
+
 data class SatelliteInfo(
     val svid: Int,
     val constellationType: Int,
@@ -15,4 +17,4 @@ data class SatelliteInfo(
     var longitude: Double = 0.0,
     var altitude: Double = 0.0,
     var speed: Double = 0.0
-)
+) : Serializable
