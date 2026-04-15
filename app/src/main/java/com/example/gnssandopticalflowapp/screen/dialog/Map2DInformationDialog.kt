@@ -2,23 +2,23 @@ package com.example.gnssandopticalflowapp.screen.dialog
 
 import android.annotation.SuppressLint
 import android.location.Location
-import android.os.Bundle
 import androidx.fragment.app.FragmentManager
 import com.example.gnssandopticalflowapp.base.BaseDialogFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.DialogMap2dInformationBinding
+
 @SuppressLint("SetTextI18n")
-class Map2DInformationDialog() :
+class Map2DInformationDialog :
     BaseDialogFragment<DialogMap2dInformationBinding>(DialogMap2dInformationBinding::inflate) {
 
-    override fun DialogMap2dInformationBinding.initView() {
-        val lat = arguments?.getDouble(KEY_LAT) ?: 0.0
-        val lon = arguments?.getDouble(KEY_LON) ?: 0.0
-        val speed = arguments?.getFloat(KEY_SPEED) ?: 0f
-        val time = arguments?.getString(KEY_TIME) ?: ""
+    private var latitude: Double = 0.0
+    private var longitude: Double = 0.0
+    private var speed: Float = 0f
+    private var time: String = ""
 
-        tvLatitude.text = "Latitude: $lat"
-        tvLongitude.text = "Longitude: $lon"
+    override fun DialogMap2dInformationBinding.initView() {
+        tvLatitude.text = "Latitude: $latitude"
+        tvLongitude.text = "Longitude: $longitude"
         tvTime.text = "Time: $time"
         tvVelocity.text = "Speed: $speed m/s"
     }
@@ -33,7 +33,7 @@ class Map2DInformationDialog() :
         }
 
         bgParent.setSingleClick {
-
+            // block click
         }
     }
 
@@ -46,17 +46,13 @@ class Map2DInformationDialog() :
             }
         }
 
-        mainViewModel.currentTime.observe(viewLifecycleOwner) { time ->
-            binding.tvTime.text = "Time: $time"
+        mainViewModel.currentTime.observe(viewLifecycleOwner) { currentTime ->
+            binding.tvTime.text = "Time: $currentTime"
         }
     }
 
     companion object {
         private const val TAG = "Map2DInformationDialog"
-        private const val KEY_LAT = "key_lat"
-        private const val KEY_LON = "key_lon"
-        private const val KEY_SPEED = "key_speed"
-        private const val KEY_TIME = "key_time"
 
         fun showDialog(
             fragmentManager: FragmentManager,
@@ -64,12 +60,10 @@ class Map2DInformationDialog() :
             time: String
         ) {
             val dialog = Map2DInformationDialog().apply {
-                arguments = Bundle().apply {
-                    putDouble(KEY_LAT, loc.latitude)
-                    putDouble(KEY_LON, loc.longitude)
-                    putFloat(KEY_SPEED, loc.speed)
-                    putString(KEY_TIME, time)
-                }
+                latitude = loc.latitude
+                longitude = loc.longitude
+                speed = loc.speed
+                this.time = time
             }
             dialog.show(fragmentManager, TAG)
         }

@@ -2,7 +2,6 @@ package com.example.gnssandopticalflowapp.screen.dialog
 
 import android.annotation.SuppressLint
 import android.location.GnssStatus
-import android.os.Bundle
 import androidx.fragment.app.FragmentManager
 import com.example.gnssandopticalflowapp.base.BaseDialogFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
@@ -13,19 +12,14 @@ import java.util.Locale
 class Map3DInformationDialog :
     BaseDialogFragment<DialogMap3dInformationBinding>(DialogMap3dInformationBinding::inflate) {
 
-    override fun DialogMap3dInformationBinding.initView() {
-        val sat = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            arguments?.getSerializable(KEY_SAT, SatelliteInfo::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            arguments?.getSerializable(KEY_SAT) as? SatelliteInfo
-        }
-        val totalSats = arguments?.getInt(KEY_TOTAL_SATS) ?: 0
+    private var satelliteInfo: SatelliteInfo? = null
+    private var totalSatellites: Int = 0
 
-        sat?.let {
+    override fun DialogMap3dInformationBinding.initView() {
+        satelliteInfo?.let { satellite ->
             bindSatelliteInformation(
-                satellite = it,
-                totalSats = totalSats
+                satellite = satellite,
+                totalSats = totalSatellites
             )
         }
     }
@@ -63,15 +57,12 @@ class Map3DInformationDialog :
         tvElevation.text = "Elevation: ${satellite.elevationDegrees}°"
         tvAzimuth.text = "Azimuth: ${satellite.azimuthDegrees}°"
         tvCarrierFrequency.text =
-            "Carrier frequency: ${
-                if (satellite.carrierFrequencyHz > 0) {
-                    "${satellite.carrierFrequencyHz} Hz"
-                } else {
-                    "N/A"
-                }
-            }"
-        tvUsedInFix.text =
-            "Usage status: ${if (satellite.usedInFix) "In use" else "Not in use"}"
+            if (satellite.carrierFrequencyHz > 0) {
+                "Carrier frequency: ${satellite.carrierFrequencyHz} Hz"
+            } else {
+                "Carrier frequency: N/A"
+            }
+        tvUsedInFix.text = "Usage status: ${if (satellite.usedInFix) "In use" else "Not in use"}"
         tvLatitude.text = "Latitude: $formattedLatitude°"
         tvLongitude.text = "Longitude: $formattedLongitude°"
         tvAltitude.text = "Altitude: $formattedAltitude m"
@@ -88,6 +79,7 @@ class Map3DInformationDialog :
         }
 
         bgParent.setSingleClick {
+            // block click
         }
     }
 
@@ -95,8 +87,6 @@ class Map3DInformationDialog :
 
     companion object {
         private const val TAG = "Map3DInformationDialog"
-        private const val KEY_SAT = "key_sat"
-        private const val KEY_TOTAL_SATS = "key_total_sats"
 
         fun showDialog(
             fragmentManager: FragmentManager,
@@ -104,10 +94,8 @@ class Map3DInformationDialog :
             totalSats: Int
         ) {
             val dialog = Map3DInformationDialog().apply {
-                arguments = Bundle().apply {
-                    putSerializable(KEY_SAT, sat)
-                    putInt(KEY_TOTAL_SATS, totalSats)
-                }
+                satelliteInfo = sat
+                totalSatellites = totalSats
             }
             dialog.show(fragmentManager, TAG)
         }
