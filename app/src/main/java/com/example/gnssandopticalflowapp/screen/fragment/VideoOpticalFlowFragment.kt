@@ -35,7 +35,7 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
     private val updateProgressAction = object : Runnable {
         override fun run() {
             updateProgress()
-            handler.postDelayed(this, 1000)
+            handler.postDelayed(this, 16)
         }
     }
 
