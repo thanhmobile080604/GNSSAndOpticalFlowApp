@@ -47,6 +47,8 @@ class CameraOpticalFlowFragment :
     private lateinit var fusion: SensorFusion
     private var fuseOutput: FloatArray? = null
     private lateinit var mvViewer: MotionVectorViz
+    private var frameCount: Int = 0
+    private val updateInterval: Int = 30 // frames between automatic feature updates
 
     private var videoEncoder: VideoEncoder? = null
     private var isRecording = false
@@ -281,6 +283,11 @@ class CameraOpticalFlowFragment :
     }
 
     override fun onCameraFrame(inputFrame: CameraBridgeViewBase.CvCameraViewFrame): Mat? {
+        // automatic feature update periodically
+        frameCount++
+        if (frameCount % updateInterval == 0) {
+            if (::opticalFlow.isInitialized) opticalFlow.updateFeatures()
+        }
         // get IMU variables
         val velocity: FloatArray = imuEstimator.getVelocity()
         val imuPosition: FloatArray = imuEstimator.getPosition()
