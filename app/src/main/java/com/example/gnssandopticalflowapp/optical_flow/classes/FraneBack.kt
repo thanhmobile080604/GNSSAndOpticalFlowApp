@@ -52,7 +52,7 @@ class FraneBack : OpticalFlow {
         )
 
         currFrame.copyTo(flowRgb)
-        drawOptFlowMap(flowGray, flowRgb, 64, Scalar(0.0, 255.0, 0.0))
+        drawOptFlowMap(flowGray, flowRgb, 32, Scalar(0.0, 255.0, 0.0))
 
         currGray.copyTo(prevGray)
 
