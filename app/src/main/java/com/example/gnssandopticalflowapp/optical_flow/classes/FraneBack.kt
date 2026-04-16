@@ -32,15 +32,12 @@ class FraneBack : OpticalFlow {
         Log.d("RUN-OF", "started")
         currFrame = newFrame
 
-        // convert current frame to gray
         Imgproc.cvtColor(currFrame, currGray, Imgproc.COLOR_RGBA2GRAY)
 
-        // if this is the first run
         if (prevGray.empty()) {
             currGray.copyTo(prevGray)
         }
 
-        // calculate optical flow from prevFrame to currFrame
         Video.calcOpticalFlowFarneback(
             prevGray,
             currGray,
@@ -54,14 +51,11 @@ class FraneBack : OpticalFlow {
             flags
         )
 
-        // draw the optical flow
         currFrame.copyTo(flowRgb)
         drawOptFlowMap(flowGray, flowRgb, 64, Scalar(0.0, 255.0, 0.0))
 
-        // update the variables for the next loop
         currGray.copyTo(prevGray)
 
-        // create the output array
         ofOutput.of_frame = flowRgb
         ofOutput.position = Point(0.0, 0.0)
         return ofOutput
@@ -80,6 +74,9 @@ class FraneBack : OpticalFlow {
     }
 
     private fun drawOptFlowMap(flow: Mat, flowmap: Mat, step: Int, color: Scalar?) {
+        val lineThickness = 4
+        val circleRadius = 5
+
         var y = 0
         while (y < flowmap.rows()) {
             var x = 0
@@ -87,10 +84,16 @@ class FraneBack : OpticalFlow {
                 val f: DoubleArray = flow.get(y, x)
                 val fx = f[0]
                 val fy = f[1]
-                val start: Point = Point(x.toDouble(), y.toDouble())
-                val end: Point = Point((x + fx).roundToInt().toDouble(), (y + fy).roundToInt().toDouble())
-                Imgproc.line(flowmap, start, end, color)
-                Imgproc.circle(flowmap, start, 2, color, -1)
+
+                val start = Point(x.toDouble(), y.toDouble())
+                val end = Point(
+                    (x + fx).roundToInt().toDouble(),
+                    (y + fy).roundToInt().toDouble()
+                )
+
+                Imgproc.line(flowmap, start, end, color, lineThickness)
+                Imgproc.circle(flowmap, start, circleRadius, color, -1)
+
                 x += step
             }
             y += step
