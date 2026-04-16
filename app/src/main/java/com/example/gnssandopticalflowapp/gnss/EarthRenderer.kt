@@ -395,8 +395,7 @@ class EarthRenderer(private val context: Context) : Renderer {
                 val userModelMatrix = FloatArray(16)
                 Matrix.setIdentityM(userModelMatrix, 0)
                 Matrix.translateM(userModelMatrix, 0, userX, userY, userZ)
-                Matrix.scaleM(userModelMatrix, 0, 0.04f, 0.04f, 0.04f)
-
+                Matrix.scaleM(userModelMatrix, 0, 0.01f, 0.01f, 0.01f)
                 GLES32.glUniformMatrix4fv(modelLocSat, 1, false, userModelMatrix, 0)
                 // Cyan color for user
                 GLES32.glUniform4fv(colorLocSat, 1, floatArrayOf(0.0f, 1.0f, 1.0f, 1.0f), 0)
