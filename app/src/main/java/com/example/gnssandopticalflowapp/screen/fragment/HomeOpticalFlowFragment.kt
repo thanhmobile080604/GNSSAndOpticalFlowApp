@@ -1,15 +1,9 @@
 package com.example.gnssandopticalflowapp.screen.fragment
 
-import android.app.AlertDialog
-import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
-import android.view.LayoutInflater
-import android.widget.Button
-import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment

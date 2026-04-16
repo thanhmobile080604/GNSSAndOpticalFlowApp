@@ -1,8 +1,8 @@
 package com.example.gnssandopticalflowapp.gnss
 
 import android.content.Context
-import android.opengl.GLES20.glGetUniformLocation
-import android.opengl.GLES20.glUniform3f
+import android.opengl.GLES32.glGetUniformLocation
+import android.opengl.GLES32.glUniform3f
 import android.opengl.GLES32.glClearColor
 import android.opengl.GLES32
 import android.opengl.GLES32.GL_COLOR_BUFFER_BIT
