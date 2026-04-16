@@ -77,6 +77,10 @@ class GNSSViewerFragment :
     private lateinit var locationManager: LocationManager
     private var currentLocation: Location? = null
     private var userMarker: Marker? = null
+    // Set to true to force a test location (New York) for EarthRenderer testing
+    private var useTestLocation: Boolean = false
+    private val testLatitude = 40.712776
+    private val testLongitude = -74.005974
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -370,7 +374,9 @@ class GNSSViewerFragment :
         binding.mapView.invalidate()
 
         if (rendererSet) {
-            earthRenderer.updateUserLocation(loc.latitude, loc.longitude)
+            val latToUse = if (useTestLocation) testLatitude else loc.latitude
+            val lonToUse = if (useTestLocation) testLongitude else loc.longitude
+            earthRenderer.updateUserLocation(latToUse, lonToUse)
         }
     }
 
