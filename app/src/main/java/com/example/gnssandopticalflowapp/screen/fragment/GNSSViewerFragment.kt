@@ -63,6 +63,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlin.math.abs
 
 @RequiresApi(Build.VERSION_CODES.R)
 class GNSSViewerFragment :
@@ -376,7 +377,14 @@ class GNSSViewerFragment :
     private fun showLocationDetailsDialog(loc: Location) {
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         sdf.timeZone = TimeZone.getDefault()
-        val localTime = sdf.format(Date(loc.time))
+        val baseLocal = sdf.format(Date(loc.time))
+        val tz = TimeZone.getDefault()
+        val offsetMillis = tz.getOffset(loc.time)
+        val sign = if (offsetMillis >= 0) "+" else "-"
+        val offHours = abs(offsetMillis) / 3600000
+        val offMinutes = (abs(offsetMillis) % 3600000) / 60000
+        val utcSuffix = "UTC$sign" + String.format("%02d:%02d", offHours, offMinutes)
+        val localTime = "$baseLocal $utcSuffix"
         checkIfFragmentAttached {
             Map2DInformationDialog.showDialog(
                 fragmentManager = parentFragmentManager,
@@ -661,7 +669,14 @@ class GNSSViewerFragment :
                     if (age < 5000) loc.time else System.currentTimeMillis()
                 } ?: System.currentTimeMillis()
                 
-                mainViewModel.currentTime.value = sdf.format(Date(displayTime))
+                val baseTime = sdf.format(Date(displayTime))
+                val tz = TimeZone.getDefault()
+                val offsetMillis = tz.getOffset(displayTime)
+                val sign = if (offsetMillis >= 0) "+" else "-"
+                val offHours = Math.abs(offsetMillis) / 3600000
+                val offMinutes = (Math.abs(offsetMillis) % 3600000) / 60000
+                val utcSuffix = "UTC$sign" + String.format("%02d:%02d", offHours, offMinutes)
+                mainViewModel.currentTime.value = "$baseTime $utcSuffix"
                 delay(1000)
             }
         }
