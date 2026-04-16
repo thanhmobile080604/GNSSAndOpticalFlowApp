@@ -77,10 +77,14 @@ class FraneBack : OpticalFlow {
         val lineThickness = 4
         val circleRadius = 5
 
-        var y = 0
-        while (y < flowmap.rows()) {
-            var x = 0
-            while (x < flowmap.cols()) {
+        val maxRows = kotlin.math.min(flow.rows(), flowmap.rows())
+        val maxCols = kotlin.math.min(flow.cols(), flowmap.cols())
+        val halfStep = step / 2
+
+        var y = halfStep
+        while (y < maxRows) {
+            var x = halfStep
+            while (x < maxCols) {
                 val f: DoubleArray = flow.get(y, x)
                 val fx = f[0]
                 val fy = f[1]
