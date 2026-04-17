@@ -3,7 +3,6 @@ package com.example.gnssandopticalflowapp.screen.fragment
 import android.Manifest
 import android.graphics.Bitmap
 import android.os.SystemClock
-import android.text.format.DateUtils.formatElapsedTime
 import android.util.Log
 import android.widget.SeekBar
 import android.widget.Toast
@@ -289,18 +288,18 @@ class CameraOpticalFlowFragment :
             if (::opticalFlow.isInitialized) opticalFlow.updateFeatures()
         }
         // get IMU variables
-        val velocity: FloatArray = imuEstimator.getVelocity()
-        val imuPosition: FloatArray = imuEstimator.getPosition()
+        val velocity = imuEstimator.getVelocity()
+        val imuPosition = imuEstimator.getPosition()
 
         // Convert the velocity to mph
-        val xVelocityMph: Float = velocity[0] * 2.23694f
-        val yVelocityMph: Float = velocity[1] * 2.23694f
-        val zVelocityMph: Float = velocity[2] * 2.23694f
+        val xVelocity = velocity[0]
+        val yVelocity = velocity[1]
+        val zVelocity = velocity[2]
 
         Log.d("POS", "${imuPosition[0]}, ${imuPosition[1]}, ${imuPosition[2]}")
 
         // Get the magnitude of the velocity vector
-        val speedMph: Float = sqrt((xVelocityMph * xVelocityMph + yVelocityMph * yVelocityMph + zVelocityMph * zVelocityMph).toDouble()).toFloat()
+        val speedMph = sqrt((xVelocity * xVelocity + yVelocity * yVelocity + zVelocity * zVelocity).toDouble()).toFloat()
 
         activity?.runOnUiThread {
             binding.velPred.text = speedMph.toString()
