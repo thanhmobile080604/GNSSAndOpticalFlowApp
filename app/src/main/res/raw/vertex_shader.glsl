@@ -1,6 +1,6 @@
 #version 320 es
 
-uniform mat4 projectionMatrix;
+layout(location = 2) uniform mat4 projectionMatrix;
 layout(location = 0) uniform mat4 modelMatrix;
 layout(location = 1) uniform mat4 viewMatrix;
 

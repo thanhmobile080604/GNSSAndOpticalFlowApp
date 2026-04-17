@@ -1,15 +1,15 @@
 package com.example.gnssandopticalflowapp.gnss
 
 import android.content.Context
-import android.opengl.GLES32.glGetUniformLocation
-import android.opengl.GLES32.glUniform3f
-import android.opengl.GLES32.glClearColor
 import android.opengl.GLES32
 import android.opengl.GLES32.GL_COLOR_BUFFER_BIT
 import android.opengl.GLES32.GL_DEPTH_BUFFER_BIT
 import android.opengl.GLES32.GL_DEPTH_TEST
 import android.opengl.GLES32.glClear
+import android.opengl.GLES32.glClearColor
 import android.opengl.GLES32.glEnable
+import android.opengl.GLES32.glGetUniformLocation
+import android.opengl.GLES32.glUniform3f
 import android.opengl.GLES32.glViewport
 import android.opengl.GLSurfaceView.Renderer
 import android.opengl.Matrix
@@ -30,6 +30,7 @@ import javax.microedition.khronos.opengles.GL10
 import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.atan
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -73,6 +74,8 @@ class EarthRenderer(private val context: Context) : Renderer {
     private var isCameraInitialized = false
 
     private var earthTextureId = 0
+    private var moonTextureId = 0
+    private var sunTextureId = 0
 
     private var satProgram = 0
     private var satellites = listOf<com.example.gnssandopticalflowapp.model.SatelliteInfo>()
@@ -137,7 +140,7 @@ class EarthRenderer(private val context: Context) : Renderer {
         if (LoggerConfig.ON) {
             ShaderHelper.validateProgram(program)
         }
-        
+
         val satVertexSrc = ShaderReader.readTextFileFromResource(context, R.raw.sat_vertex_shader)
         val satFragSrc = ShaderReader.readTextFileFromResource(context, R.raw.sat_fragment_shader)
         satProgram = ShaderHelper.buildProgram(satVertexSrc, satFragSrc)
@@ -180,6 +183,8 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glBufferData(GLES32.GL_ELEMENT_ARRAY_BUFFER, sphereIndices.size * Int.SIZE_BYTES, indicesBuffer, GLES32.GL_STATIC_DRAW)
 
         earthTextureId = TextureLoader.loadTexture2D(context, R.drawable.earth_texture)
+        moonTextureId = TextureLoader.loadTexture2D(context, R.drawable.moon_texture)
+        sunTextureId = TextureLoader.loadTexture2D(context, R.drawable.sun_texture)
         
         GLES32.glBindBuffer(GLES32.GL_ARRAY_BUFFER, 0)
         GLES32.glBindVertexArray(0)
@@ -189,10 +194,12 @@ class EarthRenderer(private val context: Context) : Renderer {
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         val aspectRatio = if (width > height) width.toFloat() / height else height.toFloat() / width
 
-        Matrix.perspectiveM(projectionMatrix, 0, 45f, 1/aspectRatio, 0.1f, 10f)
+        Matrix.perspectiveM(projectionMatrix, 0, 45f, 1/aspectRatio, 0.1f, 20f)
+        
+        GLES32.glUseProgram(program)
         val uniformLocation = glGetUniformLocation(program, "projectionMatrix")
         GLES32.glUniformMatrix4fv(uniformLocation, 1, false, projectionMatrix, 0)
-
+        
         glViewport(0, 0, width, height)
     }
 
@@ -237,7 +244,8 @@ class EarthRenderer(private val context: Context) : Renderer {
 
         GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
         GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, earthTextureId)
-        GLES32.glUniform1i(glGetUniformLocation(program, "earthTexture"), 0)
+        GLES32.glUniform1i(glGetUniformLocation(program, "bodyTexture"), 0)
+        GLES32.glUniform1i(glGetUniformLocation(program, "bodyType"), 0) // Earth
 
         Matrix.setIdentityM(viewMatrix, 0)
 //        Matrix.setLookAtM(viewMatrix, 0,
@@ -283,6 +291,97 @@ class EarthRenderer(private val context: Context) : Renderer {
         glUniform3f(glGetUniformLocation(program, "lightColor"), 1f, 1f, 1f)
         glUniform3f(glGetUniformLocation(program, "lightPos"), lightX, lightY, lightZ)
         glUniform3f(glGetUniformLocation(program, "viewPos"), camX, camY, camZ)
+
+        GLES32.glBindVertexArray(VAO)
+        GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
+        GLES32.glBindVertexArray(0)
+
+        // Draw Moon
+        val jd = System.currentTimeMillis() / 86400000.0 + 2440587.5
+        val dJD = jd - 2451545.0
+
+        var L_moon = 218.32 + 13.176396 * dJD
+        var M_moon = 134.96 + 13.064993 * dJD
+        var F_moon = 93.27 + 13.229350 * dJD
+
+        L_moon %= 360.0; if (L_moon < 0) L_moon += 360.0
+        M_moon %= 360.0; if (M_moon < 0) M_moon += 360.0
+        F_moon %= 360.0; if (F_moon < 0) F_moon += 360.0
+
+        val lambdaMoon = Math.toRadians(L_moon + 6.289 * sin(Math.toRadians(M_moon)))
+        val betaMoon = Math.toRadians(5.128 * sin(Math.toRadians(F_moon)))
+
+        // Ecliptic to Equatorial
+        val eps = Math.toRadians(23.439)
+        val sinDeltaMoon = sin(betaMoon) * cos(eps) + cos(betaMoon) * sin(eps) * sin(lambdaMoon)
+        val deltaMoon = asin(sinDeltaMoon)
+        val alphaMoon = atan2(sin(lambdaMoon) * cos(eps) - tan(betaMoon) * sin(eps), cos(lambdaMoon))
+
+        // Sidereal time approx
+        val gmst = (18.697374558 + 24.06570982441908 * dJD) % 24.0
+        val gmstRad = Math.toRadians(gmst * 15.0)
+        val moonLonRad = alphaMoon - gmstRad
+
+        val rMoonDist = 0.1f * 3.0f // Brought much closer to Earth for visibility (was 60.33f)
+        val mX = (rMoonDist * cos(deltaMoon) * sin(moonLonRad)).toFloat()
+        val mY = (rMoonDist * sin(deltaMoon)).toFloat()
+        val mZ = (rMoonDist * cos(deltaMoon) * cos(moonLonRad)).toFloat()
+
+        val moonModelMatrix = FloatArray(16)
+        Matrix.setIdentityM(moonModelMatrix, 0)
+        Matrix.translateM(moonModelMatrix, 0, mX, mY, mZ)
+        val moonScale = 0.2727f // Scale exactly to correct ratio (Moon is ~27.27% of Earth's size)
+        Matrix.scaleM(moonModelMatrix, 0, moonScale, moonScale, moonScale)
+
+        val vpMatrix = FloatArray(16)
+        Matrix.multiplyMM(vpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
+        val mPos = floatArrayOf(mX, mY, mZ, 1f)
+        val mClip = FloatArray(4)
+        Matrix.multiplyMV(mClip, 0, vpMatrix, 0, mPos, 0)
+        if (mClip[3] > 0) {
+            val ndcX = mClip[0] / mClip[3]
+            val ndcY = mClip[1] / mClip[3]
+            val ndcZ = mClip[2] / mClip[3]
+        } else {
+            Log.d("EarthRenderer", "Moon is behind camera")
+        }
+
+        GLES32.glUseProgram(program)
+        GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
+        GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, moonTextureId)
+        GLES32.glUniform1i(GLES32.glGetUniformLocation(program, "bodyTexture"), 0)
+        GLES32.glUniform1i(GLES32.glGetUniformLocation(program, "bodyType"), 1) // Moon
+        
+        GLES32.glUniformMatrix4fv(1, 1, false, viewMatrix, 0)
+        GLES32.glUniformMatrix4fv(0, 1, false, moonModelMatrix, 0)
+
+        GLES32.glBindVertexArray(VAO)
+        GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
+        GLES32.glBindVertexArray(0)
+
+        // Draw Sun
+        val sunModelMatrix = FloatArray(16)
+        Matrix.setIdentityM(sunModelMatrix, 0)
+
+        val lightLength = sqrt((lightX * lightX + lightY * lightY + lightZ * lightZ).toDouble()).toFloat()
+        val rSunDist = 0.1f * 30.0f // Sun distance mapping
+        val sX = (lightX / lightLength) * rSunDist
+        val sY = (lightY / lightLength) * rSunDist
+        val sZ = (lightZ / lightLength) * rSunDist
+
+        Matrix.translateM(sunModelMatrix, 0, sX, sY, sZ)
+        
+        val sunScale = 3.0f // Make Sun bigger than Earth (scale visual)
+        Matrix.scaleM(sunModelMatrix, 0, sunScale, sunScale, sunScale)
+
+        GLES32.glUseProgram(program)
+        GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
+        GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, sunTextureId)
+        GLES32.glUniform1i(GLES32.glGetUniformLocation(program, "bodyTexture"), 0)
+        GLES32.glUniform1i(GLES32.glGetUniformLocation(program, "bodyType"), 2) // Sun
+        
+        GLES32.glUniformMatrix4fv(1, 1, false, viewMatrix, 0)
+        GLES32.glUniformMatrix4fv(0, 1, false, sunModelMatrix, 0)
 
         GLES32.glBindVertexArray(VAO)
         GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
