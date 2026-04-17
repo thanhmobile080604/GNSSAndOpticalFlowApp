@@ -79,6 +79,11 @@ class EarthRenderer(private val context: Context) : Renderer {
 
     private var satProgram = 0
     private var satellites = listOf<com.example.gnssandopticalflowapp.model.SatelliteInfo>()
+
+    // Ring for user location
+    private var ringVAO = 0
+    private var ringVBO = 0
+    private val ringVertexCount = 360
     
     private inner class SatRenderState(
         var rX: Float, var rY: Float, var rZ: Float,
@@ -186,6 +191,33 @@ class EarthRenderer(private val context: Context) : Renderer {
         moonTextureId = TextureLoader.loadTexture2D(context, R.drawable.moon_texture)
         sunTextureId = TextureLoader.loadTexture2D(context, R.drawable.sun_texture)
         
+        // Ring for user location
+        val ringVertices = FloatArray(ringVertexCount * 3)
+        for (i in 0 until ringVertexCount) {
+            val angle = Math.toRadians(i.toDouble())
+            ringVertices[i * 3] = cos(angle).toFloat()
+            ringVertices[i * 3 + 1] = sin(angle).toFloat()
+            ringVertices[i * 3 + 2] = 0f
+        }
+        
+        val vaoRingBuffer = IntBuffer.allocate(1)
+        val vboRingBuffer = IntBuffer.allocate(1)
+        GLES32.glGenVertexArrays(1, vaoRingBuffer)
+        GLES32.glGenBuffers(1, vboRingBuffer)
+        ringVAO = vaoRingBuffer.get(0)
+        ringVBO = vboRingBuffer.get(0)
+
+        GLES32.glBindVertexArray(ringVAO)
+        GLES32.glBindBuffer(GLES32.GL_ARRAY_BUFFER, ringVBO)
+        val ringFB = ByteBuffer.allocateDirect(ringVertices.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+            .put(ringVertices)
+        ringFB.position(0)
+        GLES32.glBufferData(GLES32.GL_ARRAY_BUFFER, ringVertices.size * 4, ringFB, GLES32.GL_STATIC_DRAW)
+        GLES32.glVertexAttribPointer(0, 3, GLES32.GL_FLOAT, false, 3 * 4, 0)
+        GLES32.glEnableVertexAttribArray(0)
+
         GLES32.glBindBuffer(GLES32.GL_ARRAY_BUFFER, 0)
         GLES32.glBindVertexArray(0)
         GLES32.glBindBuffer(GLES32.GL_ELEMENT_ARRAY_BUFFER, 0)
@@ -498,8 +530,45 @@ class EarthRenderer(private val context: Context) : Renderer {
                 GLES32.glUniformMatrix4fv(modelLocSat, 1, false, userModelMatrix, 0)
                 // Cyan color for user
                 GLES32.glUniform4fv(colorLocSat, 1, floatArrayOf(0.0f, 1.0f, 1.0f, 1.0f), 0)
-
                 GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
+
+                // Draw pulsating rings
+                GLES32.glBindVertexArray(ringVAO)
+                GLES32.glEnable(GLES32.GL_BLEND)
+                GLES32.glBlendFunc(GLES32.GL_SRC_ALPHA, GLES32.GL_ONE_MINUS_SRC_ALPHA)
+                GLES32.glLineWidth(3.0f)
+
+                val maxRingScale = 0.01f
+                for (i in 0 until 2) {
+                    val offset = i * 1000L
+                    val pulseTime = ((System.currentTimeMillis() + offset) % 2000L).toFloat() / 2000f
+
+                    val ringModelMatrix = FloatArray(16)
+                    Matrix.setIdentityM(ringModelMatrix, 0)
+
+                    val ringR = rUser + 0.0001f // slightly above the earth surface to avoid z-fighting
+                    val rX = (ringR * cos(radLat) * sin(radLon)).toFloat()
+                    val rY = (ringR * sin(radLat)).toFloat()
+                    val rZ = (ringR * cos(radLat) * cos(radLon)).toFloat()
+                    Matrix.translateM(ringModelMatrix, 0, rX, rY, rZ)
+
+                    Matrix.rotateM(ringModelMatrix, 0, lon.toFloat(), 0f, 1f, 0f)
+                    Matrix.rotateM(ringModelMatrix, 0, -lat.toFloat(), 1f, 0f, 0f)
+
+                    val currentScale = pulseTime * maxRingScale
+                    Matrix.scaleM(ringModelMatrix, 0, currentScale, currentScale, currentScale)
+
+                    GLES32.glUniformMatrix4fv(modelLocSat, 1, false, ringModelMatrix, 0)
+
+                    // Linear fade out
+                    val alpha = 1.0f - pulseTime
+                    GLES32.glUniform4fv(colorLocSat, 1, floatArrayOf(0.0f, 1.0f, 1.0f, alpha), 0)
+
+                    GLES32.glDrawArrays(GLES32.GL_LINE_LOOP, 0, ringVertexCount)
+                }
+
+                GLES32.glDisable(GLES32.GL_BLEND)
+                GLES32.glBindVertexArray(VAO) // Restore sphere VAO
             }
         }
 
