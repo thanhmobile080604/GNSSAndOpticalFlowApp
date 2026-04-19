@@ -65,6 +65,9 @@ class EarthRenderer(private val context: Context) : Renderer {
     var theta = 0f
     var phi = 0f
 
+    var velocityTheta = 0f
+    var velocityPhi = 0f
+
     private var targetPhi: Float? = null
     private var targetTheta: Float? = null
     private var targetScale: Float? = null
@@ -263,6 +266,23 @@ class EarthRenderer(private val context: Context) : Renderer {
                 scaleFactor = tScale
                 targetScale = null
             }
+        }
+
+        if (targetTheta == null && targetPhi == null) {
+            if (abs(velocityTheta) > 0.01f || abs(velocityPhi) > 0.01f) {
+                theta -= velocityTheta
+                phi += velocityPhi
+                phi = phi.coerceIn(-89.9f, 89.9f)
+
+                velocityTheta *= 0.95f
+                velocityPhi *= 0.95f
+            } else {
+                velocityTheta = 0f
+                velocityPhi = 0f
+            }
+        } else {
+            velocityTheta = 0f
+            velocityPhi = 0f
         }
 
         timeElapsed += animationSpeed * 0.016f

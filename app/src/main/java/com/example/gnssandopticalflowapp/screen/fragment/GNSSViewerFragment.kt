@@ -512,6 +512,20 @@ class GNSSViewerFragment :
                     }
                     return super.onSingleTapConfirmed(e)
                 }
+
+                override fun onFling(
+                    e1: MotionEvent?,
+                    e2: MotionEvent,
+                    velocityX: Float,
+                    velocityY: Float
+                ): Boolean {
+                    if (is3DMode && rendererSet) {
+                        earthRenderer.velocityTheta = velocityX * 0.005f
+                        earthRenderer.velocityPhi = velocityY * 0.005f
+                        return true
+                    }
+                    return false
+                }
             })
 
         scaleGestureDetector = ScaleGestureDetector(
@@ -545,7 +559,11 @@ class GNSSViewerFragment :
                         previousX = event.x
                         previousY = event.y
                         isMultiTouch = false
-                        if (rendererSet) earthRenderer.clearTargets()
+                        if (rendererSet) {
+                            earthRenderer.clearTargets()
+                            earthRenderer.velocityTheta = 0f
+                            earthRenderer.velocityPhi = 0f
+                        }
                     }
 
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
