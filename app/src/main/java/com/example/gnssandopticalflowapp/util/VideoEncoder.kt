@@ -23,6 +23,7 @@ class VideoEncoder(
     private var isMuxerStarted = false
     private val bufferInfo = MediaCodec.BufferInfo()
     private var frameIndex = 0L
+    private var startTimeUs = -1L
     private var colorFormat = -1
 
     private var isReleased = false
@@ -53,6 +54,7 @@ class VideoEncoder(
 
         mediaMuxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         isReleased = false
+        startTimeUs = -1L
     }
 
     private fun selectSupportedColorFormat(mimeType: String): Int {
@@ -90,7 +92,11 @@ class VideoEncoder(
 
                 inputBuffer?.put(yuvBytes)
 
-                val presentationTimeUs = frameIndex * 1000000L / 30
+                val currentTimeUs = System.nanoTime() / 1000L
+                if (startTimeUs < 0L) {
+                    startTimeUs = currentTimeUs
+                }
+                val presentationTimeUs = currentTimeUs - startTimeUs
                 mediaCodec?.queueInputBuffer(inputBufferIndex, 0, yuvBytes.size, presentationTimeUs, 0)
                 frameIndex++
             }
