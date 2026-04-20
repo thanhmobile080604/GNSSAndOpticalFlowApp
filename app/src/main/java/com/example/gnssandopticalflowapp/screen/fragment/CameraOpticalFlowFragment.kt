@@ -311,7 +311,7 @@ class CameraOpticalFlowFragment :
         val currentOutput = opticalFlow.run(frame)
         output = currentOutput
 
-        if (currentOutput != null && currentOutput.of_frame != null) {
+        if (currentOutput != null && currentOutput.ofFrame != null) {
             // fuse the IMU sensor with the Optical Flow
             val pos = currentOutput.position
             if (pos != null) {
@@ -327,7 +327,7 @@ class CameraOpticalFlowFragment :
                     binding.motionVector.setImageBitmap(dst)
                 }
             }
-            val outFrame = currentOutput.of_frame ?: frame
+            val outFrame = currentOutput.ofFrame ?: frame
             writeToVideoWriter(outFrame)
             return outFrame
         }

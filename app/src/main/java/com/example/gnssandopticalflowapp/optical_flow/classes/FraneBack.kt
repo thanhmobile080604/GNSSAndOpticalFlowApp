@@ -57,7 +57,7 @@ class FraneBack : OpticalFlow {
 
         currGray.copyTo(prevGray)
 
-        ofOutput.of_frame = flowRgb
+        ofOutput.ofFrame = flowRgb
         ofOutput.position = Point(0.0, 0.0)
         return ofOutput
     }

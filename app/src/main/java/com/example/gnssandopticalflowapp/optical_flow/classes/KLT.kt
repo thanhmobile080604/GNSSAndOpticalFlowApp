@@ -68,7 +68,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
 
         if (prevGray.empty()) {
             this.updatePoints(prevGray, currGray, prevPts)
-            ofOutput.of_frame = null
+            ofOutput.ofFrame = null
             ofOutput.position = null
             return ofOutput
         }
@@ -86,7 +86,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
         }
 
         if (prevPts.empty()) {
-            ofOutput.of_frame = null
+            ofOutput.ofFrame = null
             ofOutput.position = null
             return ofOutput
         }
@@ -146,7 +146,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
             prevPts.fromArray(*currPts.toArray())
         }
 
-        ofOutput.of_frame = currFrame
+        ofOutput.ofFrame = currFrame
         ofOutput.position = currMv
         return ofOutput
     }

@@ -5,7 +5,7 @@ import org.opencv.core.Point
 
 class OFOutput {
     @JvmField
-    var of_frame: Mat? = null
+    var ofFrame: Mat? = null
     @JvmField
     var position: Point? = null
 }

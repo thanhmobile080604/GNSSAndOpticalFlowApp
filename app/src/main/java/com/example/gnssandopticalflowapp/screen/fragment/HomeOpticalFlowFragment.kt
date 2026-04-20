@@ -132,7 +132,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                     
                     if (!rgbaMat.empty()) {
                         val output = klt.run(rgbaMat)
-                        val outFrame = output.of_frame ?: rgbaMat
+                        val outFrame = output.ofFrame ?: rgbaMat
                         
                         encoder.encodeFrame(outFrame)
                         framesProcessed++
