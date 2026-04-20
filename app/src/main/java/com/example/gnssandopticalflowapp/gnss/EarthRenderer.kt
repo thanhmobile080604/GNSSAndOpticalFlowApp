@@ -321,24 +321,46 @@ class EarthRenderer(private val context: Context) : Renderer {
         Matrix.setIdentityM(modelMatrix, 0)
         GLES32.glUniformMatrix4fv(0, 1, false, modelMatrix, 0)
 
-        // Add light based on GMT
-        val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("GMT"))
-        val hours = calendar.get(java.util.Calendar.HOUR_OF_DAY)
-        val minutes = calendar.get(java.util.Calendar.MINUTE)
-        val timeInHours = hours + minutes / 60.0f
-        val dayOfYear = calendar.get(java.util.Calendar.DAY_OF_YEAR)
+        // Add light based on GMT - use same UTC time as moon for consistency
+        val utcCalendarSun = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+        val utcTimeMillisSun = utcCalendarSun.timeInMillis
+        val jdSun = utcTimeMillisSun / 86400000.0 + 2440587.5
+        val dJDSun = jdSun - 2451545.0
 
-        // Calculate sun position
-        // Declination (approx)
-        val decRad =
-            asin(0.39795 * cos(0.2163108 + 2 * atan(0.9671396 * tan(0.00860 * (dayOfYear - 186)))))
-        // Longitude
-        val sunLonRaw = (12.0f - timeInHours) * 15.0f
-        val sunLonRad = Math.toRadians(sunLonRaw.toDouble())
+        // Sun orbital elements (more accurate)
+        var L_sun = 280.466 + 0.9856474 * dJDSun  // Mean longitude
+        var M_sun = 357.529 + 0.9856003 * dJDSun  // Mean anomaly
+        var w_sun = 282.940 + 4.70935e-5 * dJDSun  // Perihelion
 
-        val lightX = (cos(decRad) * sin(sunLonRad) * 10.0).toFloat()
-        val lightY = (sin(decRad) * 10.0).toFloat()
-        val lightZ = (cos(decRad) * cos(sunLonRad) * 10.0).toFloat()
+        L_sun %= 360.0; if (L_sun < 0) L_sun += 360.0
+        M_sun %= 360.0; if (M_sun < 0) M_sun += 360.0
+        w_sun %= 360.0; if (w_sun < 0) w_sun += 360.0
+
+        // Calculate ecliptic longitude with equation of center
+        val C_sun = (1.915 * sin(Math.toRadians(M_sun)) + 
+                    0.020 * sin(Math.toRadians(2 * M_sun))) * (1 - 0.003 * Math.toRadians(M_sun))
+        val lambdaSun = Math.toRadians(L_sun + C_sun)
+        
+        // Sun's ecliptic latitude is essentially 0 (sun is on ecliptic)
+        val betaSun = 0.0
+
+        // Ecliptic to Equatorial (same obliquity as moon)
+        val eps = Math.toRadians(23.439 - 0.0000004 * dJDSun)
+        val sinDeltaSun = sin(betaSun) * cos(eps) + cos(betaSun) * sin(eps) * sin(lambdaSun)
+        val deltaSun = asin(sinDeltaSun)
+        val alphaSun = atan2(sin(lambdaSun) * cos(eps) - tan(betaSun) * sin(eps), cos(lambdaSun))
+
+        // Use same sidereal time calculation as moon
+        val T_sun = dJDSun / 36525.0
+        val gmstSun = 280.46061837 + 360.98564736629 * dJDSun + 0.000387933 * T_sun * T_sun - T_sun * T_sun * T_sun / 38710000.0
+        val gmstDegSun = gmstSun % 360.0
+        val gmstRadSun = Math.toRadians(gmstDegSun)
+        val sunLonRad = alphaSun - gmstRadSun
+
+        // Calculate sun position in same coordinate system as moon
+        val lightX = (10.0 * cos(deltaSun) * sin(sunLonRad)).toFloat()
+        val lightY = (10.0 * sin(deltaSun)).toFloat()
+        val lightZ = (10.0 * cos(deltaSun) * cos(sunLonRad)).toFloat()
 
         glUniform3f(glGetUniformLocation(program, "lightColor"), 1f, 1f, 1f)
         glUniform3f(glGetUniformLocation(program, "lightPos"), lightX, lightY, lightZ)
@@ -349,29 +371,44 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glBindVertexArray(0)
 
         // Draw Moon
-        val jd = System.currentTimeMillis() / 86400000.0 + 2440587.5
-        val dJD = jd - 2451545.0
+        // Use UTC time instead of local time
+        val utcCalendarMoon = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+        val utcTimeMillisMoon = utcCalendarMoon.timeInMillis
+        val jdMoon = utcTimeMillisMoon / 86400000.0 + 2440587.5
+        val dJDMoon = jdMoon - 2451545.0
 
-        var L_moon = 218.32 + 13.176396 * dJD
-        var M_moon = 134.96 + 13.064993 * dJD
-        var F_moon = 93.27 + 13.229350 * dJD
+        // Moon orbital elements (more accurate)
+        var L_moon = 218.32 + 13.176396 * dJDMoon  // Mean longitude
+        var M_moon = 134.96 + 13.064993 * dJDMoon  // Mean anomaly
+        var F_moon = 93.27 + 13.229350 * dJDMoon    // Argument of latitude
+        var Omega_moon = 125.08 - 0.0529539 * dJDMoon  // Ascending node
+        var w_moon = 318.06 + 0.1643573 * dJDMoon     // Perigee
 
         L_moon %= 360.0; if (L_moon < 0) L_moon += 360.0
         M_moon %= 360.0; if (M_moon < 0) M_moon += 360.0
         F_moon %= 360.0; if (F_moon < 0) F_moon += 360.0
+        Omega_moon %= 360.0; if (Omega_moon < 0) Omega_moon += 360.0
+        w_moon %= 360.0; if (w_moon < 0) w_moon += 360.0
 
-        val lambdaMoon = Math.toRadians(L_moon + 6.289 * sin(Math.toRadians(M_moon)))
-        val betaMoon = Math.toRadians(5.128 * sin(Math.toRadians(F_moon)))
+        // Calculate ecliptic longitude with more terms
+        val lambdaMoon = Math.toRadians(L_moon + 6.289 * sin(Math.toRadians(M_moon)) + 
+                                         0.214 * sin(Math.toRadians(2 * M_moon)) +
+                                         0.658 * sin(Math.toRadians(2 * F_moon)))
+        val betaMoon = Math.toRadians(5.128 * sin(Math.toRadians(F_moon)) +
+                                       0.281 * sin(Math.toRadians(M_moon + F_moon)) +
+                                       0.278 * sin(Math.toRadians(M_moon - F_moon)))
 
         // Ecliptic to Equatorial
-        val eps = Math.toRadians(23.439)
-        val sinDeltaMoon = sin(betaMoon) * cos(eps) + cos(betaMoon) * sin(eps) * sin(lambdaMoon)
+        val epsMoon = Math.toRadians(23.439 - 0.0000004 * dJDMoon)  // Obliquity with small correction
+        val sinDeltaMoon = sin(betaMoon) * cos(epsMoon) + cos(betaMoon) * sin(epsMoon) * sin(lambdaMoon)
         val deltaMoon = asin(sinDeltaMoon)
-        val alphaMoon = atan2(sin(lambdaMoon) * cos(eps) - tan(betaMoon) * sin(eps), cos(lambdaMoon))
+        val alphaMoon = atan2(sin(lambdaMoon) * cos(epsMoon) - tan(betaMoon) * sin(epsMoon), cos(lambdaMoon))
 
-        // Sidereal time approx
-        val gmst = (18.697374558 + 24.06570982441908 * dJD) % 24.0
-        val gmstRad = Math.toRadians(gmst * 15.0)
+        // Improved sidereal time calculation
+        val T = dJDMoon / 36525.0
+        val gmst = 280.46061837 + 360.98564736629 * dJDMoon + 0.000387933 * T * T - T * T * T / 38710000.0
+        val gmstDeg = gmst % 360.0
+        val gmstRad = Math.toRadians(gmstDeg)
         val moonLonRad = alphaMoon - gmstRad
 
         val rMoonDist = 0.1f * 3.0f // Brought much closer to Earth for visibility (was 60.33f)
