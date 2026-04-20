@@ -7,7 +7,6 @@ import android.opengl.GLES32.GL_DEPTH_BUFFER_BIT
 import android.opengl.GLES32.GL_DEPTH_TEST
 import android.opengl.GLES32.glClear
 import android.opengl.GLES32.glClearColor
-import android.opengl.GLES32.glEnable
 import android.opengl.GLES32.glGetUniformLocation
 import android.opengl.GLES32.glUniform3f
 import android.opengl.GLES32.glViewport
@@ -21,6 +20,7 @@ import com.example.gnssandopticalflowapp.util.LoggerConfig
 import com.example.gnssandopticalflowapp.util.ShaderHelper
 import com.example.gnssandopticalflowapp.util.ShaderReader
 import com.example.gnssandopticalflowapp.util.TextureLoader
+import java.lang.Math.toRadians
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -29,7 +29,6 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.abs
 import kotlin.math.asin
-import kotlin.math.atan
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -43,23 +42,20 @@ class EarthRenderer(private val context: Context) : Renderer {
     private val projectionMatrix = FloatArray(16)
     private val viewMatrix = FloatArray(16)
     private val modelMatrix = FloatArray(16)
-    private val rotationMatrix = FloatArray(16)
 
     private var timeElapsed: Float = 0.0f
     private var animationSpeed: Float = 0.1f
 
     private var program = 0
-    private var VBO = 0
-    private var VAO = 0
-    private var EBO = 0
+    private var vbo = 0
+    private var vao = 0
+    private var ebo = 0
 
     private var skyboxVAO = 0
     private var skyboxVBO = 0
     private var skyboxProgram = 0
     private var skyboxTexture = 0
 
-    var xRotation = 0f
-    var yRotation = 0f
     var scaleFactor = 1.0f
 
     var theta = 0f
@@ -88,7 +84,7 @@ class EarthRenderer(private val context: Context) : Renderer {
     private var ringVBO = 0
     private val ringVertexCount = 360
     
-    private inner class SatRenderState(
+    private class SatRenderState(
         var rX: Float, var rY: Float, var rZ: Float,
         var tX: Float, var tY: Float, var tZ: Float,
         var info: com.example.gnssandopticalflowapp.model.SatelliteInfo
@@ -103,7 +99,7 @@ class EarthRenderer(private val context: Context) : Renderer {
         sphereIndices = sphere.indices
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
-        glEnable(GL_DEPTH_TEST)
+        GLES32.glEnable(GL_DEPTH_TEST)
 
         val skyboxVertexShaderSource = ShaderReader.readTextFileFromResource(context, R.raw.skybox_vertex_shader)
         val skyboxFragmentShaderSource = ShaderReader.readTextFileFromResource(context, R.raw.skybox_fragment_shader)
@@ -161,12 +157,12 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glGenVertexArrays(1, vaoBuffer)
         GLES32.glGenBuffers(1, vboBuffer)
         GLES32.glGenBuffers(1, eboBuffer)
-        VAO = vaoBuffer.get(0)
-        VBO = vboBuffer.get(0)
-        EBO = eboBuffer.get(0)
+        vao = vaoBuffer.get(0)
+        vbo = vboBuffer.get(0)
+        ebo = eboBuffer.get(0)
 
-        GLES32.glBindVertexArray(VAO)
-        GLES32.glBindBuffer(GLES32.GL_ARRAY_BUFFER, VBO)
+        GLES32.glBindVertexArray(vao)
+        GLES32.glBindBuffer(GLES32.GL_ARRAY_BUFFER, vbo)
         val vertexBuffer: FloatBuffer = ByteBuffer
             .allocateDirect(sphereVertices.size * Float.SIZE_BYTES)
             .order(ByteOrder.nativeOrder())
@@ -187,7 +183,7 @@ class EarthRenderer(private val context: Context) : Renderer {
             .asIntBuffer()
         indicesBuffer.put(sphereIndices)
         indicesBuffer.position(0)
-        GLES32.glBindBuffer(GLES32.GL_ELEMENT_ARRAY_BUFFER, EBO)
+        GLES32.glBindBuffer(GLES32.GL_ELEMENT_ARRAY_BUFFER, ebo)
         GLES32.glBufferData(GLES32.GL_ELEMENT_ARRAY_BUFFER, sphereIndices.size * Int.SIZE_BYTES, indicesBuffer, GLES32.GL_STATIC_DRAW)
 
         earthTextureId = TextureLoader.loadTexture2D(context, R.drawable.earth_texture)
@@ -197,7 +193,7 @@ class EarthRenderer(private val context: Context) : Renderer {
         // Ring for user location
         val ringVertices = FloatArray(ringVertexCount * 3)
         for (i in 0 until ringVertexCount) {
-            val angle = Math.toRadians(i.toDouble())
+            val angle = toRadians(i.toDouble())
             ringVertices[i * 3] = cos(angle).toFloat()
             ringVertices[i * 3 + 1] = sin(angle).toFloat()
             ringVertices[i * 3 + 2] = 0f
@@ -307,9 +303,9 @@ class EarthRenderer(private val context: Context) : Renderer {
 
         // Tính vị trí camera theo tọa độ hình cầu
         val radius = scaleFactor
-        val camX = (radius * cos(Math.toRadians(phi.toDouble())) * sin(Math.toRadians(theta.toDouble()))).toFloat()
-        val camY = (radius * sin(Math.toRadians(phi.toDouble()))).toFloat()
-        val camZ = (radius * cos(Math.toRadians(phi.toDouble())) * cos(Math.toRadians(theta.toDouble()))).toFloat()
+        val camX = (radius * cos(toRadians(phi.toDouble())) * sin(toRadians(theta.toDouble()))).toFloat()
+        val camY = (radius * sin(toRadians(phi.toDouble()))).toFloat()
+        val camZ = (radius * cos(toRadians(phi.toDouble())) * cos(toRadians(theta.toDouble()))).toFloat()
 
         Matrix.setLookAtM(viewMatrix, 0,
             camX, camY, camZ,  // camera position
@@ -328,33 +324,33 @@ class EarthRenderer(private val context: Context) : Renderer {
         val dJDSun = jdSun - 2451545.0
 
         // Sun orbital elements (more accurate)
-        var L_sun = 280.466 + 0.9856474 * dJDSun  // Mean longitude
-        var M_sun = 357.529 + 0.9856003 * dJDSun  // Mean anomaly
-        var w_sun = 282.940 + 4.70935e-5 * dJDSun  // Perihelion
+        var lSun = 280.466 + 0.9856474 * dJDSun  // Mean longitude
+        var mSun = 357.529 + 0.9856003 * dJDSun  // Mean anomaly
+        var wSun = 282.940 + 4.70935e-5 * dJDSun  // Perihelion
 
-        L_sun %= 360.0; if (L_sun < 0) L_sun += 360.0
-        M_sun %= 360.0; if (M_sun < 0) M_sun += 360.0
-        w_sun %= 360.0; if (w_sun < 0) w_sun += 360.0
+        lSun %= 360.0; if (lSun < 0) lSun += 360.0
+        mSun %= 360.0; if (mSun < 0) mSun += 360.0
+        wSun %= 360.0; if (wSun < 0) wSun += 360.0
 
         // Calculate ecliptic longitude with equation of center
-        val C_sun = (1.915 * sin(Math.toRadians(M_sun)) + 
-                    0.020 * sin(Math.toRadians(2 * M_sun))) * (1 - 0.003 * Math.toRadians(M_sun))
-        val lambdaSun = Math.toRadians(L_sun + C_sun)
+        val cSun = (1.915 * sin(toRadians(mSun)) + 
+                    0.020 * sin(toRadians(2 * mSun))) * (1 - 0.003 * toRadians(mSun))
+        val lambdaSun = toRadians(lSun + cSun)
         
         // Sun's ecliptic latitude is essentially 0 (sun is on ecliptic)
         val betaSun = 0.0
 
         // Ecliptic to Equatorial (same obliquity as moon)
-        val eps = Math.toRadians(23.439 - 0.0000004 * dJDSun)
+        val eps = toRadians(23.439 - 0.0000004 * dJDSun)
         val sinDeltaSun = sin(betaSun) * cos(eps) + cos(betaSun) * sin(eps) * sin(lambdaSun)
         val deltaSun = asin(sinDeltaSun)
         val alphaSun = atan2(sin(lambdaSun) * cos(eps) - tan(betaSun) * sin(eps), cos(lambdaSun))
 
         // Use same sidereal time calculation as moon
-        val T_sun = dJDSun / 36525.0
-        val gmstSun = 280.46061837 + 360.98564736629 * dJDSun + 0.000387933 * T_sun * T_sun - T_sun * T_sun * T_sun / 38710000.0
+        val tSun = dJDSun / 36525.0
+        val gmstSun = 280.46061837 + 360.98564736629 * dJDSun + 0.000387933 * tSun * tSun - tSun * tSun * tSun / 38710000.0
         val gmstDegSun = gmstSun % 360.0
-        val gmstRadSun = Math.toRadians(gmstDegSun)
+        val gmstRadSun = toRadians(gmstDegSun)
         val sunLonRad = alphaSun - gmstRadSun
 
         // Calculate sun position in same coordinate system as moon
@@ -366,7 +362,7 @@ class EarthRenderer(private val context: Context) : Renderer {
         glUniform3f(glGetUniformLocation(program, "lightPos"), lightX, lightY, lightZ)
         glUniform3f(glGetUniformLocation(program, "viewPos"), camX, camY, camZ)
 
-        GLES32.glBindVertexArray(VAO)
+        GLES32.glBindVertexArray(vao)
         GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
         GLES32.glBindVertexArray(0)
 
@@ -378,37 +374,37 @@ class EarthRenderer(private val context: Context) : Renderer {
         val dJDMoon = jdMoon - 2451545.0
 
         // Moon orbital elements (more accurate)
-        var L_moon = 218.32 + 13.176396 * dJDMoon  // Mean longitude
-        var M_moon = 134.96 + 13.064993 * dJDMoon  // Mean anomaly
-        var F_moon = 93.27 + 13.229350 * dJDMoon    // Argument of latitude
-        var Omega_moon = 125.08 - 0.0529539 * dJDMoon  // Ascending node
-        var w_moon = 318.06 + 0.1643573 * dJDMoon     // Perigee
+        var lMoon = 218.32 + 13.176396 * dJDMoon  // Mean longitude
+        var mMoon = 134.96 + 13.064993 * dJDMoon  // Mean anomaly
+        var fMoon = 93.27 + 13.229350 * dJDMoon    // Argument of latitude
+        var omegaMoon = 125.08 - 0.0529539 * dJDMoon  // Ascending node
+        var wMoon = 318.06 + 0.1643573 * dJDMoon     // Perigee
 
-        L_moon %= 360.0; if (L_moon < 0) L_moon += 360.0
-        M_moon %= 360.0; if (M_moon < 0) M_moon += 360.0
-        F_moon %= 360.0; if (F_moon < 0) F_moon += 360.0
-        Omega_moon %= 360.0; if (Omega_moon < 0) Omega_moon += 360.0
-        w_moon %= 360.0; if (w_moon < 0) w_moon += 360.0
+        lMoon %= 360.0; if (lMoon < 0) lMoon += 360.0
+        mMoon %= 360.0; if (mMoon < 0) mMoon += 360.0
+        fMoon %= 360.0; if (fMoon < 0) fMoon += 360.0
+        omegaMoon %= 360.0; if (omegaMoon < 0) omegaMoon += 360.0
+        wMoon %= 360.0; if (wMoon < 0) wMoon += 360.0
 
         // Calculate ecliptic longitude with more terms
-        val lambdaMoon = Math.toRadians(L_moon + 6.289 * sin(Math.toRadians(M_moon)) + 
-                                         0.214 * sin(Math.toRadians(2 * M_moon)) +
-                                         0.658 * sin(Math.toRadians(2 * F_moon)))
-        val betaMoon = Math.toRadians(5.128 * sin(Math.toRadians(F_moon)) +
-                                       0.281 * sin(Math.toRadians(M_moon + F_moon)) +
-                                       0.278 * sin(Math.toRadians(M_moon - F_moon)))
+        val lambdaMoon = toRadians(lMoon + 6.289 * sin(toRadians(mMoon)) + 
+                                         0.214 * sin(toRadians(2 * mMoon)) +
+                                         0.658 * sin(toRadians(2 * fMoon)))
+        val betaMoon = toRadians(5.128 * sin(toRadians(fMoon)) +
+                                       0.281 * sin(toRadians(mMoon + fMoon)) +
+                                       0.278 * sin(toRadians(mMoon - fMoon)))
 
         // Ecliptic to Equatorial
-        val epsMoon = Math.toRadians(23.439 - 0.0000004 * dJDMoon)  // Obliquity with small correction
+        val epsMoon = toRadians(23.439 - 0.0000004 * dJDMoon)  // Obliquity with small correction
         val sinDeltaMoon = sin(betaMoon) * cos(epsMoon) + cos(betaMoon) * sin(epsMoon) * sin(lambdaMoon)
         val deltaMoon = asin(sinDeltaMoon)
         val alphaMoon = atan2(sin(lambdaMoon) * cos(epsMoon) - tan(betaMoon) * sin(epsMoon), cos(lambdaMoon))
 
         // Improved sidereal time calculation
-        val T = dJDMoon / 36525.0
-        val gmst = 280.46061837 + 360.98564736629 * dJDMoon + 0.000387933 * T * T - T * T * T / 38710000.0
+        val t = dJDMoon / 36525.0
+        val gmst = 280.46061837 + 360.98564736629 * dJDMoon + 0.000387933 * t * t - t * t * t / 38710000.0
         val gmstDeg = gmst % 360.0
-        val gmstRad = Math.toRadians(gmstDeg)
+        val gmstRad = toRadians(gmstDeg)
         val moonLonRad = alphaMoon - gmstRad
 
         val rMoonDist = 0.1f * 3.0f // Brought much closer to Earth for visibility (was 60.33f)
@@ -427,24 +423,20 @@ class EarthRenderer(private val context: Context) : Renderer {
         val mPos = floatArrayOf(mX, mY, mZ, 1f)
         val mClip = FloatArray(4)
         Matrix.multiplyMV(mClip, 0, vpMatrix, 0, mPos, 0)
-        if (mClip[3] > 0) {
-            val ndcX = mClip[0] / mClip[3]
-            val ndcY = mClip[1] / mClip[3]
-            val ndcZ = mClip[2] / mClip[3]
-        } else {
+        if (mClip[3] <= 0) {
             Log.d("EarthRenderer", "Moon is behind camera")
         }
 
         GLES32.glUseProgram(program)
         GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
         GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, moonTextureId)
-        GLES32.glUniform1i(GLES32.glGetUniformLocation(program, "bodyTexture"), 0)
-        GLES32.glUniform1i(GLES32.glGetUniformLocation(program, "bodyType"), 1) // Moon
+        GLES32.glUniform1i(glGetUniformLocation(program, "bodyTexture"), 0)
+        GLES32.glUniform1i(glGetUniformLocation(program, "bodyType"), 1) // Moon
         
         GLES32.glUniformMatrix4fv(1, 1, false, viewMatrix, 0)
         GLES32.glUniformMatrix4fv(0, 1, false, moonModelMatrix, 0)
 
-        GLES32.glBindVertexArray(VAO)
+        GLES32.glBindVertexArray(vao)
         GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
         GLES32.glBindVertexArray(0)
 
@@ -466,13 +458,13 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glUseProgram(program)
         GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
         GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, sunTextureId)
-        GLES32.glUniform1i(GLES32.glGetUniformLocation(program, "bodyTexture"), 0)
-        GLES32.glUniform1i(GLES32.glGetUniformLocation(program, "bodyType"), 2) // Sun
+        GLES32.glUniform1i(glGetUniformLocation(program, "bodyTexture"), 0)
+        GLES32.glUniform1i(glGetUniformLocation(program, "bodyType"), 2) // Sun
         
         GLES32.glUniformMatrix4fv(1, 1, false, viewMatrix, 0)
         GLES32.glUniformMatrix4fv(0, 1, false, sunModelMatrix, 0)
 
-        GLES32.glBindVertexArray(VAO)
+        GLES32.glBindVertexArray(vao)
         GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
         GLES32.glBindVertexArray(0)
 
@@ -502,14 +494,13 @@ class EarthRenderer(private val context: Context) : Renderer {
         GLES32.glUniform1i(glGetUniformLocation(skyboxProgram, "skybox"), 0)
 
         GLES32.glDrawArrays(GLES32.GL_TRIANGLES, 0, 36)
-
         GLES32.glBindVertexArray(0)
         GLES32.glDepthMask(true)
         GLES32.glDepthFunc(GLES32.GL_LESS) // reset lại depth func mặc định
 
         // Draw Satellites
         GLES32.glUseProgram(satProgram)
-        GLES32.glBindVertexArray(VAO) // reuse sphere VAO
+        GLES32.glBindVertexArray(vao) // reuse sphere VAO
 
         val projLocSat = glGetUniformLocation(satProgram, "projectionMatrix")
         val viewLocSat = glGetUniformLocation(satProgram, "viewMatrix")
@@ -573,8 +564,8 @@ class EarthRenderer(private val context: Context) : Renderer {
                 // X = sin(lon)*cos(lat), Y = sin(lat), Z = cos(lon)*cos(lat)
                 // However, the Earth texture usually has Prime Meridian at center of X axis image.
                 // We'll use the same formula as the camera
-                val radLat = Math.toRadians(lat)
-                val radLon = Math.toRadians(lon)
+                val radLat = toRadians(lat)
+                val radLon = toRadians(lon)
 
                 val userX = (rUser * cos(radLat) * sin(radLon)).toFloat()
                 val userY = (rUser * sin(radLat)).toFloat()
@@ -625,7 +616,7 @@ class EarthRenderer(private val context: Context) : Renderer {
                 }
 
                 GLES32.glDisable(GLES32.GL_BLEND)
-                GLES32.glBindVertexArray(VAO) // Restore sphere VAO
+                GLES32.glBindVertexArray(vao) // Restore sphere VAO
             }
         }
 
@@ -666,8 +657,8 @@ class EarthRenderer(private val context: Context) : Renderer {
                 // Close proportion: Earth is 0.1f. We pull orbits much closer (0.15f - 0.17f) instead of physically correct 0.41f
                 val normalizedAlt = (sat.altitude / 35786000.0).coerceIn(0.0, 1.0)
                 val rSat = 0.15f + (0.02f * normalizedAlt).toFloat()
-                val latRad = Math.toRadians(sat.latitude)
-                val lonRad = Math.toRadians(sat.longitude)
+                val latRad = toRadians(sat.latitude)
+                val lonRad = toRadians(sat.longitude)
                 
                 val tx = (rSat * cos(latRad) * sin(lonRad)).toFloat()
                 val ty = (rSat * sin(latRad)).toFloat()
