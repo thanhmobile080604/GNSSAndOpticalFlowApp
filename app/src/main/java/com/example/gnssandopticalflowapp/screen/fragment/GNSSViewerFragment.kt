@@ -6,12 +6,14 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Canvas
+import android.location.GnssMeasurementsEvent
 import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -37,7 +39,10 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
 import com.example.gnssandopticalflowapp.gnss.EarthRenderer
+import com.example.gnssandopticalflowapp.gnss.GnssSatellitePvtResolver
+import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePositionFromEcef
 import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePosition
+import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSpeedFromEcefVelocity
 import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadiusAndSpeed
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog
@@ -68,6 +73,8 @@ import kotlin.math.abs
 @RequiresApi(Build.VERSION_CODES.R)
 class GNSSViewerFragment :
     BaseFragment<FragmentGnssViewerBinding>(FragmentGnssViewerBinding::inflate) {
+    private data class SatelliteKey(val constellationType: Int, val svid: Int)
+
     private var rendererSet = false
     private lateinit var earthRenderer: EarthRenderer
     private lateinit var scaleGestureDetector: ScaleGestureDetector
@@ -81,6 +88,10 @@ class GNSSViewerFragment :
     private var useTestLocation: Boolean = false
     private val testLatitude = 40.712776
     private val testLongitude = -74.005974
+    private val latestSatellitePvt =
+        mutableMapOf<SatelliteKey, GnssSatellitePvtResolver.SatellitePvtSnapshot>()
+    private var gnssMeasurementsRegistered = false
+    private var chipsetSupportsSatellitePvt = false
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -106,6 +117,22 @@ class GNSSViewerFragment :
                 safeContext(),
                 it
             ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private val gnssMeasurementsCallback = object : GnssMeasurementsEvent.Callback() {
+        override fun onGnssMeasurementsReceived(eventArgs: GnssMeasurementsEvent) {
+            val now = SystemClock.elapsedRealtimeNanos()
+            for (measurement in eventArgs.measurements) {
+                val snapshot = GnssSatellitePvtResolver.extractPvt(measurement) ?: continue
+                latestSatellitePvt[SatelliteKey(measurement.constellationType, measurement.svid)] =
+                    snapshot.copy(capturedAtElapsedRealtimeNanos = now)
+            }
+
+            val staleThresholdNanos = 10_000_000_000L
+            latestSatellitePvt.entries.removeAll { (_, snapshot) ->
+                now - snapshot.capturedAtElapsedRealtimeNanos > staleThresholdNanos
+            }
         }
     }
 
@@ -137,6 +164,7 @@ class GNSSViewerFragment :
                         if (status.hasCarrierFrequencyHz(i)) status.getCarrierFrequencyHz(i) else 0f
                     val svid = status.getSvid(i)
                     val constellation = status.getConstellationType(i)
+                    val satelliteKey = SatelliteKey(constellation, svid)
 
                     Log.v(
                         "GNSS_SAT",
@@ -152,24 +180,49 @@ class GNSSViewerFragment :
                     var lon = 0.0
                     var alt = 0.0
                     var spd = 0.0
+                    var positionSource = "Approximate"
+                    var ephemerisSource: String? = null
 
-                    val (orbitRadius, orbitSpeed) = getOrbitRadiusAndSpeed(
-                        constellation,
-                        svid
-                    )
-                    spd = orbitSpeed
+                    val pvtSnapshot = latestSatellitePvt[satelliteKey]?.takeIf { snapshot ->
+                        SystemClock.elapsedRealtimeNanos() - snapshot.capturedAtElapsedRealtimeNanos <= 10_000_000_000L
+                    }
 
-                    currentLocation?.let { loc ->
-                        val pos = calculateSatellitePosition(
+                    if (pvtSnapshot != null) {
+                        val pos = calculateSatellitePositionFromEcef(
+                            ecefX = pvtSnapshot.ecefX,
+                            ecefY = pvtSnapshot.ecefY,
+                            ecefZ = pvtSnapshot.ecefZ
+                        )
+                        lat = pos.latitude
+                        lon = pos.longitude
+                        alt = pos.altitude
+                        spd = calculateSpeedFromEcefVelocity(
+                            pvtSnapshot.velocityXMetersPerSecond,
+                            pvtSnapshot.velocityYMetersPerSecond,
+                            pvtSnapshot.velocityZMetersPerSecond
+                        ) ?: 0.0
+                        positionSource = "Real GNSS PVT"
+                        ephemerisSource =
+                            GnssSatellitePvtResolver.getEphemerisSourceLabel(pvtSnapshot.ephemerisSource)
+                    } else {
+                        val (orbitRadius, orbitSpeed) = getOrbitRadiusAndSpeed(
+                            constellation,
+                            svid
+                        )
+                        spd = orbitSpeed
+
+                        currentLocation?.let { loc ->
+                            val pos = calculateSatellitePosition(
                                 observerLat = loc.latitude,
                                 observerLon = loc.longitude,
                                 azimuthDegrees = azimuthDegrees,
                                 elevationDegrees = elevationDegrees,
                                 orbitRadius = orbitRadius
                             )
-                        lat = pos.latitude
-                        lon = pos.longitude
-                        alt = pos.altitude
+                            lat = pos.latitude
+                            lon = pos.longitude
+                            alt = pos.altitude
+                        }
                     }
 
                     satellites.add(
@@ -184,7 +237,9 @@ class GNSSViewerFragment :
                             latitude = lat,
                             longitude = lon,
                             altitude = alt,
-                            speed = spd
+                            speed = spd,
+                            positionSource = positionSource,
+                            ephemerisSource = ephemerisSource
                         )
                     )
                 }
@@ -282,6 +337,9 @@ class GNSSViewerFragment :
             locationManager =
                 safeContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
         }
+
+        val capabilities = runCatching { locationManager.gnssCapabilities }.getOrNull()
+        chipsetSupportsSatellitePvt = capabilities?.hasSatellitePvt() == true
     }
 
     @SuppressLint("MissingPermission")
@@ -307,6 +365,7 @@ class GNSSViewerFragment :
 
         // Request GNSS Status
         locationManager.registerGnssStatusCallback(safeContext().mainExecutor, gnssStatusCallback)
+        registerGnssMeasurements()
 
         // Check last known location immediately if it's fresh (within 2 minutes)
         val lastKnownMap = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
@@ -328,7 +387,38 @@ class GNSSViewerFragment :
         if (::locationManager.isInitialized) {
             locationManager.removeUpdates(locationListener)
             locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
+            if (gnssMeasurementsRegistered) {
+                locationManager.unregisterGnssMeasurementsCallback(gnssMeasurementsCallback)
+                gnssMeasurementsRegistered = false
+            }
         }
+        latestSatellitePvt.clear()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun registerGnssMeasurements() {
+        if (!::locationManager.isInitialized || gnssMeasurementsRegistered) return
+
+        val capabilities = runCatching { locationManager.gnssCapabilities }.getOrNull()
+        if (capabilities?.hasMeasurements() == false) {
+            Log.i("GNSS_STATUS", "GNSS measurements are not supported on this device.")
+            return
+        }
+
+        if (chipsetSupportsSatellitePvt) {
+            Log.i("GNSS_STATUS", "Chipset reports SatellitePvt support. Registering measurements.")
+        }
+
+        val registered = runCatching {
+            locationManager.registerGnssMeasurementsCallback(
+                safeContext().mainExecutor,
+                gnssMeasurementsCallback
+            )
+        }.onFailure { error ->
+            Log.w("GNSS_STATUS", "Failed to register GNSS measurements callback", error)
+        }.getOrDefault(false)
+
+        gnssMeasurementsRegistered = registered
     }
 
     @SuppressLint("MissingPermission")

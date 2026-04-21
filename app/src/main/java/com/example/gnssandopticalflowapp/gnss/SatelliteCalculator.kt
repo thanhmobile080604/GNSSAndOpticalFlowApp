@@ -9,6 +9,11 @@ import kotlin.math.sqrt
 
 object SatelliteCalculator {
     private const val EARTH_RADIUS_M = 6378137.0
+    private const val WGS84_A = 6378137.0
+    private const val WGS84_F = 1.0 / 298.257223563
+    private const val WGS84_B = WGS84_A * (1.0 - WGS84_F)
+    private const val WGS84_E2 = 1.0 - (WGS84_B * WGS84_B) / (WGS84_A * WGS84_A)
+    private const val WGS84_EP2 = (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_B * WGS84_B)
     private const val MU = 3.986004418e14 // Earth's gravitational constant (m^3/s^2)
 
     /**
@@ -105,6 +110,48 @@ object SatelliteCalculator {
             ecefX = ecefX,
             ecefY = ecefY,
             ecefZ = ecefZ
+        )
+    }
+
+    fun calculateSatellitePositionFromEcef(
+        ecefX: Double,
+        ecefY: Double,
+        ecefZ: Double
+    ): SatellitePositionResult {
+        val p = sqrt((ecefX * ecefX) + (ecefY * ecefY))
+        val theta = atan2(ecefZ * WGS84_A, p * WGS84_B)
+        val sinTheta = sin(theta)
+        val cosTheta = cos(theta)
+
+        val latitude = atan2(
+            ecefZ + (WGS84_EP2 * WGS84_B * sinTheta * sinTheta * sinTheta),
+            p - (WGS84_E2 * WGS84_A * cosTheta * cosTheta * cosTheta)
+        )
+        val longitude = atan2(ecefY, ecefX)
+        val sinLatitude = sin(latitude)
+        val radiusOfCurvature = WGS84_A / sqrt(1.0 - (WGS84_E2 * sinLatitude * sinLatitude))
+        val altitude = (p / cos(latitude)) - radiusOfCurvature
+
+        return SatellitePositionResult(
+            latitude = Math.toDegrees(latitude),
+            longitude = Math.toDegrees(longitude),
+            altitude = altitude,
+            ecefX = ecefX,
+            ecefY = ecefY,
+            ecefZ = ecefZ
+        )
+    }
+
+    fun calculateSpeedFromEcefVelocity(
+        velocityX: Double?,
+        velocityY: Double?,
+        velocityZ: Double?
+    ): Double? {
+        if (velocityX == null || velocityY == null || velocityZ == null) return null
+        return sqrt(
+            (velocityX * velocityX) +
+                (velocityY * velocityY) +
+                (velocityZ * velocityZ)
         )
     }
 }
