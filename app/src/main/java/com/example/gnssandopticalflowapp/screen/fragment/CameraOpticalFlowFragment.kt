@@ -6,7 +6,6 @@ import android.os.SystemClock
 import android.util.Log
 import android.widget.SeekBar
 import android.widget.Toast
-import androidx.core.graphics.createBitmap
 import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
@@ -56,6 +55,7 @@ class CameraOpticalFlowFragment :
     private var timerJob: Job? = null
     private var timerStartTime: Long = 0L
     private var elapsedBeforePause: Long = 0L
+    private var motionVectorBitmap: Bitmap? = null
 
     override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
@@ -120,6 +120,10 @@ class CameraOpticalFlowFragment :
             } else {
                 KLT(velPred)
             }
+            opticalFlow.setSensitivity(sensitivityBar.progress.coerceAtLeast(1))
+            mvViewer.resetMotionVector()
+            motionVectorBitmap = null
+            binding.motionVector.setImageBitmap(null)
         }
 
         sensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -296,8 +300,6 @@ class CameraOpticalFlowFragment :
         val yVelocity = velocity[1]
         val zVelocity = velocity[2]
 
-        Log.d("POS", "${imuPosition[0]}, ${imuPosition[1]}, ${imuPosition[2]}")
-
         // Get the magnitude of the velocity vector
         val speedMph = sqrt((xVelocity * xVelocity + yVelocity * yVelocity + zVelocity * zVelocity).toDouble()).toFloat()
 
@@ -321,7 +323,7 @@ class CameraOpticalFlowFragment :
                 mvMat = mv
 
                 // draw Motion Vector
-                val dst: Bitmap = createBitmap(mv.width(), mv.height())
+                val dst = getOrCreateMotionVectorBitmap(mv)
                 Utils.matToBitmap(mv, dst)
                 activity?.runOnUiThread {
                     binding.motionVector.setImageBitmap(dst)
@@ -344,6 +346,17 @@ class CameraOpticalFlowFragment :
             }
 
             videoEncoder?.encodeFrame(matFrame)
+        }
+    }
+
+    private fun getOrCreateMotionVectorBitmap(mat: Mat): Bitmap {
+        val currentBitmap = motionVectorBitmap
+        if (currentBitmap != null && currentBitmap.width == mat.cols() && currentBitmap.height == mat.rows()) {
+            return currentBitmap
+        }
+
+        return Bitmap.createBitmap(mat.cols(), mat.rows(), Bitmap.Config.ARGB_8888).also {
+            motionVectorBitmap = it
         }
     }
 }
