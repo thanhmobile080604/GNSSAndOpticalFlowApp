@@ -2,11 +2,13 @@ package com.example.gnssandopticalflowapp.gnss
 
 import android.location.GnssMeasurement
 import android.os.SystemClock
-import android.util.Log
 import java.lang.reflect.Method
 
 object GnssSatellitePvtResolver {
-    private const val TAG = "GnssSatellitePvt"
+    data class ProbeResult(
+        val snapshot: SatellitePvtSnapshot?,
+        val reason: String
+    )
 
     data class SatellitePvtSnapshot(
         val ecefX: Double,
@@ -43,39 +45,63 @@ object GnssSatellitePvtResolver {
     private var lookupFailed = false
 
     fun extractPvt(measurement: GnssMeasurement): SatellitePvtSnapshot? {
-        val access = getReflectionAccess(measurement) ?: return null
+        return probeMeasurement(measurement).snapshot
+    }
+
+    fun probeMeasurement(measurement: GnssMeasurement): ProbeResult {
+        val access = getReflectionAccess(measurement)
+            ?: return ProbeResult(
+                snapshot = null,
+                reason = "SatellitePvt API unavailable on runtime or blocked by reflection"
+            )
 
         return try {
             val hasPvt = access.hasSatellitePvt.invoke(measurement) as? Boolean ?: false
-            if (!hasPvt) return null
+            if (!hasPvt) {
+                return ProbeResult(
+                    snapshot = null,
+                    reason = "Measurement.hasSatellitePvt() == false"
+                )
+            }
 
-            val pvt = access.getSatellitePvt.invoke(measurement) ?: return null
-            val positionEcef = access.getPositionEcef.invoke(pvt) ?: return null
+            val pvt = access.getSatellitePvt.invoke(measurement)
+                ?: return ProbeResult(
+                    snapshot = null,
+                    reason = "Measurement.getSatellitePvt() returned null"
+                )
+            val positionEcef = access.getPositionEcef.invoke(pvt)
+                ?: return ProbeResult(
+                    snapshot = null,
+                    reason = "SatellitePvt returned null PositionEcef"
+                )
             val velocityEcef = access.getVelocityEcef.invoke(pvt)
 
-            SatellitePvtSnapshot(
-                ecefX = (access.getPositionX.invoke(positionEcef) as Number).toDouble(),
-                ecefY = (access.getPositionY.invoke(positionEcef) as Number).toDouble(),
-                ecefZ = (access.getPositionZ.invoke(positionEcef) as Number).toDouble(),
-                velocityXMetersPerSecond = velocityEcef?.let {
-                    (access.getVelocityX.invoke(it) as Number).toDouble()
-                },
-                velocityYMetersPerSecond = velocityEcef?.let {
-                    (access.getVelocityY.invoke(it) as Number).toDouble()
-                },
-                velocityZMetersPerSecond = velocityEcef?.let {
-                    (access.getVelocityZ.invoke(it) as Number).toDouble()
-                },
-                ephemerisSource = access.getEphemerisSource?.invoke(pvt)?.let {
-                    (it as Number).toInt()
-                }
+            ProbeResult(
+                snapshot = SatellitePvtSnapshot(
+                    ecefX = (access.getPositionX.invoke(positionEcef) as Number).toDouble(),
+                    ecefY = (access.getPositionY.invoke(positionEcef) as Number).toDouble(),
+                    ecefZ = (access.getPositionZ.invoke(positionEcef) as Number).toDouble(),
+                    velocityXMetersPerSecond = velocityEcef?.let {
+                        (access.getVelocityX.invoke(it) as Number).toDouble()
+                    },
+                    velocityYMetersPerSecond = velocityEcef?.let {
+                        (access.getVelocityY.invoke(it) as Number).toDouble()
+                    },
+                    velocityZMetersPerSecond = velocityEcef?.let {
+                        (access.getVelocityZ.invoke(it) as Number).toDouble()
+                    },
+                    ephemerisSource = access.getEphemerisSource?.invoke(pvt)?.let {
+                        (it as Number).toInt()
+                    }
+                ),
+                reason = "SatellitePvt extracted successfully"
             )
         } catch (error: Throwable) {
-            if (!lookupFailed) {
-                lookupFailed = true
-                Log.w(TAG, "Failed to read SatellitePvt from GnssMeasurement", error)
-            }
-            null
+            lookupFailed = true
+            ProbeResult(
+                snapshot = null,
+                reason = "Exception while reading SatellitePvt: ${error.javaClass.simpleName}"
+            )
         }
     }
 
@@ -128,7 +154,6 @@ object GnssSatellitePvtResolver {
                 }
             } catch (error: Throwable) {
                 lookupFailed = true
-                Log.i(TAG, "SatellitePvt API not available on this device/runtime")
                 null
             }
         }

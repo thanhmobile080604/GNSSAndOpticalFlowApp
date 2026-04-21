@@ -38,10 +38,12 @@ import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
+import com.example.gnssandopticalflowapp.gnss.CelesTrakSatelliteRepository
 import com.example.gnssandopticalflowapp.gnss.EarthRenderer
 import com.example.gnssandopticalflowapp.gnss.GnssSatellitePvtResolver
-import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePositionFromEcef
 import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePosition
+import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePositionFromEcef
+import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePositionFromMeanElements
 import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSpeedFromEcefVelocity
 import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadiusAndSpeed
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
@@ -90,8 +92,11 @@ class GNSSViewerFragment :
     private val testLongitude = -74.005974
     private val latestSatellitePvt =
         mutableMapOf<SatelliteKey, GnssSatellitePvtResolver.SatellitePvtSnapshot>()
+    private val latestCelesTrakOrbits =
+        mutableMapOf<SatelliteKey, CelesTrakSatelliteRepository.OrbitRecord>()
+    private val lastLoggedSource = mutableMapOf<SatelliteKey, String>()
     private var gnssMeasurementsRegistered = false
-    private var chipsetSupportsSatellitePvt = false
+    private var celesTrakRefreshInFlight = false
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -124,8 +129,9 @@ class GNSSViewerFragment :
         override fun onGnssMeasurementsReceived(eventArgs: GnssMeasurementsEvent) {
             val now = SystemClock.elapsedRealtimeNanos()
             for (measurement in eventArgs.measurements) {
+                val satelliteKey = SatelliteKey(measurement.constellationType, measurement.svid)
                 val snapshot = GnssSatellitePvtResolver.extractPvt(measurement) ?: continue
-                latestSatellitePvt[SatelliteKey(measurement.constellationType, measurement.svid)] =
+                latestSatellitePvt[satelliteKey] =
                     snapshot.copy(capturedAtElapsedRealtimeNanos = now)
             }
 
@@ -138,24 +144,8 @@ class GNSSViewerFragment :
 
     @SuppressLint("NewApi")
     private val gnssStatusCallback = object : GnssStatus.Callback() {
-        override fun onStarted() {
-            super.onStarted()
-            Log.d("GNSS_STATUS", "GNSS system started, searching for satellites...")
-        }
-
-        override fun onStopped() {
-            super.onStopped()
-            Log.d("GNSS_STATUS", "GNSS system stopped.")
-        }
-
-        override fun onFirstFix(ttffMillis: Int) {
-            super.onFirstFix(ttffMillis)
-            Log.d("GNSS_STATUS", "First GNSS fix acquired in ${ttffMillis}ms")
-        }
-
         override fun onSatelliteStatusChanged(status: GnssStatus) {
             val satelliteCount = status.satelliteCount
-            Log.d("GNSS_STATUS", "Satellite status changed. Found $satelliteCount satellites.")
 
             if (rendererSet) {
                 val satellites = mutableListOf<SatelliteInfo>()
@@ -165,13 +155,6 @@ class GNSSViewerFragment :
                     val svid = status.getSvid(i)
                     val constellation = status.getConstellationType(i)
                     val satelliteKey = SatelliteKey(constellation, svid)
-
-                    Log.v(
-                        "GNSS_SAT",
-                        "Sat index $i: SVID=$svid, Constellation=$constellation, CN0=${
-                            status.getCn0DbHz(i)
-                        }, UsedInFix=${status.usedInFix(i)}"
-                    )
 
                     val elevationDegrees = status.getElevationDegrees(i)
                     val azimuthDegrees = status.getAzimuthDegrees(i)
@@ -186,6 +169,7 @@ class GNSSViewerFragment :
                     val pvtSnapshot = latestSatellitePvt[satelliteKey]?.takeIf { snapshot ->
                         SystemClock.elapsedRealtimeNanos() - snapshot.capturedAtElapsedRealtimeNanos <= 10_000_000_000L
                     }
+                    val celesTrakOrbit = latestCelesTrakOrbits[satelliteKey]
 
                     if (pvtSnapshot != null) {
                         val pos = calculateSatellitePositionFromEcef(
@@ -204,6 +188,55 @@ class GNSSViewerFragment :
                         positionSource = "Real GNSS PVT"
                         ephemerisSource =
                             GnssSatellitePvtResolver.getEphemerisSourceLabel(pvtSnapshot.ephemerisSource)
+                    } else if (celesTrakOrbit != null) {
+                        val orbitState = runCatching {
+                            calculateSatellitePositionFromMeanElements(
+                                epochUtcMillis = celesTrakOrbit.epochUtcMillis,
+                                meanMotionRevPerDay = celesTrakOrbit.meanMotionRevPerDay,
+                                eccentricity = celesTrakOrbit.eccentricity,
+                                inclinationDeg = celesTrakOrbit.inclinationDeg,
+                                raanDeg = celesTrakOrbit.raanDeg,
+                                argOfPerigeeDeg = celesTrakOrbit.argOfPerigeeDeg,
+                                meanAnomalyDeg = celesTrakOrbit.meanAnomalyDeg
+                            )
+                        }.getOrNull()
+
+                        if (orbitState != null) {
+                            lat = orbitState.position.latitude
+                            lon = orbitState.position.longitude
+                            alt = orbitState.position.altitude
+                            spd = orbitState.speedMetersPerSecond
+                            positionSource = "CelesTrak GP"
+                            ephemerisSource = buildString {
+                                celesTrakOrbit.noradCatalogId?.let {
+                                    append("NORAD ")
+                                    append(it)
+                                }
+                                if (celesTrakOrbit.objectName.isNotBlank()) {
+                                    if (isNotEmpty()) append(" | ")
+                                    append(celesTrakOrbit.objectName)
+                                }
+                            }.ifBlank { null }
+                        } else {
+                            val (orbitRadius, orbitSpeed) = getOrbitRadiusAndSpeed(
+                                constellation,
+                                svid
+                            )
+                            spd = orbitSpeed
+
+                            currentLocation?.let { loc ->
+                                val pos = calculateSatellitePosition(
+                                    observerLat = loc.latitude,
+                                    observerLon = loc.longitude,
+                                    azimuthDegrees = azimuthDegrees,
+                                    elevationDegrees = elevationDegrees,
+                                    orbitRadius = orbitRadius
+                                )
+                                lat = pos.latitude
+                                lon = pos.longitude
+                                alt = pos.altitude
+                            }
+                        }
                     } else {
                         val (orbitRadius, orbitSpeed) = getOrbitRadiusAndSpeed(
                             constellation,
@@ -223,6 +256,14 @@ class GNSSViewerFragment :
                             lon = pos.longitude
                             alt = pos.altitude
                         }
+                    }
+
+                    if (lastLoggedSource[satelliteKey] != positionSource) {
+                        lastLoggedSource[satelliteKey] = positionSource
+                        Log.d(
+                            "GNSS_SOURCE",
+                            "sat=$constellation/$svid source=$positionSource"
+                        )
                     }
 
                     satellites.add(
@@ -337,17 +378,13 @@ class GNSSViewerFragment :
             locationManager =
                 safeContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
         }
-
-        val capabilities = runCatching { locationManager.gnssCapabilities }.getOrNull()
-        chipsetSupportsSatellitePvt = capabilities?.hasSatellitePvt() == true
     }
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
         if (!hasLocationPermission()) return
         setupLocationManager()
-
-        Log.d("LOCATION", "Starting location and GNSS updates...")
+        refreshCelesTrakDataIfNeeded()
 
         // Request Location
         locationManager.requestLocationUpdates(
@@ -393,6 +430,26 @@ class GNSSViewerFragment :
             }
         }
         latestSatellitePvt.clear()
+        latestCelesTrakOrbits.clear()
+        lastLoggedSource.clear()
+    }
+
+    private fun refreshCelesTrakDataIfNeeded(forceRefresh: Boolean = false) {
+        if (celesTrakRefreshInFlight) return
+
+        celesTrakRefreshInFlight = true
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val snapshot = CelesTrakSatelliteRepository.getSnapshot(forceRefresh) ?: return@launch
+
+                latestCelesTrakOrbits.clear()
+                snapshot.records.forEach { (key, orbit) ->
+                    latestCelesTrakOrbits[SatelliteKey(key.constellationType, key.svid)] = orbit
+                }
+            } finally {
+                celesTrakRefreshInFlight = false
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -401,12 +458,7 @@ class GNSSViewerFragment :
 
         val capabilities = runCatching { locationManager.gnssCapabilities }.getOrNull()
         if (capabilities?.hasMeasurements() == false) {
-            Log.i("GNSS_STATUS", "GNSS measurements are not supported on this device.")
             return
-        }
-
-        if (chipsetSupportsSatellitePvt) {
-            Log.i("GNSS_STATUS", "Chipset reports SatellitePvt support. Registering measurements.")
         }
 
         val registered = runCatching {
@@ -414,8 +466,6 @@ class GNSSViewerFragment :
                 safeContext().mainExecutor,
                 gnssMeasurementsCallback
             )
-        }.onFailure { error ->
-            Log.w("GNSS_STATUS", "Failed to register GNSS measurements callback", error)
         }.getOrDefault(false)
 
         gnssMeasurementsRegistered = registered
