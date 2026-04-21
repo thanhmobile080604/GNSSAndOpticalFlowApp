@@ -63,13 +63,13 @@ class Map3DInformationDialog :
                 "Carrier frequency: N/A"
             }
         tvUsedInFix.text =
-            "Usage status: ${if (satellite.usedInFix) "In use" else "Not in use"} | Source: ${satellite.positionSource}"
+            "Usage status: ${if (satellite.usedInFix) "In use" else "Not in use"}"
+        tvSource.text = "Source: ${satellite.positionSource}"
         tvLatitude.text = "Latitude: $formattedLatitude°"
         tvLongitude.text = "Longitude: $formattedLongitude°"
         tvAltitude.text = "Altitude: $formattedAltitude m"
-        tvVelocity.text = satellite.ephemerisSource?.let {
-            "Speed: $formattedSpeed | Ephemeris: $it"
-        } ?: "Speed: $formattedSpeed"
+        tvVelocity.text = "Speed: $formattedSpeed "
+        tvEphemeris.text = "Ephemeris: ${satellite.ephemerisSource ?: "N/A"}"
     }
 
     override fun DialogMap3dInformationBinding.initListener() {
