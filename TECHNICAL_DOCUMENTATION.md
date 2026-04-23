@@ -753,17 +753,17 @@ p(t) = p(t-1) + v(t) * Δt
 
 ---
 
-## 6. Cap nhat GNSS SatellitePvt runtime
+## 6. Cập nhật GNSS SatellitePvt runtime
 
-### 6.1 Muc tieu
+### 6.1 Mục tiêu
 
-Phan GNSS da duoc mo rong de uu tien lay vi tri ve tinh that tu GNSS raw measurements, thay vi chi suy ra tu `observerLat`, `observerLon`, `azimuthDegrees`, `elevationDegrees` va ban kinh quy dao xap xi.
+Phần GNSS đã được mở rộng để ưu tiên lấy vị trí vệ tinh thật từ GNSS raw measurements, thay vì chỉ suy ra từ `observerLat`, `observerLon`, `azimuthDegrees`, `elevationDegrees` và bán kính quỹ đạo xấp xỉ.
 
-He thong hien tai hoat dong theo nguyen tac:
-- Prefer `SatellitePvt` neu chipset tra ve du lieu that
-- Fallback ve nhanh approximate cu neu thiet bi khong ho tro
+Hệ thống hiện tại hoạt động theo nguyên tắc:
+- Prefer `SatellitePvt` nếu chipset trả về dữ liệu thật
+- Fallback về nhánh approximate cũ nếu thiết bị không hỗ trợ
 
-### 6.2 Cac file da thay doi
+### 6.2 Các file đã thay đổi
 
 - `app/src/main/java/com/example/gnssandopticalflowapp/gnss/GnssSatellitePvtResolver.kt`
 - `app/src/main/java/com/example/gnssandopticalflowapp/gnss/SatelliteCalculator.kt`
@@ -771,32 +771,32 @@ He thong hien tai hoat dong theo nguyen tac:
 - `app/src/main/java/com/example/gnssandopticalflowapp/model/SatelliteInfo.kt`
 - `app/src/main/java/com/example/gnssandopticalflowapp/screen/dialog/Map3DInformationDialog.kt`
 
-### 6.3 Luong xu ly moi
+### 6.3 Luồng xử lý mới
 
-1. `GNSSViewerFragment` dang ky dong thoi `GnssStatus.Callback` va `GnssMeasurementsEvent.Callback`.
-2. `GnssMeasurementsEvent` duoc dung de doc tung `GnssMeasurement`.
-3. Moi measurement duoc thu resolve `SatellitePvt`.
-4. Du lieu PVT duoc cache theo khoa `constellationType + svid`.
-5. Khi `GnssStatus` cap nhat danh sach ve tinh, app ghep metadata hien thi voi PVT cache neu co.
+1. `GNSSViewerFragment` đăng ký đồng thời `GnssStatus.Callback` và `GnssMeasurementsEvent.Callback`.
+2. `GnssMeasurementsEvent` được dùng để đọc từng `GnssMeasurement`.
+3. Mỗi measurement được thử resolve `SatellitePvt`.
+4. Dữ liệu PVT được cache theo khóa `constellationType + svid`.
+5. Khi `GnssStatus` cập nhật danh sách vệ tinh, app ghép metadata hiển thị với PVT cache nếu có.
 
 ### 6.4 Resolver qua reflection
 
-`GnssSatellitePvtResolver.kt` dung reflection de truy cap:
+`GnssSatellitePvtResolver.kt` dùng reflection để truy cập:
 - `hasSatellitePvt()`
 - `getSatellitePvt()`
 - `getPositionEcef()`
 - `getVelocityEcef()`
 - `getEphemerisSource()`
 
-Huong nay giup:
-- Khong hard-bind compile-time vao hidden/system API
-- Van chay duoc tren may khong expose `SatellitePvt`
+Hướng này giúp:
+- Không hard-bind compile-time vào hidden/system API
+- Vẫn chạy được trên máy không expose `SatellitePvt`
 
-Neu reflection fail, resolver tra `null` va luong xu ly quay ve nhanh approximate.
+Nếu reflection fail, resolver trả `null` và luồng xử lý quay về nhánh approximate.
 
-### 6.5 Chuyen ECEF sang LLA
+### 6.5 Chuyển ECEF sang LLA
 
-`SatelliteCalculator.kt` bo sung:
+`SatelliteCalculator.kt` bổ sung:
 
 ```kotlin
 fun calculateSatellitePositionFromEcef(
@@ -806,20 +806,20 @@ fun calculateSatellitePositionFromEcef(
 ): SatellitePositionResult
 ```
 
-Ham nay dung tham so WGS84 de doi tu ECEF sang:
+Hàm này dùng tham số WGS84 để đổi từ ECEF sang:
 - `latitude`
 - `longitude`
 - `altitude`
 
-### 6.6 Tinh toc do ve tinh that
+### 6.6 Tính tốc độ vệ tinh thật
 
-Khi `SatellitePvt` co velocity ECEF, toc do duoc tinh bang:
+Khi `SatellitePvt` có velocity ECEF, tốc độ được tính bằng:
 
 ```text
 speed = sqrt(vx^2 + vy^2 + vz^2)
 ```
 
-Ham bo sung:
+Hàm bổ sung:
 
 ```kotlin
 fun calculateSpeedFromEcefVelocity(
@@ -829,111 +829,111 @@ fun calculateSpeedFromEcefVelocity(
 ): Double?
 ```
 
-### 6.7 Co che fallback
+### 6.7 Cơ chế fallback
 
-App hien tai co 2 nhanh:
+App hiện tại có 2 nhánh:
 
 `Real GNSS PVT`
-- Dung khi `GnssMeasurement` tra `SatellitePvt`
-- Vi tri ve tinh di truc tiep tu PVT that
-- Toc do co the lay tu velocity ECEF
+- Dùng khi `GnssMeasurement` trả `SatellitePvt`
+- Vị trí vệ tinh đi trực tiếp từ PVT thật
+- Tốc độ có thể lấy từ velocity ECEF
 
 `Approximate`
-- Dung khi khong co `SatellitePvt`
-- Van tinh tu `observerLat`, `observerLon`, `azimuthDegrees`, `elevationDegrees`, `orbitRadius`
-- Giu tuong thich voi thiet bi cu
+- Dùng khi không có `SatellitePvt`
+- Vẫn tính từ `observerLat`, `observerLon`, `azimuthDegrees`, `elevationDegrees`, `orbitRadius`
+- Giữ tương thích với thiết bị cũ
 
-### 6.8 Cache va timeout
+### 6.8 Cache và timeout
 
-Du lieu `SatellitePvt` duoc cache tam trong fragment theo `SatelliteKey`.
+Dữ liệu `SatellitePvt` được cache tạm trong fragment theo `SatelliteKey`.
 
-Timeout hien tai la 10 giay:
-- Ban ghi qua cu se bi loai bo
-- Tranh render vi tri ve tinh loi thoi
+Timeout hiện tại là 10 giây:
+- Bản ghi quá cũ sẽ bị loại bỏ
+- Tránh render vị trí vệ tinh lỗi thời
 
-### 6.9 Tac dong len UI
+### 6.9 Tác động lên UI
 
-`SatelliteInfo` bo sung:
+`SatelliteInfo` bổ sung:
 - `positionSource`
 - `ephemerisSource`
 
-`Map3DInformationDialog` hien thi them:
-- `Source: Real GNSS PVT` hoac `Source: Approximate`
-- `Ephemeris: ...` neu co
+`Map3DInformationDialog` hiển thị thêm:
+- `Source: Real GNSS PVT` hoặc `Source: Approximate`
+- `Ephemeris: ...` nếu có
 
-### 6.10 Ghi chu runtime
+### 6.10 Ghi chú runtime
 
-- Khong phai moi thiet bi Android deu tra `SatellitePvt`
-- `GnssCapabilities.hasSatellitePvt()` chi cho biet chipset co kha nang, khong dam bao moi measurement deu co PVT
-- Logic cuoi cung van la prefer real PVT, fallback approximate
+- Không phải mọi thiết bị Android đều trả `SatellitePvt`
+- `GnssCapabilities.hasSatellitePvt()` chỉ cho biết chipset có khả năng, không đảm bảo mọi measurement đều có PVT
+- Logic cuối cùng vẫn là prefer real PVT, fallback approximate
 
-## 7. Cap nhat CelesTrak GP fallback ngoai thiet bi
+## 7. Cập nhật CelesTrak GP fallback ngoài thiết bị
 
-### 7.1 Muc tieu
+### 7.1 Mục tiêu
 
-Mot so may nhu `S20 Ultra` co:
+Một số máy như `S20 Ultra` có:
 - `hasMeasurements=true`
 - `hasSatellitePvt=false`
 - `hasNavigationMessages=false`
 
-Trong truong hop nay app khong the lay vi tri ve tinh that chi tu API GNSS local.
+Trong trường hợp này app không thể lấy vị trí vệ tinh thật chỉ từ API GNSS local.
 
-Nhanh moi dung du lieu ngoai tu `CelesTrak GP` de nang cap vi tri ve tinh, nhung van giu fallback approximate cu khi:
-- fetch that bai
-- khong map duoc `SVID`
-- propagate orbit that bai
+Nhánh mới dùng dữ liệu ngoài từ `CelesTrak GP` để nâng cấp vị trí vệ tinh, nhưng vẫn giữ fallback approximate cũ khi:
+- fetch thất bại
+- không map được `SVID`
+- propagate orbit thất bại
 
-### 7.2 File moi va file chinh sua
+### 7.2 File mới và file chỉnh sửa
 
 - `app/src/main/java/com/example/gnssandopticalflowapp/gnss/CelesTrakSatelliteRepository.kt`
 - `app/src/main/java/com/example/gnssandopticalflowapp/gnss/SatelliteCalculator.kt`
 - `app/src/main/java/com/example/gnssandopticalflowapp/screen/fragment/GNSSViewerFragment.kt`
 
-### 7.3 Nguon du lieu
+### 7.3 Nguồn dữ liệu
 
-Repository moi goi endpoint:
+Repository mới gọi endpoint:
 
 ```text
 https://celestrak.org/NORAD/elements/gp.php?GROUP=...&FORMAT=JSON
 ```
 
-Hien tai app fetch 3 group:
+Hiện tại app fetch 3 group:
 - `GPS-OPS`
 - `GALILEO`
 - `BEIDOU`
 
-Ly do:
-- day la cac group map `SVID` kha chac tu ten ve tinh
-- `GLONASS`, `QZSS`, `IRNSS`, `SBAS` hien chua co heuristic map on dinh tu ten object trong nhanh nay
+Lý do:
+- đây là các group map `SVID` khá chắc từ tên vệ tinh
+- `GLONASS`, `QZSS`, `IRNSS`, `SBAS` hiện chưa có heuristic map ổn định từ tên object trong nhánh này
 
-### 7.4 Cache va tan suat refresh
+### 7.4 Cache và tần suất refresh
 
-`CelesTrakSatelliteRepository` cache snapshot toi thieu `2 gio`.
+`CelesTrakSatelliteRepository` cache snapshot tối thiểu `2 giờ`.
 
-Dieu nay giup:
-- giam so lan goi mang
-- tranh vi pham khuyen nghi khong poll qua thuong xuyen cua CelesTrak
-- tranh lag khi `GnssStatus` callback ban ra lien tuc
+Điều này giúp:
+- giảm số lần gọi mạng
+- tránh vi phạm khuyến nghị không poll quá thường xuyên của CelesTrak
+- tránh lag khi `GnssStatus` callback bắn ra liên tục
 
 ### 7.5 Map SVID
 
-App map `SVID` tu `OBJECT_NAME` bang regex:
+App map `SVID` từ `OBJECT_NAME` bằng regex:
 - GPS: `PRN xx`
 - Galileo: `GALILEO xx`
 - BeiDou: `(Cxx)`
 
-Neu khong tach duoc `SVID`, record do bi bo qua va ve tinh se tiep tuc dung nhanh approximate.
+Nếu không tách được `SVID`, record đó bị bỏ qua và vệ tinh sẽ tiếp tục dùng nhánh approximate.
 
 ### 7.6 Propagate orbit
 
-`SatelliteCalculator.kt` bo sung:
+`SatelliteCalculator.kt` bổ sung:
 
 ```kotlin
 fun calculateSatellitePositionFromMeanElements(...): OrbitStateResult
 ```
 
-Ham nay:
-- doc `MEAN_MOTION`
+Hàm này:
+- đọc `MEAN_MOTION`
 - `ECCENTRICITY`
 - `INCLINATION`
 - `RA_OF_ASC_NODE`
@@ -941,47 +941,48 @@ Ham nay:
 - `MEAN_ANOMALY`
 - `EPOCH`
 
-Sau do:
-- giai Kepler equation
-- tinh vi tri orbital plane
+Sau đó:
+- giải Kepler equation
+- tính vị trí orbital plane
 - quay sang ECI
-- doi sang ECEF bang Greenwich sidereal angle
-- doi tiep sang `latitude`, `longitude`, `altitude`
+- đổi sang ECEF bằng Greenwich sidereal angle
+- đổi tiếp sang `latitude`, `longitude`, `altitude`
 
-Toc do duoc tinh bang cong thuc `vis-viva`.
+Tốc độ được tính bằng công thức `vis-viva`.
 
-### 7.7 Thu tu uu tien nguon du lieu
+### 7.7 Thứ tự ưu tiên nguồn dữ liệu
 
-Trong `GNSSViewerFragment`, thu tu xu ly hien tai la:
+Trong `GNSSViewerFragment`, thứ tự xử lý hiện tại là:
 
 1. `Real GNSS PVT`
 2. `CelesTrak GP`
 3. `Approximate`
 
-Nghia la:
-- neu may tra `SatellitePvt` thi van uu tien PVT that
-- neu may khong tra PVT nhung co CelesTrak map duoc thi dung orbit ngoai
-- neu ca hai deu khong co thi quay ve calculator cu
+Nghĩa là:
+- nếu máy trả `SatellitePvt` thì vẫn ưu tiên PVT thật
+- nếu máy không trả PVT nhưng có CelesTrak map được thì dùng orbit ngoài
+- nếu cả hai đều không có thì quay về calculator cũ
 
 ### 7.8 Logging runtime
 
-Bo sung them cac nhom log:
+Bổ sung thêm các nhóm log:
 - `GNSS_CAP`
 - `GNSS_PVT_DEBUG`
 - `GNSS_CELESTRAK`
 
-Muc dich:
-- phan biet may co support PVT hay khong
-- biet ly do `PVT null`
-- biet da nap duoc bao nhieu ve tinh map tu CelesTrak
+Mục đích:
+- phân biệt máy có support PVT hay không
+- biết lý do `PVT null`
+- biết đã nạp được bao nhiêu vệ tinh map từ CelesTrak
 
-### 7.9 Ghi chu do chinh xac
+### 7.9 Ghi chú độ chính xác
 
-Nhanh `CelesTrak GP` tot hon approximate local vi dung orbital elements that tu ngoai, nhung no van:
-- khong phai broadcast ephemeris GNSS native tren may
-- khong phai full SGP4 implementation
-- duoc toi uu cho visualization va fallback thuc dung
+Nhánh `CelesTrak GP` tốt hơn approximate local vì dùng orbital elements thật từ ngoài, nhưng nó vẫn:
+- không phải broadcast ephemeris GNSS native trên máy
+- không phải full SGP4 implementation
+- được tối ưu cho visualization và fallback thực dụng
 
-Neu muon do chinh xac GNSS cao hon nua, huong sau se la:
+Nếu muốn độ chính xác GNSS cao hơn nữa, hướng sau sẽ là:
 - parse `RINEX nav`
-- hoac dung `broadcast ephemeris / precise ephemeris` tu IGS/BKG
+- hoặc dùng `broadcast ephemeris / precise ephemeris` từ IGS/BKG
+
