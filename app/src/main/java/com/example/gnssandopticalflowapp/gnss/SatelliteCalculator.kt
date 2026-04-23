@@ -1,8 +1,8 @@
 package com.example.gnssandopticalflowapp.gnss
 
 import android.location.GnssStatus
+import com.example.gnssandopticalflowapp.model.OrbitStateResult
 import com.example.gnssandopticalflowapp.model.SatellitePositionResult
-import java.lang.Math.cbrt
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.pow
@@ -18,11 +18,6 @@ object SatelliteCalculator {
     private const val WGS84_EP2 = (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_B * WGS84_B)
     private const val MU = 3.986004418e14 // Earth's gravitational constant (m^3/s^2)
     private const val SECONDS_PER_DAY = 86400.0
-
-    data class OrbitStateResult(
-        val position: SatellitePositionResult,
-        val speedMetersPerSecond: Double
-    )
 
     /**
      * Returns the approximate orbital radius (from Earth's center in meters) and the 
@@ -174,7 +169,7 @@ object SatelliteCalculator {
         observationUtcMillis: Long = System.currentTimeMillis()
     ): OrbitStateResult {
         val meanMotionRadPerSec = meanMotionRevPerDay * (2.0 * Math.PI) / SECONDS_PER_DAY
-        val semiMajorAxis = cbrt(MU / (meanMotionRadPerSec * meanMotionRadPerSec))
+        val semiMajorAxis = kotlin.math.cbrt(MU / (meanMotionRadPerSec * meanMotionRadPerSec))
 
         val deltaSeconds = (observationUtcMillis - epochUtcMillis) / 1000.0
         val meanAnomalyRad = normalizeRadians(

@@ -14,6 +14,7 @@ import android.opengl.GLSurfaceView.Renderer
 import android.opengl.Matrix
 import android.util.Log
 import com.example.gnssandopticalflowapp.R
+import com.example.gnssandopticalflowapp.model.SatRenderState
 import com.example.gnssandopticalflowapp.model.createSphere
 import com.example.gnssandopticalflowapp.model.skyboxVertices
 import com.example.gnssandopticalflowapp.util.LoggerConfig
@@ -34,6 +35,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.math.tan
+
 
 class EarthRenderer(private val context: Context) : Renderer {
     private lateinit var sphereVertices: FloatArray
@@ -83,12 +85,7 @@ class EarthRenderer(private val context: Context) : Renderer {
     private var ringVAO = 0
     private var ringVBO = 0
     private val ringVertexCount = 360
-    
-    private class SatRenderState(
-        var rX: Float, var rY: Float, var rZ: Float,
-        var tX: Float, var tY: Float, var tZ: Float,
-        var info: com.example.gnssandopticalflowapp.model.SatelliteInfo
-    )
+
     private var renderSatellites = mutableMapOf<String, SatRenderState>()
     val satelliteCount: Int get() = satellites.size
     private val satLock = Any()

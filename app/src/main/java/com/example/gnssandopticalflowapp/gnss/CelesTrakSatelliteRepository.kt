@@ -1,6 +1,10 @@
 package com.example.gnssandopticalflowapp.gnss
 
 import android.location.GnssStatus
+import com.example.gnssandopticalflowapp.model.CacheSnapshot
+import com.example.gnssandopticalflowapp.model.GroupRequest
+import com.example.gnssandopticalflowapp.model.OrbitRecord
+import com.example.gnssandopticalflowapp.model.SatelliteKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -16,34 +20,6 @@ object CelesTrakSatelliteRepository {
     private const val CACHE_TTL_MS = 2 * 60 * 60 * 1000L
     private const val CONNECT_TIMEOUT_MS = 10_000
     private const val READ_TIMEOUT_MS = 10_000
-
-    data class SatelliteKey(
-        val constellationType: Int,
-        val svid: Int
-    )
-
-    data class OrbitRecord(
-        val key: SatelliteKey,
-        val objectName: String,
-        val noradCatalogId: Int?,
-        val epochUtcMillis: Long,
-        val inclinationDeg: Double,
-        val raanDeg: Double,
-        val eccentricity: Double,
-        val argOfPerigeeDeg: Double,
-        val meanAnomalyDeg: Double,
-        val meanMotionRevPerDay: Double
-    )
-
-    data class CacheSnapshot(
-        val records: Map<SatelliteKey, OrbitRecord>,
-        val fetchedAtUtcMillis: Long
-    )
-
-    private data class GroupRequest(
-        val groupName: String,
-        val constellationType: Int
-    )
 
     private val supportedGroups = listOf(
         GroupRequest("GPS-OPS", GnssStatus.CONSTELLATION_GPS),

@@ -1,40 +1,12 @@
 package com.example.gnssandopticalflowapp.gnss
 
 import android.location.GnssMeasurement
-import android.os.SystemClock
+import com.example.gnssandopticalflowapp.model.ProbeResult
+import com.example.gnssandopticalflowapp.model.ReflectionAccess
+import com.example.gnssandopticalflowapp.model.SatellitePvtSnapshot
 import java.lang.reflect.Method
 
 object GnssSatellitePvtResolver {
-    data class ProbeResult(
-        val snapshot: SatellitePvtSnapshot?,
-        val reason: String
-    )
-
-    data class SatellitePvtSnapshot(
-        val ecefX: Double,
-        val ecefY: Double,
-        val ecefZ: Double,
-        val velocityXMetersPerSecond: Double?,
-        val velocityYMetersPerSecond: Double?,
-        val velocityZMetersPerSecond: Double?,
-        val ephemerisSource: Int?,
-        val capturedAtElapsedRealtimeNanos: Long = SystemClock.elapsedRealtimeNanos()
-    )
-
-    private data class ReflectionAccess(
-        val hasSatellitePvt: Method,
-        val getSatellitePvt: Method,
-        val getPositionEcef: Method,
-        val getVelocityEcef: Method,
-        val getEphemerisSource: Method?,
-        val getPositionX: Method,
-        val getPositionY: Method,
-        val getPositionZ: Method,
-        val getVelocityX: Method,
-        val getVelocityY: Method,
-        val getVelocityZ: Method
-    )
-
     @Volatile
     private var cachedAccess: ReflectionAccess? = null
 

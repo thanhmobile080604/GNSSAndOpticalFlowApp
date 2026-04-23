@@ -46,7 +46,10 @@ import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatel
 import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSatellitePositionFromMeanElements
 import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.calculateSpeedFromEcefVelocity
 import com.example.gnssandopticalflowapp.gnss.SatelliteCalculator.getOrbitRadiusAndSpeed
+import com.example.gnssandopticalflowapp.model.OrbitRecord
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
+import com.example.gnssandopticalflowapp.model.SatelliteKey
+import com.example.gnssandopticalflowapp.model.SatellitePvtSnapshot
 import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog
 import com.example.gnssandopticalflowapp.screen.dialog.Map3DInformationDialog
 import com.google.android.gms.common.api.ResolvableApiException
@@ -75,8 +78,6 @@ import kotlin.math.abs
 @RequiresApi(Build.VERSION_CODES.R)
 class GNSSViewerFragment :
     BaseFragment<FragmentGnssViewerBinding>(FragmentGnssViewerBinding::inflate) {
-    private data class SatelliteKey(val constellationType: Int, val svid: Int)
-
     private var rendererSet = false
     private lateinit var earthRenderer: EarthRenderer
     private lateinit var scaleGestureDetector: ScaleGestureDetector
@@ -91,9 +92,9 @@ class GNSSViewerFragment :
     private val testLatitude = 40.712776
     private val testLongitude = -74.005974
     private val latestSatellitePvt =
-        mutableMapOf<SatelliteKey, GnssSatellitePvtResolver.SatellitePvtSnapshot>()
+        mutableMapOf<SatelliteKey, SatellitePvtSnapshot>()
     private val latestCelesTrakOrbits =
-        mutableMapOf<SatelliteKey, CelesTrakSatelliteRepository.OrbitRecord>()
+        mutableMapOf<SatelliteKey, OrbitRecord>()
     private val lastLoggedSource = mutableMapOf<SatelliteKey, String>()
     private var gnssMeasurementsRegistered = false
     private var celesTrakRefreshInFlight = false
