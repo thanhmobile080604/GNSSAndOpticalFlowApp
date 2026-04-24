@@ -2,6 +2,7 @@ package com.example.gnssandopticalflowapp.screen.fragment
 
 import android.Manifest
 import android.graphics.Bitmap
+import android.media.MediaScannerConnection
 import android.os.SystemClock
 import android.util.Log
 import android.widget.SeekBar
@@ -33,6 +34,7 @@ import org.opencv.core.CvType
 import org.opencv.core.Mat
 import kotlin.math.sqrt
 import androidx.core.graphics.createBitmap
+import java.io.File
 
 class CameraOpticalFlowFragment :
     BaseFragment<FragmentCameraOpticalFlowBinding>(FragmentCameraOpticalFlowBinding::inflate),
@@ -294,10 +296,10 @@ class CameraOpticalFlowFragment :
             return
         }
         val cacheDir = safeContext().cacheDir
-        val videosDir = java.io.File(cacheDir, "videos")
+        val videosDir = File(cacheDir, "videos")
         if (!videosDir.exists()) videosDir.mkdirs()
         
-        val outputFile = java.io.File(videosDir, "recorded_${System.currentTimeMillis()}.mp4")
+        val outputFile = File(videosDir, "recorded_${System.currentTimeMillis()}.mp4")
         recordedFilePath = outputFile.absolutePath
         Log.d("CAMERA-RECORD", "Target path: $recordedFilePath")
         
@@ -317,7 +319,7 @@ class CameraOpticalFlowFragment :
 
     private fun stopRecording() {
         isRecording = false
-        val file = java.io.File(recordedFilePath)
+        val file = File(recordedFilePath)
         
         videoEncoder?.release()
         videoEncoder = null
@@ -330,7 +332,7 @@ class CameraOpticalFlowFragment :
         
         if (recordedFilePath.isNotEmpty() && size > 100) {
             // Scan file to ensure it's ready for general use
-            android.media.MediaScannerConnection.scanFile(safeContext(), arrayOf(recordedFilePath), null) { _, _ -> }
+            MediaScannerConnection.scanFile(safeContext(), arrayOf(recordedFilePath), null) { _, _ -> }
             
             VideoStorageUtil.addVideo(safeContext(), recordedFilePath)
             

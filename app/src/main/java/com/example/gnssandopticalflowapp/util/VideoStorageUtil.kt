@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.example.gnssandopticalflowapp.model.VideoInfo
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.core.content.edit
 
 object VideoStorageUtil {
     private const val PREFS_NAME = "video_storage_prefs"
@@ -47,6 +48,6 @@ object VideoStorageUtil {
             obj.put("timestamp", video.timestamp)
             array.put(obj)
         }
-        prefs.edit().putString(KEY_VIDEO_LIST, array.toString()).apply()
+        prefs.edit { putString(KEY_VIDEO_LIST, array.toString()) }
     }
 }

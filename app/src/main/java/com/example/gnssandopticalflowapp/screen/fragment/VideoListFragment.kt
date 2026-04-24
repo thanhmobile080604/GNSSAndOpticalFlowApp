@@ -1,6 +1,5 @@
 package com.example.gnssandopticalflowapp.screen.fragment
 
-import android.widget.Toast
 import androidx.recyclerview.widget.GridLayoutManager
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.adapter.VideoListAdapter
