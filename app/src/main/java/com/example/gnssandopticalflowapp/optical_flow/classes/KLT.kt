@@ -8,6 +8,7 @@ import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
 import org.opencv.video.Video
 import java.util.concurrent.Semaphore
+import kotlin.math.roundToInt
 
 class KLT(private val velLabel: TextView?) : OpticalFlow {
     private val prevGray: Mat = Mat()
@@ -18,7 +19,9 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
     private val err: MatOfFloat = MatOfFloat()
     private val color: Scalar = Scalar(240.0, 230.0, 140.0)
     private var flowPts: Int = 0
-    private var maxCorners: Int = 50
+    private var maxCorners: Int = 240
+    private var qualityLevel: Double = 0.005
+    private var minDistance: Double = 2.0
     private var updateFeatures: Boolean = false
     private var prevMv: Point? = null
     private var currMv: Point? = null
@@ -34,7 +37,11 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
     override fun setSensitivity(value: Int) {
         try {
             semaphore.acquire()
-            maxCorners = value
+            val normalized = value.coerceIn(0, 100) / 100.0
+            maxCorners = (12 + (normalized * 408.0)).roundToInt()
+            qualityLevel = (0.10 - (normalized * 0.095)).coerceIn(0.005, 0.10)
+            minDistance = (14.0 - (normalized * 12.0)).coerceIn(2.0, 14.0)
+            updateFeatures = true
             semaphore.release()
         } catch (e: Exception) {
             Log.e("SENSITIVITY", "Failed to acquire semaphore")
@@ -53,8 +60,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
     private fun updatePoints(prevGray: Mat, currGray: Mat, prevPts: MatOfPoint2f) {
         currGray.copyTo(prevGray)
         val corners = MatOfPoint()
-        // detect more, but with reasonable min distance and quality
-        Imgproc.goodFeaturesToTrack(prevGray, corners, maxCorners, 0.01, 3.0)
+        Imgproc.goodFeaturesToTrack(prevGray, corners, maxCorners, qualityLevel, minDistance)
         prevPts.fromArray(*corners.toArray())
     }
 
