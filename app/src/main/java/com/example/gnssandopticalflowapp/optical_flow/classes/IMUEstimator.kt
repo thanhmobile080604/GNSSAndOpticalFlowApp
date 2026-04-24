@@ -26,6 +26,7 @@ class IMUEstimator(context: Context) : SensorEventListener {
     private var angularVelocity = FloatArray(3)
     private val velocity = FloatArray(3)
     private val position = FloatArray(3)
+    private var gravityInitialized = false
     private var lastUpdateTime: Long
 
     // init binary Semaphore
@@ -57,10 +58,26 @@ class IMUEstimator(context: Context) : SensorEventListener {
         // Update the last update time
         lastUpdateTime = currentTime
 
-        // Handle the sensor data
         when (event.sensor.type) {
-            Sensor.TYPE_ACCELEROMETER ->                 // Save the gravity vector
-                gravity = event.values.clone()
+            Sensor.TYPE_ACCELEROMETER -> {
+                if (!gravityInitialized) {
+                    gravity = event.values.clone()
+                    gravityInitialized = true
+                } else {
+                    val alpha = 0.8f
+                    gravity[0] = alpha * gravity[0] + (1.0f - alpha) * event.values[0]
+                    gravity[1] = alpha * gravity[1] + (1.0f - alpha) * event.values[1]
+                    gravity[2] = alpha * gravity[2] + (1.0f - alpha) * event.values[2]
+                }
+
+                linearAcceleration[0] = event.values[0] - gravity[0]
+                linearAcceleration[1] = event.values[1] - gravity[1]
+                linearAcceleration[2] = event.values[2] - gravity[2]
+
+                velocity[0] += linearAcceleration[0] * deltaTime
+                velocity[1] += linearAcceleration[1] * deltaTime
+                velocity[2] += linearAcceleration[2] * deltaTime
+            }
 
             Sensor.TYPE_GYROSCOPE -> {
                 // Save the rotation vector and angular velocity
@@ -70,16 +87,6 @@ class IMUEstimator(context: Context) : SensorEventListener {
 
             Sensor.TYPE_MAGNETIC_FIELD -> magnitude = event.values.clone()
         }
-        // Calculate the linear acceleration by subtracting the gravity vector
-        // from the accelerometer readings
-        linearAcceleration[0] = event.values[0] - gravity[0]
-        linearAcceleration[1] = event.values[1] - gravity[1]
-        linearAcceleration[2] = event.values[2] - gravity[2]
-
-        // Integrate the linear acceleration to estimate the velocity
-        velocity[0] += linearAcceleration[0] * deltaTime
-        velocity[1] += linearAcceleration[1] * deltaTime
-        velocity[2] += linearAcceleration[2] * deltaTime
 
         // Apply a low-pass filter to the velocity estimate to reduce noise
         velocity[0] = 0.8f * velocity[0] + 0.2f * angularVelocity[0]
@@ -124,6 +131,18 @@ class IMUEstimator(context: Context) : SensorEventListener {
     fun getVelocity(): FloatArray {
         // Return the current velocity estimate
         return velocity.clone()
+    }
+
+    fun getLinearAcceleration(): FloatArray {
+        var output = FloatArray(3)
+        try {
+            semaphore.acquire()
+            output = linearAcceleration.clone()
+            semaphore.release()
+        } catch (e: Exception) {
+            Log.e("IMU", "Failed to acquire semaphore")
+        }
+        return output
     }
 
     fun getPosition(): FloatArray {

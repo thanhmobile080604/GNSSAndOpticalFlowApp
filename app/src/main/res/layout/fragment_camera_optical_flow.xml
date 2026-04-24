@@ -82,10 +82,11 @@
         app:layout_constraintTop_toBottomOf="@+id/cvCamera" />
 
     <TextView
+        android:id="@+id/ofAlgorithm"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:fontFamily="@font/inter_regular"
-        android:text="Optical Flow Mode"
+        android:text="KLT"
         android:textColor="@color/white"
         app:layout_constraintBottom_toTopOf="@id/ofType"
         app:layout_constraintEnd_toEndOf="@id/ofType"
@@ -99,6 +100,29 @@
         app:layout_constraintBottom_toBottomOf="@id/update_features_button"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toEndOf="@id/update_features_button"
+        app:switchMinWidth="48dp"
+        app:thumbTint="@android:color/white"
+        app:trackTint="@color/switch_track_selector" />
+
+    <TextView
+        android:id="@+id/Test"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="@font/inter_regular"
+        android:text="Test"
+        android:textColor="@color/white"
+        app:layout_constraintBottom_toTopOf="@id/testType"
+        app:layout_constraintEnd_toEndOf="@id/testType"
+        app:layout_constraintStart_toStartOf="@id/testType" />
+
+    <androidx.appcompat.widget.SwitchCompat
+        android:id="@+id/testType"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:splitTrack="false"
+        app:layout_constraintBottom_toBottomOf="@id/update_features_button"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@id/ofType"
         app:switchMinWidth="48dp"
         app:thumbTint="@android:color/white"
         app:trackTint="@color/switch_track_selector" />

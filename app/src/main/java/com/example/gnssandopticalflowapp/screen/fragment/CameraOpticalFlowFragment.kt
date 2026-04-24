@@ -60,10 +60,17 @@ class CameraOpticalFlowFragment :
     private var isMovingMode = false
     private var isMovingModeManualOverride = false
     private var ignoreMovingSwitchChanges = false
+    // Auto detection source only. testType switch controls manual/auto at runtime.
+    // true: phone IMU motion, false: GNSS location speed.
+    private val useIndoorPhoneMotionDetection = true
+    private var phoneMovingHoldFrames = 0
+    private val phoneMovingAccelerationThreshold = 0.25
+    private val phoneMovingHoldFrameCount = 12
 
     override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
         kltSensitivityBar.progress = kltSensitivityBar.max
+        testType.isChecked = false
         applyOpticalFlowModeUi(useFarneback = false)
         applyCurrentSensitivity()
         applyMovingMode(isMoving = false, manualOverride = false)
@@ -124,15 +131,36 @@ class CameraOpticalFlowFragment :
 
         movingStatus.setOnCheckedChangeListener { _, isChecked ->
             if (ignoreMovingSwitchChanges) return@setOnCheckedChangeListener
-            applyMovingMode(isMoving = isChecked, manualOverride = true)
+
+            if (binding.testType.isChecked) {
+                applyMovingMode(isMoving = isChecked, manualOverride = true)
+            } else {
+                ignoreMovingSwitchChanges = true
+                binding.movingStatus.isChecked = isMovingMode
+                ignoreMovingSwitchChanges = false
+            }
+        }
+
+        testType.setOnCheckedChangeListener { _, isManualMode ->
+            phoneMovingHoldFrames = 0
+
+            if (isManualMode) {
+                applyMovingMode(isMoving = binding.movingStatus.isChecked, manualOverride = true)
+            } else {
+                isMovingModeManualOverride = false
+                updateAutoMovingModeFromCurrentSource()
+            }
         }
 
         ofType.setSingleClick {
-            opticalFlow = if (ofType.isChecked) {
+            val selectedOpticalFlow = if (ofType.isChecked) {
+                ofAlgorithm.text = "Farneback"
                 Farneback()
             } else {
+                ofAlgorithm.text = "KLT"
                 KLT(velPred)
             }
+            opticalFlow = selectedOpticalFlow
             applyOpticalFlowModeUi(useFarneback = ofType.isChecked)
             applyCurrentSensitivity()
             opticalFlow.setMovingMode(isMovingMode)
@@ -207,9 +235,20 @@ class CameraOpticalFlowFragment :
         binding.movingType.text = if (isMoving) "Moving" else "Stand Still"
     }
 
+    private fun updateAutoMovingModeFromCurrentSource() {
+        if (isMovingModeManualOverride) return
+
+        if (useIndoorPhoneMotionDetection) {
+            updateMovingModeFromPhoneMotion()
+        } else {
+            val isMovingFromLocation = (mainViewModel.currentLocation.value?.speed ?: 0f) > 0f
+            applyMovingMode(isMoving = isMovingFromLocation, manualOverride = false)
+        }
+    }
+
     override fun initObserver() {
         mainViewModel.currentLocation.observe(viewLifecycleOwner) { location ->
-            if (isMovingModeManualOverride) return@observe
+            if (isMovingModeManualOverride || useIndoorPhoneMotionDetection) return@observe
 
             val isMovingFromLocation = (location?.speed ?: 0f) > 0f
             applyMovingMode(isMoving = isMovingFromLocation, manualOverride = false)
@@ -355,6 +394,9 @@ class CameraOpticalFlowFragment :
         // get IMU variables
         val velocity = imuEstimator.getVelocity()
         val imuPosition = imuEstimator.getPosition()
+        if (!isMovingModeManualOverride && useIndoorPhoneMotionDetection) {
+            updateMovingModeFromPhoneMotion()
+        }
 
         // Convert the velocity to mph
         val xVelocity = velocity[0]
@@ -418,6 +460,31 @@ class CameraOpticalFlowFragment :
 
         return createBitmap(mat.cols(), mat.rows()).also {
             motionVectorBitmap = it
+        }
+    }
+
+    private fun updateMovingModeFromPhoneMotion() {
+        if (isMovingModeManualOverride) return
+
+        val acceleration = imuEstimator.getLinearAcceleration()
+        val ax = acceleration.getOrElse(0) { 0f }.toDouble()
+        val ay = acceleration.getOrElse(1) { 0f }.toDouble()
+        val az = acceleration.getOrElse(2) { 0f }.toDouble()
+        val accelerationMagnitude = sqrt((ax * ax) + (ay * ay) + (az * az))
+
+        if (accelerationMagnitude > phoneMovingAccelerationThreshold) {
+            phoneMovingHoldFrames = phoneMovingHoldFrameCount
+        } else if (phoneMovingHoldFrames > 0) {
+            phoneMovingHoldFrames--
+        }
+
+        val detectedMoving = phoneMovingHoldFrames > 0
+        if (detectedMoving != isMovingMode) {
+            activity?.runOnUiThread {
+                if (!isMovingModeManualOverride) {
+                    applyMovingMode(isMoving = detectedMoving, manualOverride = false)
+                }
+            }
         }
     }
 }
