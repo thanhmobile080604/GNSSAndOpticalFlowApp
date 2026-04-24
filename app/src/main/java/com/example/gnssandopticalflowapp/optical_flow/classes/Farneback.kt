@@ -10,7 +10,7 @@ import org.opencv.imgproc.Imgproc
 import org.opencv.video.Video
 import kotlin.math.roundToInt
 
-class FraneBack : OpticalFlow {
+class Farneback : OpticalFlow {
     private val scaledPrevGray: Mat = Mat()
     private val scaledCurrGray: Mat = Mat()
     private val flowGray: Mat = Mat()
@@ -127,16 +127,19 @@ class FraneBack : OpticalFlow {
                 val magnitudeSquared = (fx * fx) + (fy * fy)
 
                 if (magnitudeSquared >= minMotionSquared) {
+                    // Farneback returns scene flow; invert it so the UI shows camera/object motion direction.
+                    val displayFx = -fx
+                    val displayFy = -fy
                     val start = Point(screenX.toDouble(), screenY.toDouble())
                     val end = Point(
-                        start.x + (fx * vectorLengthMultiplier),
-                        start.y + (fy * vectorLengthMultiplier)
+                        start.x + (displayFx * vectorLengthMultiplier),
+                        start.y + (displayFy * vectorLengthMultiplier)
                     )
 
                     Imgproc.line(flowmap, start, end, color, vectorThickness)
                     Imgproc.circle(flowmap, start, dotRadius, color, -1)
-                    sumX += fx
-                    sumY += fy
+                    sumX += displayFx
+                    sumY += displayFy
                     sampleCount++
                 }
 

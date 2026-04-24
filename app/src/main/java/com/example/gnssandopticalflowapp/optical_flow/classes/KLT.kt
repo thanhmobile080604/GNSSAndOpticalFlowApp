@@ -55,9 +55,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
         val corners = MatOfPoint()
         // detect more, but with reasonable min distance and quality
         Imgproc.goodFeaturesToTrack(prevGray, corners, maxCorners, 0.01, 3.0)
-        if (!corners.empty()) {
-            prevPts.fromArray(*corners.toArray())
-        }
+        prevPts.fromArray(*corners.toArray())
     }
 
     override fun run(newFrame: Mat): OFOutput {

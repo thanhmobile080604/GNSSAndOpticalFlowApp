@@ -14,7 +14,7 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentCameraOpticalFlowBinding
 import com.example.gnssandopticalflowapp.model.OFOutput
 import com.example.gnssandopticalflowapp.optical_flow.classes.BasicFusion
-import com.example.gnssandopticalflowapp.optical_flow.classes.FraneBack
+import com.example.gnssandopticalflowapp.optical_flow.classes.Farneback
 import com.example.gnssandopticalflowapp.optical_flow.classes.IMUEstimator
 import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.optical_flow.classes.MotionVectorViz
@@ -59,6 +59,9 @@ class CameraOpticalFlowFragment :
 
     override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
+        kltSensitivityBar.progress = kltSensitivityBar.max
+        applyOpticalFlowModeUi(useFarneback = false)
+        applyCurrentSensitivity()
 
         cameraView.apply {
             setCameraIndex(CameraBridgeViewBase.CAMERA_ID_BACK)
@@ -116,20 +119,33 @@ class CameraOpticalFlowFragment :
 
         ofType.setOnClickListener {
             opticalFlow = if (ofType.isChecked) {
-                FraneBack()
+                Farneback()
             } else {
                 KLT(velPred)
             }
-            opticalFlow.setSensitivity(sensitivityBar.progress.coerceAtLeast(1))
+            applyOpticalFlowModeUi(useFarneback = ofType.isChecked)
+            applyCurrentSensitivity()
             mvViewer.resetMotionVector()
             motionVectorBitmap = null
             binding.motionVector.setImageBitmap(null)
         }
 
-        sensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        kltSensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 Log.d("SEEK", progress.toString())
-                if (::opticalFlow.isInitialized) {
+                if (::opticalFlow.isInitialized && !ofType.isChecked) {
+                    opticalFlow.setSensitivity(progress)
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        farnebackSensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                Log.d("SEEK", progress.toString())
+                if (::opticalFlow.isInitialized && ofType.isChecked) {
                     opticalFlow.setSensitivity(progress)
                 }
             }
@@ -151,6 +167,22 @@ class CameraOpticalFlowFragment :
             if (isRecording) stopRecording()
             onBack()
         }
+    }
+
+    private fun applyOpticalFlowModeUi(useFarneback: Boolean) {
+        binding.kltSensitivityBar.isEnabled = !useFarneback
+        binding.kltSensitivityBar.alpha = if (useFarneback) 0.5f else 1.0f
+        binding.farnebackSensitivityBar.isEnabled = useFarneback
+        binding.farnebackSensitivityBar.alpha = if (useFarneback) 1.0f else 0.5f
+    }
+
+    private fun applyCurrentSensitivity() {
+        val sensitivity = if (binding.ofType.isChecked) {
+            binding.farnebackSensitivityBar.progress
+        } else {
+            binding.kltSensitivityBar.progress
+        }
+        opticalFlow.setSensitivity(sensitivity)
     }
 
     override fun initObserver() {}
