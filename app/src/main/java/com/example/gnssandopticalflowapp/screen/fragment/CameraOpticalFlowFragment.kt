@@ -32,6 +32,7 @@ import org.opencv.android.Utils
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 import kotlin.math.sqrt
+import androidx.core.graphics.createBitmap
 
 class CameraOpticalFlowFragment :
     BaseFragment<FragmentCameraOpticalFlowBinding>(FragmentCameraOpticalFlowBinding::inflate),
@@ -387,7 +388,7 @@ class CameraOpticalFlowFragment :
             return currentBitmap
         }
 
-        return Bitmap.createBitmap(mat.cols(), mat.rows(), Bitmap.Config.ARGB_8888).also {
+        return createBitmap(mat.cols(), mat.rows()).also {
             motionVectorBitmap = it
         }
     }

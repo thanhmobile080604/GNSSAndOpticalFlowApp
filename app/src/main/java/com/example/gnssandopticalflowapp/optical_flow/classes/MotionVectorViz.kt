@@ -26,13 +26,11 @@ class MotionVectorViz(rows: Int, cols: Int) {
     fun getMotionVector(newPos: Point?): Mat {
         if (newPos == null) return motionVector
 
-        // treat incoming Point as delta (dx, dy)
         val dx = newPos.x
         val dy = newPos.y
-        val mag = sqrt(dx * dx + dy * dy)
 
         // scaling to make small motions visible, and larger motions proportionally longer
-        val displayScale = 10.0 // multiplier for visual amplification
+        val displayScale = 16.0 // multiplier for visual amplification
         var dispDx = dx * displayScale
         var dispDy = dy * displayScale
 
@@ -48,8 +46,8 @@ class MotionVectorViz(rows: Int, cols: Int) {
         // clear previous drawing each frame
         motionVector.setTo(Scalar(0.0))
 
-        val end = Point(center.x + dispDx, center.y + dispDy)
-        Imgproc.line(motionVector, center, end, color, 8)
+        val end = Point(center.x - dispDx, center.y - dispDy)
+        Imgproc.arrowedLine(motionVector, center, end, color, 8, Imgproc.LINE_AA, 0, 0.25)
 
         return motionVector
     }
