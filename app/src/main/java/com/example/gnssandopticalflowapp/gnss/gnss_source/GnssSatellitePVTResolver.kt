@@ -1,12 +1,11 @@
-package com.example.gnssandopticalflowapp.gnss
+package com.example.gnssandopticalflowapp.gnss.gnss_source
 
 import android.location.GnssMeasurement
 import com.example.gnssandopticalflowapp.model.ProbeResult
 import com.example.gnssandopticalflowapp.model.ReflectionAccess
 import com.example.gnssandopticalflowapp.model.SatellitePvtSnapshot
-import java.lang.reflect.Method
 
-object GnssSatellitePvtResolver {
+object GnssSatellitePVTResolver {
     @Volatile
     private var cachedAccess: ReflectionAccess? = null
 

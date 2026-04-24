@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.gnss
+package com.example.gnssandopticalflowapp.gnss.gnss_source
 
 import android.location.GnssStatus
 import com.example.gnssandopticalflowapp.model.CacheSnapshot

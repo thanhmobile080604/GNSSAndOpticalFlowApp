@@ -1,9 +1,10 @@
-package com.example.gnssandopticalflowapp.gnss
+package com.example.gnssandopticalflowapp.gnss.gnss_source
 
 import android.location.GnssStatus
 import com.example.gnssandopticalflowapp.model.OrbitStateResult
 import com.example.gnssandopticalflowapp.model.SatellitePositionResult
 import kotlin.math.atan2
+import kotlin.math.cbrt
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
@@ -169,7 +170,7 @@ object SatelliteCalculator {
         observationUtcMillis: Long = System.currentTimeMillis()
     ): OrbitStateResult {
         val meanMotionRadPerSec = meanMotionRevPerDay * (2.0 * Math.PI) / SECONDS_PER_DAY
-        val semiMajorAxis = kotlin.math.cbrt(MU / (meanMotionRadPerSec * meanMotionRadPerSec))
+        val semiMajorAxis = cbrt(MU / (meanMotionRadPerSec * meanMotionRadPerSec))
 
         val deltaSeconds = (observationUtcMillis - epochUtcMillis) / 1000.0
         val meanAnomalyRad = normalizeRadians(
