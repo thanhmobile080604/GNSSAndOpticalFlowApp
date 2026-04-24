@@ -9,6 +9,7 @@ import org.opencv.imgproc.Imgproc
 import org.opencv.video.Video
 import java.util.concurrent.Semaphore
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 class KLT(private val velLabel: TextView?) : OpticalFlow {
     private val prevGray: Mat = Mat()
@@ -18,6 +19,9 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
     private val status: MatOfByte = statusInit()
     private val err: MatOfFloat = MatOfFloat()
     private val color: Scalar = Scalar(240.0, 230.0, 140.0)
+    private val displayVectorLengthMultiplier = 4.8
+    private val minDisplayVectorLength = 9.0
+    private val vectorThickness = 4
     private var flowPts: Int = 0
     private var maxCorners: Int = 240
     private var qualityLevel: Double = 0.005
@@ -117,7 +121,16 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
                     val dy = pt2.y - pt1.y
                     dxList.add(dx)
                     dyList.add(dy)
-                    Imgproc.line(currFrame, pt1, pt2, color, 6)
+                    var displayDx = -dx * displayVectorLengthMultiplier
+                    var displayDy = -dy * displayVectorLengthMultiplier
+                    val displayMagnitude = sqrt((displayDx * displayDx) + (displayDy * displayDy))
+                    if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
+                        val scaleUp = minDisplayVectorLength / displayMagnitude
+                        displayDx *= scaleUp
+                        displayDy *= scaleUp
+                    }
+                    val displayEnd = Point(pt1.x + displayDx, pt1.y + displayDy)
+                    Imgproc.line(currFrame, pt1, displayEnd, color, vectorThickness)
                     flowPts++
                 }
             }
@@ -135,7 +148,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
             val medDy = median(dyList)
 
             // smooth motion vector with previous estimate
-            val newMv = Point(medDx / 5.0, medDy / 5.0) // scale factor to normalize
+            val newMv = Point(-medDx / 5.0, -medDy / 5.0) // invert scene flow to show camera/object motion
             if (prevMv == null) {
                 currMv = newMv
             } else {

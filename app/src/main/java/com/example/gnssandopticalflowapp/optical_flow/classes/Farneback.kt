@@ -9,6 +9,7 @@ import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 import org.opencv.video.Video
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 class Farneback : OpticalFlow {
     private val scaledPrevGray: Mat = Mat()
@@ -24,10 +25,11 @@ class Farneback : OpticalFlow {
     private val flags = 0
     private var frameScale = 0.5
     private var drawStep = 28
-    private var minMotionMagnitude = 0.5
-    private val dotRadius = 6
-    private val vectorThickness = 3
-    private val vectorLengthMultiplier = 1.8
+    private var minMotionMagnitude = 0.22
+    private val dotRadius = 4
+    private val vectorThickness = 4
+    private val vectorLengthMultiplier = 4.2
+    private val minDisplayVectorLength = 9.0
     private val ofOutput: OFOutput = OFOutput()
     private val flowColor = Scalar(0.0, 255.0, 0.0)
 
@@ -81,7 +83,7 @@ class Farneback : OpticalFlow {
         levels = if (normalized >= 0.65) 3 else 2
         winSize = (11 + (normalized * 8)).toInt().coerceIn(11, 19)
         iterations = if (normalized >= 0.5) 3 else 2
-        minMotionMagnitude = (1.0 - (normalized * 0.7)).coerceIn(0.3, 1.0)
+        minMotionMagnitude = (0.35 - (normalized * 0.23)).coerceIn(0.12, 0.35)
     }
 
     private fun resizeForFlow(sourceGray: Mat, targetGray: Mat) {
@@ -128,18 +130,24 @@ class Farneback : OpticalFlow {
 
                 if (magnitudeSquared >= minMotionSquared) {
                     // Farneback returns scene flow; invert it so the UI shows camera/object motion direction.
-                    val displayFx = -fx
-                    val displayFy = -fy
+                    var displayFx = -fx * vectorLengthMultiplier
+                    var displayFy = -fy * vectorLengthMultiplier
+                    val displayMagnitude = sqrt((displayFx * displayFx) + (displayFy * displayFy))
+                    if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
+                        val scaleUp = minDisplayVectorLength / displayMagnitude
+                        displayFx *= scaleUp
+                        displayFy *= scaleUp
+                    }
                     val start = Point(screenX.toDouble(), screenY.toDouble())
                     val end = Point(
-                        start.x + (displayFx * vectorLengthMultiplier),
-                        start.y + (displayFy * vectorLengthMultiplier)
+                        start.x + displayFx,
+                        start.y + displayFy
                     )
 
                     Imgproc.line(flowmap, start, end, color, vectorThickness)
                     Imgproc.circle(flowmap, start, dotRadius, color, -1)
-                    sumX += displayFx
-                    sumY += displayFy
+                    sumX += -fx
+                    sumY += -fy
                     sampleCount++
                 }
 
