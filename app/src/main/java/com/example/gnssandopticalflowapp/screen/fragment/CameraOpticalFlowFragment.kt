@@ -69,7 +69,8 @@ class CameraOpticalFlowFragment :
 
     override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
-        kltSensitivityBar.progress = kltSensitivityBar.max
+        kltSensitivityBar.progress = 50
+        farnebackSensitivityBar.progress = 50
         testType.isChecked = false
         applyOpticalFlowModeUi(useFarneback = false)
         applyCurrentSensitivity()
