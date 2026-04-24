@@ -30,6 +30,7 @@ class Farneback : OpticalFlow {
     private val vectorThickness = 4
     private val vectorLengthMultiplier = 4.2
     private val minDisplayVectorLength = 9.0
+    private var vectorDirectionSign = -1.0
     private val ofOutput: OFOutput = OFOutput()
     private val flowColor = Scalar(0.0, 255.0, 0.0)
 
@@ -74,6 +75,10 @@ class Farneback : OpticalFlow {
 
     override fun updateFeatures() {
         // Do nothing
+    }
+
+    override fun setMovingMode(isMoving: Boolean) {
+        vectorDirectionSign = if (isMoving) 1.0 else -1.0
     }
 
     override fun setSensitivity(value: Int) {
@@ -129,9 +134,8 @@ class Farneback : OpticalFlow {
                 val magnitudeSquared = (fx * fx) + (fy * fy)
 
                 if (magnitudeSquared >= minMotionSquared) {
-                    // Farneback returns scene flow; invert it so the UI shows camera/object motion direction.
-                    var displayFx = -fx * vectorLengthMultiplier
-                    var displayFy = -fy * vectorLengthMultiplier
+                    var displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
+                    var displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
                     val displayMagnitude = sqrt((displayFx * displayFx) + (displayFy * displayFy))
                     if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
                         val scaleUp = minDisplayVectorLength / displayMagnitude
@@ -146,8 +150,8 @@ class Farneback : OpticalFlow {
 
                     Imgproc.line(flowmap, start, end, color, vectorThickness)
                     Imgproc.circle(flowmap, start, dotRadius, color, -1)
-                    sumX += -fx
-                    sumY += -fy
+                    sumX += fx * vectorDirectionSign
+                    sumY += fy * vectorDirectionSign
                     sampleCount++
                 }
 

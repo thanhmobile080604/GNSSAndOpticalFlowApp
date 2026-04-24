@@ -53,23 +53,6 @@
         app:srcCompat="@drawable/ic_launcher_foreground" />
 
     <TextView
-        android:id="@+id/resetMV"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginStart="6dp"
-        android:background="@drawable/bg_blue_gradient_40_left"
-        android:fontFamily="@font/inter_bold"
-        android:gravity="center"
-        android:text="Reset"
-        android:textColor="@color/white"
-        android:textSize="14sp"
-        app:layout_constraintBottom_toBottomOf="@id/update_features_button"
-        app:layout_constraintDimensionRatio="86:56"
-        app:layout_constraintStart_toEndOf="@id/update_features_button"
-        app:layout_constraintTop_toTopOf="@+id/update_features_button"
-        app:layout_constraintWidth_percent="0.2" />
-
-    <TextView
         android:id="@+id/update_features_button"
         android:layout_width="0dp"
         android:layout_height="0dp"
@@ -102,7 +85,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:fontFamily="@font/inter_regular"
-        android:text="Mode"
+        android:text="Optical Flow Mode"
         android:textColor="@color/white"
         app:layout_constraintBottom_toTopOf="@id/ofType"
         app:layout_constraintEnd_toEndOf="@id/ofType"
@@ -115,7 +98,31 @@
         android:splitTrack="false"
         app:layout_constraintBottom_toBottomOf="@id/update_features_button"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@id/resetMV"
+        app:layout_constraintStart_toEndOf="@id/update_features_button"
+        app:switchMinWidth="48dp"
+        app:thumbTint="@android:color/white"
+        app:trackTint="@color/switch_track_selector" />
+
+    <TextView
+        android:id="@+id/movingType"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="@font/inter_regular"
+        android:text="Stand Still"
+        android:textColor="@color/white"
+        app:layout_constraintBottom_toTopOf="@id/movingStatus"
+        app:layout_constraintEnd_toEndOf="@id/movingStatus"
+        app:layout_constraintStart_toStartOf="@id/movingStatus" />
+
+    <androidx.appcompat.widget.SwitchCompat
+        android:id="@+id/movingStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:splitTrack="false"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="20dp"
+        app:layout_constraintStart_toEndOf="@id/update_features_button"
+        app:layout_constraintTop_toBottomOf="@id/ofType"
         app:switchMinWidth="48dp"
         app:thumbTint="@android:color/white"
         app:trackTint="@color/switch_track_selector" />
@@ -129,7 +136,7 @@
         android:textColor="@color/white"
         app:layout_constraintBottom_toTopOf="@id/klt_sensitivity_bar"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@+id/resetMV" />
+        app:layout_constraintStart_toEndOf="@+id/update_features_button" />
 
     <SeekBar
         android:id="@+id/klt_sensitivity_bar"
@@ -143,7 +150,7 @@
         android:thumb="@drawable/ripple_purple_gradient_thumb"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@+id/resetMV"
+        app:layout_constraintStart_toEndOf="@+id/update_features_button"
         app:layout_constraintTop_toBottomOf="@+id/update_features_button"
         app:layout_constraintVertical_bias="0.6"
         app:layout_constraintWidth_percent="0.4" />
@@ -157,7 +164,7 @@
         android:textColor="@color/white"
         app:layout_constraintBottom_toTopOf="@id/farneback_sensitivity_bar"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@+id/resetMV" />
+        app:layout_constraintStart_toEndOf="@+id/update_features_button" />
 
     <SeekBar
         android:id="@+id/farneback_sensitivity_bar"
@@ -171,7 +178,7 @@
         android:thumb="@drawable/ripple_purple_gradient_thumb"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@+id/resetMV"
+        app:layout_constraintStart_toEndOf="@+id/update_features_button"
         app:layout_constraintTop_toBottomOf="@+id/klt_sensitivity_bar"
         app:layout_constraintVertical_bias="0.6"
         app:layout_constraintWidth_percent="0.4" />
@@ -183,6 +190,7 @@
         android:src="@drawable/ic_start_record_purple"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toStartOf="@id/tvTimer"
+        android:layout_marginStart="20dp"
         app:layout_constraintStart_toStartOf="@id/update_features_button"
         app:layout_constraintTop_toBottomOf="@id/update_features_button" />
 
@@ -194,8 +202,9 @@
         android:text="00:00"
         android:textColor="@color/white"
         android:textSize="16sp"
+        android:layout_marginStart="16dp"
         app:layout_constraintBottom_toBottomOf="@id/ivVideRecord"
-        app:layout_constraintEnd_toEndOf="@id/resetMV"
+        app:layout_constraintEnd_toEndOf="@id/update_features_button"
         app:layout_constraintStart_toEndOf="@id/ivVideRecord"
         app:layout_constraintTop_toTopOf="@id/ivVideRecord" />
 

@@ -8,4 +8,5 @@ interface OpticalFlow {
     fun resetMotionVector()
     fun updateFeatures()
     fun setSensitivity(value: Int)
+    fun setMovingMode(isMoving: Boolean)
 }

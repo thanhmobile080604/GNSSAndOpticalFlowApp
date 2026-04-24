@@ -57,12 +57,16 @@ class CameraOpticalFlowFragment :
     private var timerStartTime: Long = 0L
     private var elapsedBeforePause: Long = 0L
     private var motionVectorBitmap: Bitmap? = null
+    private var isMovingMode = false
+    private var isMovingModeManualOverride = false
+    private var ignoreMovingSwitchChanges = false
 
     override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
         kltSensitivityBar.progress = kltSensitivityBar.max
         applyOpticalFlowModeUi(useFarneback = false)
         applyCurrentSensitivity()
+        applyMovingMode(isMoving = false, manualOverride = false)
 
         cameraView.apply {
             setCameraIndex(CameraBridgeViewBase.CAMERA_ID_BACK)
@@ -109,16 +113,21 @@ class CameraOpticalFlowFragment :
     }
 
     override fun FragmentCameraOpticalFlowBinding.initListener() {
-        resetMV.setOnClickListener {
-            opticalFlow.resetMotionVector()
-            mvViewer.resetMotionVector()
-        }
+//        resetMV.setSingleClick {
+//            opticalFlow.resetMotionVector()
+//            mvViewer.resetMotionVector()
+//        }
 
-        updateFeaturesButton.setOnClickListener {
+        updateFeaturesButton.setSingleClick {
             opticalFlow.updateFeatures()
         }
 
-        ofType.setOnClickListener {
+        movingStatus.setOnCheckedChangeListener { _, isChecked ->
+            if (ignoreMovingSwitchChanges) return@setOnCheckedChangeListener
+            applyMovingMode(isMoving = isChecked, manualOverride = true)
+        }
+
+        ofType.setSingleClick {
             opticalFlow = if (ofType.isChecked) {
                 Farneback()
             } else {
@@ -126,6 +135,7 @@ class CameraOpticalFlowFragment :
             }
             applyOpticalFlowModeUi(useFarneback = ofType.isChecked)
             applyCurrentSensitivity()
+            opticalFlow.setMovingMode(isMovingMode)
             mvViewer.resetMotionVector()
             motionVectorBitmap = null
             binding.motionVector.setImageBitmap(null)
@@ -154,7 +164,7 @@ class CameraOpticalFlowFragment :
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
-        ivVideRecord.setOnClickListener {
+        ivVideRecord.setSingleClick {
             if (isRecording) {
                 stopRecording()
                 stopTimer()
@@ -186,7 +196,25 @@ class CameraOpticalFlowFragment :
         opticalFlow.setSensitivity(sensitivity)
     }
 
-    override fun initObserver() {}
+    private fun applyMovingMode(isMoving: Boolean, manualOverride: Boolean) {
+        isMovingMode = isMoving
+        isMovingModeManualOverride = manualOverride
+        opticalFlow.setMovingMode(isMoving)
+
+        ignoreMovingSwitchChanges = true
+        binding.movingStatus.isChecked = isMoving
+        ignoreMovingSwitchChanges = false
+        binding.movingType.text = if (isMoving) "Moving" else "Stand Still"
+    }
+
+    override fun initObserver() {
+        mainViewModel.currentLocation.observe(viewLifecycleOwner) { location ->
+            if (isMovingModeManualOverride) return@observe
+
+            val isMovingFromLocation = (location?.speed ?: 0f) > 0f
+            applyMovingMode(isMoving = isMovingFromLocation, manualOverride = false)
+        }
+    }
 
     override fun onResume() {
         super.onResume()

@@ -17,4 +17,7 @@ class BoofOF : OpticalFlow {
 
     public override fun setSensitivity(value: Int) {
     }
+
+    override fun setMovingMode(isMoving: Boolean) {
+    }
 }

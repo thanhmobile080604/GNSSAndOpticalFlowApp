@@ -22,6 +22,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
     private val displayVectorLengthMultiplier = 4.8
     private val minDisplayVectorLength = 9.0
     private val vectorThickness = 4
+    private var vectorDirectionSign = -1.0
     private var flowPts: Int = 0
     private var maxCorners: Int = 240
     private var qualityLevel: Double = 0.005
@@ -59,6 +60,10 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
 
     override fun updateFeatures() {
         this.updateFeatures = true
+    }
+
+    override fun setMovingMode(isMoving: Boolean) {
+        vectorDirectionSign = if (isMoving) 1.0 else -1.0
     }
 
     private fun updatePoints(prevGray: Mat, currGray: Mat, prevPts: MatOfPoint2f) {
@@ -121,8 +126,8 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
                     val dy = pt2.y - pt1.y
                     dxList.add(dx)
                     dyList.add(dy)
-                    var displayDx = -dx * displayVectorLengthMultiplier
-                    var displayDy = -dy * displayVectorLengthMultiplier
+                    var displayDx = dx * vectorDirectionSign * displayVectorLengthMultiplier
+                    var displayDy = dy * vectorDirectionSign * displayVectorLengthMultiplier
                     val displayMagnitude = sqrt((displayDx * displayDx) + (displayDy * displayDy))
                     if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
                         val scaleUp = minDisplayVectorLength / displayMagnitude
@@ -148,7 +153,10 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
             val medDy = median(dyList)
 
             // smooth motion vector with previous estimate
-            val newMv = Point(-medDx / 5.0, -medDy / 5.0) // invert scene flow to show camera/object motion
+            val newMv = Point(
+                medDx * vectorDirectionSign / 5.0,
+                medDy * vectorDirectionSign / 5.0
+            )
             if (prevMv == null) {
                 currMv = newMv
             } else {
