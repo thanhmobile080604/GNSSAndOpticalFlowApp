@@ -74,8 +74,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
     }
 
     override fun run(newFrame: Mat): OFOutput {
-        Log.d("RUN-OF", "started")
-        val currFrame = newFrame.clone()
+        val currFrame = newFrame
 
         Imgproc.cvtColor(currFrame, currGray, Imgproc.COLOR_RGBA2GRAY)
 

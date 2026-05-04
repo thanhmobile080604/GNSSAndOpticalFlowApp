@@ -11,6 +11,7 @@ import android.widget.SeekBar
 import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
@@ -30,12 +31,13 @@ import java.util.Locale
 class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(FragmentVideoOpticalFlowBinding::inflate) {
     private var player: ExoPlayer? = null
     private var isPlaying = true
+    private val progressUpdateIntervalMs = 250L
     
     private val handler = Handler(Looper.getMainLooper())
     private val updateProgressAction = object : Runnable {
         override fun run() {
             updateProgress()
-            handler.postDelayed(this, 16)
+            handler.postDelayed(this, progressUpdateIntervalMs)
         }
     }
 
@@ -46,6 +48,8 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
     }
 
     override fun FragmentVideoOpticalFlowBinding.initView() {
+        tvTimer.text = formatTimer(0L, 0L)
+
         binding.videoView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
                 val surface = Surface(surfaceTexture)
@@ -79,8 +83,22 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
             override fun onPlaybackStateChanged(playbackState: Int) {
                 Log.d("VIDEO-PLAYER", "Playback state changed: $playbackState")
                 if (playbackState == Player.STATE_READY) {
-                    binding.videoProgress.max = player?.duration?.toInt() ?: 100
-                    handler.post(updateProgressAction)
+                    updateProgress()
+                    startProgressUpdates()
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                isPlaying = isPlayingNow
+                binding.ivVideoControl.setImageResource(
+                    if (isPlayingNow) R.drawable.ic_pause_video else R.drawable.ic_play_video
+                )
+
+                if (isPlayingNow) {
+                    startProgressUpdates()
+                } else {
+                    handler.removeCallbacks(updateProgressAction)
+                    updateProgress()
                 }
             }
 
@@ -106,18 +124,17 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
         ivVideoControl.setOnClickListener {
             if (isPlaying) {
                 player?.pause()
-                ivVideoControl.setImageResource(R.drawable.ic_play_video)
             } else {
                 player?.play()
-                ivVideoControl.setImageResource(R.drawable.ic_pause_video)
             }
-            isPlaying = !isPlaying
         }
 
         videoProgress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    player?.seekTo(progress.toLong())
+                    val seekPosition = progress.toLong()
+                    player?.seekTo(seekPosition)
+                    binding.tvTimer.text = formatTimer(seekPosition, normalizedDurationMs())
                 }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -126,8 +143,44 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
     }
 
     private fun updateProgress() {
-        player?.let {
-            binding.videoProgress.progress = it.currentPosition.toInt()
+        val player = player ?: return
+        val duration = normalizedDurationMs()
+        val position = player.currentPosition
+            .coerceAtLeast(0L)
+            .let { if (duration > 0L) it.coerceAtMost(duration) else it }
+
+        val max = if (duration > 0L) duration else 100L
+        binding.videoProgress.max = max.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        binding.videoProgress.progress = position
+            .coerceAtMost(binding.videoProgress.max.toLong())
+            .toInt()
+        binding.tvTimer.text = formatTimer(position, duration)
+    }
+
+    private fun startProgressUpdates() {
+        handler.removeCallbacks(updateProgressAction)
+        handler.post(updateProgressAction)
+    }
+
+    private fun normalizedDurationMs(): Long {
+        val duration = player?.duration ?: 0L
+        return if (duration == C.TIME_UNSET || duration < 0L) 0L else duration
+    }
+
+    private fun formatTimer(positionMs: Long, durationMs: Long): String {
+        return "${formatVideoTime(positionMs)}/${formatVideoTime(durationMs)}"
+    }
+
+    private fun formatVideoTime(timeMs: Long): String {
+        val totalSeconds = (timeMs.coerceAtLeast(0L) / 1000L)
+        val hours = totalSeconds / 3600L
+        val minutes = (totalSeconds % 3600L) / 60L
+        val seconds = totalSeconds % 60L
+
+        return if (hours > 0L) {
+            String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
         }
     }
 
@@ -148,6 +201,8 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
     override fun onPause() {
         super.onPause()
         player?.pause()
+        isPlaying = false
+        binding.ivVideoControl.setImageResource(R.drawable.ic_play_video)
         handler.removeCallbacks(updateProgressAction)
     }
 

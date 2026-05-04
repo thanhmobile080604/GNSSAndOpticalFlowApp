@@ -9,6 +9,7 @@ import com.example.gnssandopticalflowapp.gnss.gnss_source.CelesTrakSatelliteRepo
 import com.example.gnssandopticalflowapp.gnss.gnss_source.GnssSatellitePVTResolver
 import com.example.gnssandopticalflowapp.gnss.gnss_source.SatelliteCalculator
 import com.example.gnssandopticalflowapp.model.OrbitRecord
+import com.example.gnssandopticalflowapp.model.ResolvedSatellitePosition
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.model.SatelliteKey
 import com.example.gnssandopticalflowapp.model.SatellitePvtSnapshot
@@ -238,15 +239,6 @@ class GnssSatelliteTracker {
         lastLoggedSource[satelliteKey] = positionSource
         Log.d("GNSS_SOURCE", "sat=$constellation/$svid source=$positionSource")
     }
-
-    private data class ResolvedSatellitePosition(
-        val latitude: Double = 0.0,
-        val longitude: Double = 0.0,
-        val altitude: Double = 0.0,
-        val speed: Double = 0.0,
-        val positionSource: String = "Approximate",
-        val ephemerisSource: String? = null
-    )
 
     private companion object {
         const val PVT_STALE_THRESHOLD_NANOS = 10_000_000_000L

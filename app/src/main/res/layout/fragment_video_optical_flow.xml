@@ -87,9 +87,21 @@
         android:thumb="@drawable/ripple_purple_gradient_thumb"
         app:layout_constraintBottom_toBottomOf="@id/ivVideoControl"
         app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginEnd="8dp"
+        android:layout_marginStart="4dp"
         app:layout_constraintStart_toEndOf="@+id/ivVideoControl"
-        app:layout_constraintTop_toTopOf="@id/ivVideoControl"
-        app:layout_constraintWidth_percent="0.7" />
+        app:layout_constraintTop_toTopOf="@id/ivVideoControl"/>
+
+    <TextView
+        android:id="@+id/tvTimer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:layout_constraintEnd_toEndOf="@id/videoProgress"
+        app:layout_constraintTop_toBottomOf="@id/videoProgress"
+        android:text="00:00/00:00"
+        android:textColor="@color/white"
+        android:fontFamily="@font/inter_bold"
+        android:layout_marginEnd="12dp"/>
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>

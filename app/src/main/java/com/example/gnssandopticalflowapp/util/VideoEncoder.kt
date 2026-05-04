@@ -11,7 +11,8 @@ import org.opencv.imgproc.Imgproc
 class VideoEncoder(
     private val outputPath: String,
     private val originalWidth: Int,
-    private val originalHeight: Int
+    private val originalHeight: Int,
+    private val frameRate: Int = 30
 ) {
     // Aligned dimensions (even numbers)
     private val width = if (originalWidth % 2 == 0) originalWidth else originalWidth - 1
@@ -24,7 +25,11 @@ class VideoEncoder(
     private val bufferInfo = MediaCodec.BufferInfo()
     private var frameIndex = 0L
     private var startTimeUs = -1L
+    private var lastPresentationTimeUs = 0L
     private var colorFormat = -1
+    private val i420Mat = Mat()
+    private var i420Bytes = ByteArray(0)
+    private var nv12Bytes = ByteArray(0)
 
     private var isReleased = false
 
@@ -39,7 +44,7 @@ class VideoEncoder(
 
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
         format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000)
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30)
+        format.setInteger(MediaFormat.KEY_FRAME_RATE, frameRate.coerceAtLeast(1))
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
 
         try {
@@ -55,21 +60,39 @@ class VideoEncoder(
         mediaMuxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         isReleased = false
         startTimeUs = -1L
+        lastPresentationTimeUs = 0L
+        frameIndex = 0L
     }
 
     private fun selectSupportedColorFormat(mimeType: String): Int {
-        val capabilities = MediaCodec.createEncoderByType(mimeType).codecInfo.getCapabilitiesForType(mimeType)
-        for (format in capabilities.colorFormats) {
-            if (format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar ||
-                format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar) {
-                return format
+        val codec = MediaCodec.createEncoderByType(mimeType)
+        return try {
+            val capabilities = codec.codecInfo.getCapabilitiesForType(mimeType)
+            var selectedFormat = capabilities.colorFormats[0]
+            for (format in capabilities.colorFormats) {
+                if (format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar ||
+                    format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar) {
+                    selectedFormat = format
+                    break
+                }
             }
+            selectedFormat
+        } finally {
+            codec.release()
         }
-        return capabilities.colorFormats[0] // Fallback
     }
 
     @Synchronized
     fun encodeFrame(rgbaMat: Mat) {
+        val currentTimeUs = System.nanoTime() / 1000L
+        if (startTimeUs < 0L) {
+            startTimeUs = currentTimeUs
+        }
+        encodeFrame(rgbaMat, currentTimeUs - startTimeUs)
+    }
+
+    @Synchronized
+    fun encodeFrame(rgbaMat: Mat, presentationTimeUs: Long) {
         if (isReleased) return
 
         // Ensure frame size matches encoder exactly
@@ -92,36 +115,35 @@ class VideoEncoder(
 
                 inputBuffer?.put(yuvBytes)
 
-                val currentTimeUs = System.nanoTime() / 1000L
-                if (startTimeUs < 0L) {
-                    startTimeUs = currentTimeUs
-                }
-                val presentationTimeUs = currentTimeUs - startTimeUs
-                mediaCodec?.queueInputBuffer(inputBufferIndex, 0, yuvBytes.size, presentationTimeUs, 0)
+                lastPresentationTimeUs = presentationTimeUs.coerceAtLeast(lastPresentationTimeUs)
+                mediaCodec?.queueInputBuffer(inputBufferIndex, 0, yuvBytes.size, lastPresentationTimeUs, 0)
                 frameIndex++
             }
         } catch (e: Exception) {
             Log.e("VideoEncoder", "Error in encodeFrame: ${e.message}")
         }
 
-        if (preparedMat != rgbaMat) preparedMat.release()
+        if (preparedMat !== rgbaMat) preparedMat.release()
         drainEncoder(false)
     }
 
     private fun rgbaToYuv(rgbaMat: Mat, format: Int): ByteArray {
-        val i420Mat = Mat()
         // OpenCV's COLOR_RGBA2YUV_I420 produces YUV Planar (I420)
         Imgproc.cvtColor(rgbaMat, i420Mat, Imgproc.COLOR_RGBA2YUV_I420)
 
         val size = (i420Mat.total() * i420Mat.channels()).toInt()
-        val i420Bytes = ByteArray(size)
+        if (i420Bytes.size != size) {
+            i420Bytes = ByteArray(size)
+        }
         i420Mat.get(0, 0, i420Bytes)
-        i420Mat.release()
 
         return if (format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) {
             // Convert I420 (Planar: YYYY... UU... VV...) to NV12 (Semi-Planar: YYYY... UVUV...)
             val ySize = width * height
-            val nv12Bytes = ByteArray(ySize * 3 / 2)
+            val nv12Size = ySize * 3 / 2
+            if (nv12Bytes.size != nv12Size) {
+                nv12Bytes = ByteArray(nv12Size)
+            }
 
             // Y plane is identical
             System.arraycopy(i420Bytes, 0, nv12Bytes, 0, ySize)
@@ -150,7 +172,13 @@ class VideoEncoder(
                 while (!eosQueued && attempts < 10) {
                     val inputBufferIndex = mediaCodec?.dequeueInputBuffer(10000) ?: -1
                     if (inputBufferIndex >= 0) {
-                        mediaCodec?.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        mediaCodec?.queueInputBuffer(
+                            inputBufferIndex,
+                            0,
+                            0,
+                            lastPresentationTimeUs + (1000000L / frameRate.coerceAtLeast(1)),
+                            MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                        )
                         eosQueued = true
                         Log.d("VideoEncoder", "EOS signal queued")
                     } else {
@@ -160,17 +188,23 @@ class VideoEncoder(
                 }
             }
 
+            var noOutputCount = 0
             while (true) {
-                val outputBufferIndex = mediaCodec?.dequeueOutputBuffer(bufferInfo, 10000) ?: -1
+                val timeoutUs = if (endOfStream) 10000L else 0L
+                val outputBufferIndex = mediaCodec?.dequeueOutputBuffer(bufferInfo, timeoutUs) ?: -1
                 if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
                     if (!endOfStream) break
+                    noOutputCount++
+                    if (noOutputCount > 50) break
                 } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    noOutputCount = 0
                     if (isMuxerStarted) break
                     val newFormat = mediaCodec?.outputFormat
                     trackIndex = mediaMuxer?.addTrack(newFormat!!) ?: -1
                     mediaMuxer?.start()
                     isMuxerStarted = true
                 } else if (outputBufferIndex >= 0) {
+                    noOutputCount = 0
                     val outputBuffer = mediaCodec?.getOutputBuffer(outputBufferIndex)
                     if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
                         bufferInfo.size = 0
@@ -209,6 +243,7 @@ class VideoEncoder(
                 mediaMuxer?.stop()
             }
             mediaMuxer?.release()
+            i420Mat.release()
             Log.d("VideoEncoder", "Encoder released")
         } catch (e: Exception) {
             Log.e("VideoEncoder", "Error releasing encoder: ${e.message}", e)
