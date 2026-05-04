@@ -10,6 +10,7 @@ import android.view.TextureView
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.annotation.OptIn
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.net.toUri
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -28,11 +29,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(FragmentVideoOpticalFlowBinding::inflate) {
+class VideoOpticalFlowFragment :
+    BaseFragment<FragmentVideoOpticalFlowBinding>(FragmentVideoOpticalFlowBinding::inflate) {
     private var player: ExoPlayer? = null
     private var isPlaying = true
     private val progressUpdateIntervalMs = 250L
-    
+
     private val handler = Handler(Looper.getMainLooper())
     private val updateProgressAction = object : Runnable {
         override fun run() {
@@ -51,32 +53,63 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
         tvTimer.text = formatTimer(0L, 0L)
 
         binding.videoView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-            override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
+            override fun onSurfaceTextureAvailable(
+                surfaceTexture: SurfaceTexture,
+                width: Int,
+                height: Int
+            ) {
                 val surface = Surface(surfaceTexture)
                 player?.setVideoSurface(surface)
-                
+
                 val path = mainViewModel.selectedVideoPath.value
                 if (!path.isNullOrEmpty()) {
                     play(path)
                     setVideoTitle(path)
                 }
             }
+
             override fun onSurfaceTextureSizeChanged(s: SurfaceTexture, w: Int, h: Int) {}
             override fun onSurfaceTextureDestroyed(s: SurfaceTexture): Boolean {
                 player?.setVideoSurface(null)
                 return true
             }
+
             override fun onSurfaceTextureUpdated(s: SurfaceTexture) {}
         }
 
         player?.addListener(object : Player.Listener {
+
             @OptIn(UnstableApi::class)
             override fun onVideoSizeChanged(videoSize: VideoSize) {
-                Log.d("VIDEO-PLAYER", "Video size changed: ${videoSize.width}x${videoSize.height}")
+                Log.d(
+                    "VIDEO-PLAYER",
+                    "Video size changed: ${videoSize.width}x${videoSize.height}"
+                )
+
                 checkIfFragmentAttached {
-                    val aspectRatio = if (videoSize.height == 0) 1f 
-                        else (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height
+                    val videoWidth = videoSize.width
+                    val videoHeight = videoSize.height
+
+                    if (videoWidth <= 0 || videoHeight <= 0) return@checkIfFragmentAttached
+
+                    val aspectRatio =
+                        (videoWidth * videoSize.pixelWidthHeightRatio) / videoHeight
+
                     binding.aspectRatioFrameLayout.setAspectRatio(aspectRatio)
+
+                    val layoutParams =
+                        binding.videoGroup.layoutParams as ConstraintLayout.LayoutParams
+
+                    layoutParams.width = 0
+                    layoutParams.height = 0
+
+                    // Ratio dạng width:height
+                    val ratioWidth = (videoWidth * videoSize.pixelWidthHeightRatio).toInt()
+                    val ratioHeight = videoHeight
+
+                    layoutParams.dimensionRatio = "$ratioWidth:$ratioHeight"
+
+                    binding.videoGroup.layoutParams = layoutParams
                 }
             }
 
@@ -105,7 +138,11 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 Log.e("VIDEO-PLAYER", "ExoPlayer Error: ${error.message}", error)
                 checkIfFragmentAttached {
-                    Toast.makeText(safeContext(), "Playback Error: ${error.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        safeContext(),
+                        "Playback Error: ${error.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         })
@@ -137,6 +174,7 @@ class VideoOpticalFlowFragment : BaseFragment<FragmentVideoOpticalFlowBinding>(F
                     binding.tvTimer.text = formatTimer(seekPosition, normalizedDurationMs())
                 }
             }
+
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
