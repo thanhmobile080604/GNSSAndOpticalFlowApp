@@ -110,7 +110,7 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
             return
         }
 
-        val shared = ShareHelper(safeContext()).shareFiles(selectedVideos.map { File(it.path) })
+        val shared = ShareHelper.shareFiles(safeContext(), selectedVideos.map { File(it.path) })
         if (!shared) {
             showToast("No available videos to share")
         }

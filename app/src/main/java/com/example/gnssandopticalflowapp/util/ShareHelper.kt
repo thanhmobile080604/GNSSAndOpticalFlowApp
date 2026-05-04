@@ -7,9 +7,9 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import java.io.File
 
-class ShareHelper(private val context: Context) {
+object ShareHelper {
 
-    fun shareFiles(files: List<File>): Boolean {
+    fun shareFiles(context: Context, files: List<File>): Boolean {
         return try {
             val shareableFiles = files.filter { it.exists() && it.isFile }
             if (shareableFiles.isEmpty()) return false
