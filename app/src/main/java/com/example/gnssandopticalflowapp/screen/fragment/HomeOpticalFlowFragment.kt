@@ -10,7 +10,11 @@ import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentHomeOpticalFlowBinding
+import com.example.gnssandopticalflowapp.model.VideoProcessOptions
+import com.example.gnssandopticalflowapp.optical_flow.classes.Farneback
 import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
+import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
+import com.example.gnssandopticalflowapp.screen.dialog.VideoProcessOptionsDialog
 import com.example.gnssandopticalflowapp.util.VideoStorageUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,7 +30,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
     private val videoPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
-            handleVideoSelection(uri)
+            showVideoProcessOptions(uri)
         }
     }
 
@@ -47,7 +51,13 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         }
     }
 
-    private fun handleVideoSelection(uri: Uri) {
+    private fun showVideoProcessOptions(uri: Uri) {
+        VideoProcessOptionsDialog.show(childFragmentManager) { options ->
+            handleVideoSelection(uri, options)
+        }
+    }
+
+    private fun handleVideoSelection(uri: Uri, options: VideoProcessOptions) {
         showLoadingDialog("Copying video...") {
             copyJob?.cancel()
         }
@@ -65,7 +75,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                     }
                 }
                 
-                processVideoOffline(sourceFile)
+                processVideoOffline(sourceFile, options)
                 
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -76,7 +86,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         }
     }
 
-    private suspend fun processVideoOffline(sourceFile: File) {
+    private suspend fun processVideoOffline(sourceFile: File, options: VideoProcessOptions) {
         withContext(Dispatchers.Main) {
             showLoadingDialog("Processing Optical Flow...")
         }
@@ -114,7 +124,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             return
         }
 
-        val klt = KLT(null)
+        val opticalFlow = createOpticalFlow(options)
         val frameDurationUs = 1000000L / 30 // 30 FPS
         var currentTimeUs = 0L
         var framesProcessed = 0
@@ -131,8 +141,8 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                     Utils.bitmapToMat(bitmap, rgbaMat)
                     
                     if (!rgbaMat.empty()) {
-                        val output = klt.run(rgbaMat)
-                        val outFrame = output.ofFrame ?: rgbaMat
+                        val output = opticalFlow.run(rgbaMat)
+                        val outFrame = output?.ofFrame ?: rgbaMat
                         
                         encoder.encodeFrame(outFrame)
                         framesProcessed++
@@ -174,6 +184,19 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         } else {
             Log.d("VIDEO-PROCESS", "Processing cancelled.")
             outputFile.delete() 
+        }
+    }
+
+    private fun createOpticalFlow(options: VideoProcessOptions): OpticalFlow {
+        val opticalFlow: OpticalFlow = if (options.useFarneback) {
+            Farneback()
+        } else {
+            KLT(null)
+        }
+
+        return opticalFlow.apply {
+            setSensitivity(50)
+            setMovingMode(options.isMoving)
         }
     }
 

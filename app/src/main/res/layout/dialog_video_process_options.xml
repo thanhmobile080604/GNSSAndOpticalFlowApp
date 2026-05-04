@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:animateLayoutChanges="true"
+    android:background="@color/black_60">
+
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/bgParent"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:src="@color/white"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintDimensionRatio="344:420"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintWidth_percent="0.84"
+        app:round="40dp" />
+
+    <ImageView
+        android:id="@+id/ivThumb"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="18dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_process"
+        app:layout_constraintDimensionRatio="1"
+        app:layout_constraintEnd_toEndOf="@id/bgParent"
+        app:layout_constraintStart_toStartOf="@id/bgParent"
+        app:layout_constraintTop_toTopOf="@id/bgParent"
+        app:layout_constraintWidth_percent="0.2" />
+
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp"
+        android:layout_marginTop="12dp"
+        android:fontFamily="@font/inter_bold"
+        android:gravity="center"
+        android:text="Video Options"
+        android:textColor="@color/black"
+        android:textSize="20sp"
+        app:layout_constraintEnd_toEndOf="@id/bgParent"
+        app:layout_constraintStart_toStartOf="@id/bgParent"
+        app:layout_constraintTop_toBottomOf="@id/ivThumb" />
+
+    <TextView
+        android:id="@+id/tvSubtitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="28dp"
+        android:layout_marginTop="6dp"
+        android:fontFamily="@font/inter_medium"
+        android:gravity="center"
+        android:text="Choose how optical flow reads this video"
+        android:textColor="@color/text_800"
+        android:textSize="15sp"
+        app:layout_constraintEnd_toEndOf="@id/bgParent"
+        app:layout_constraintStart_toStartOf="@id/bgParent"
+        app:layout_constraintTop_toBottomOf="@id/tvTitle" />
+
+    <LinearLayout
+        android:id="@+id/optionsPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp"
+        android:layout_marginTop="18dp"
+        android:orientation="vertical"
+        app:layout_constraintEnd_toEndOf="@id/bgParent"
+        app:layout_constraintStart_toStartOf="@id/bgParent"
+        app:layout_constraintTop_toBottomOf="@id/tvSubtitle">
+
+        <LinearLayout
+            android:id="@+id/movingRow"
+            android:layout_width="match_parent"
+            android:layout_height="62dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvMovingLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter_semi_bold"
+                    android:maxLines="1"
+                    android:text="Motion"
+                    android:textColor="@color/text_900"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tvMovingValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:fontFamily="@font/inter_regular"
+                    android:maxLines="1"
+                    android:text="Not Moving"
+                    android:textColor="@color/text_700"
+                    android:textSize="13sp" />
+
+            </LinearLayout>
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switchMoving"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:splitTrack="false"
+                app:switchMinWidth="48dp"
+                app:thumbTint="@android:color/white"
+                app:trackTint="@color/switch_track_selector" />
+
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#14000000" />
+
+        <LinearLayout
+            android:id="@+id/algorithmRow"
+            android:layout_width="match_parent"
+            android:layout_height="62dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvAlgorithmLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter_semi_bold"
+                    android:maxLines="1"
+                    android:text="Algorithm"
+                    android:textColor="@color/text_900"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tvAlgorithmValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:fontFamily="@font/inter_regular"
+                    android:maxLines="1"
+                    android:text="KLT"
+                    android:textColor="@color/text_700"
+                    android:textSize="13sp" />
+
+            </LinearLayout>
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switchAlgorithm"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:splitTrack="false"
+                app:switchMinWidth="48dp"
+                app:thumbTint="@android:color/white"
+                app:trackTint="@color/switch_track_selector" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/buttonPanel"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="18dp"
+        android:orientation="horizontal"
+        app:layout_constraintBottom_toBottomOf="@id/bgParent"
+        app:layout_constraintEnd_toEndOf="@id/bgParent"
+        app:layout_constraintStart_toStartOf="@id/bgParent"
+        app:layout_constraintTop_toBottomOf="@id/optionsPanel">
+
+        <TextView
+            android:id="@+id/tvCancel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:fontFamily="@font/inter_bold"
+            android:gravity="center"
+            android:text="Cancel"
+            android:textColor="@color/text_700"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/tvApply"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_black_purple_gradient"
+            android:clickable="true"
+            android:ellipsize="end"
+            android:focusable="true"
+            android:fontFamily="@font/inter_bold"
+            android:gravity="center"
+            android:maxLines="1"
+            android:paddingHorizontal="10dp"
+            android:text="Apply"
+            android:textColor="@color/white"
+            android:textSize="16sp" />
+
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
