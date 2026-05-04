@@ -3,10 +3,8 @@ package com.example.gnssandopticalflowapp.adapter
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
-import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.databinding.ItemVideoThumbBinding
 import com.example.gnssandopticalflowapp.model.VideoInfo
 import java.text.SimpleDateFormat
@@ -14,20 +12,58 @@ import java.util.Date
 import java.util.Locale
 
 class VideoListAdapter(
-    private val onVideoSelected: (VideoInfo?) -> Unit
+    private val onSelectionChanged: (List<VideoInfo>) -> Unit
 ) : RecyclerView.Adapter<VideoListAdapter.VideoViewHolder>() {
 
-    private var videos: List<VideoInfo> = emptyList()
+    private var videos: MutableList<VideoInfo> = mutableListOf()
     private var selectedPosition: Int = -1
+    private val selectedPaths = mutableSetOf<String>()
+    private var editMode: Boolean = false
 
     fun setData(newVideos: List<VideoInfo>) {
-        videos = newVideos
-        selectedPosition = -1
+        videos = newVideos.toMutableList()
+        clearSelection(notify = false)
         notifyDataSetChanged()
     }
 
     fun getSelectedVideo(): VideoInfo? {
-        return if (selectedPosition in videos.indices) videos[selectedPosition] else null
+        return if (!editMode && selectedPosition in videos.indices) videos[selectedPosition] else null
+    }
+
+    fun getSelectedVideos(): List<VideoInfo> {
+        return if (editMode) {
+            videos.filter { it.path in selectedPaths }
+        } else {
+            getSelectedVideo()?.let(::listOf).orEmpty()
+        }
+    }
+
+    fun setEditMode(enabled: Boolean) {
+        if (editMode == enabled) return
+
+        editMode = enabled
+        clearSelection(notify = false)
+        notifyDataSetChanged()
+        onSelectionChanged(emptyList())
+    }
+
+    fun clearSelection(notify: Boolean = true) {
+        selectedPosition = -1
+        selectedPaths.clear()
+        if (notify) {
+            notifyDataSetChanged()
+            onSelectionChanged(emptyList())
+        }
+    }
+
+    fun removeVideos(videosToRemove: List<VideoInfo>) {
+        val pathsToRemove = videosToRemove.mapTo(mutableSetOf()) { it.path }
+        if (pathsToRemove.isEmpty()) return
+
+        videos = videos.filterNot { it.path in pathsToRemove }.toMutableList()
+        clearSelection(notify = false)
+        notifyDataSetChanged()
+        onSelectionChanged(emptyList())
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VideoViewHolder {
@@ -41,25 +77,36 @@ class VideoListAdapter(
 
     override fun onBindViewHolder(holder: VideoViewHolder, position: Int) {
         val video = videos[position]
-        holder.bind(video, position == selectedPosition)
+        val isSelected = if (editMode) {
+            video.path in selectedPaths
+        } else {
+            position == selectedPosition
+        }
+        holder.bind(video, isSelected)
 
         holder.itemView.setOnClickListener {
-            val previousSelected = selectedPosition
-
-            if (selectedPosition == position) {
-                selectedPosition = -1
+            if (editMode) {
+                if (!selectedPaths.add(video.path)) {
+                    selectedPaths.remove(video.path)
+                }
+                notifyItemChanged(position)
             } else {
-                selectedPosition = position
-            }
+                val previousSelected = selectedPosition
 
-            if (previousSelected != -1) {
-                notifyItemChanged(previousSelected)
-            }
-            if (selectedPosition != -1) {
-                notifyItemChanged(selectedPosition)
-            }
+                selectedPosition = if (selectedPosition == position) {
+                    -1
+                } else {
+                    position
+                }
 
-            onVideoSelected(getSelectedVideo())
+                if (previousSelected != -1) {
+                    notifyItemChanged(previousSelected)
+                }
+                if (selectedPosition != -1) {
+                    notifyItemChanged(selectedPosition)
+                }
+            }
+            onSelectionChanged(getSelectedVideos())
         }
     }
 
@@ -81,7 +128,7 @@ class VideoListAdapter(
             val simpleDateFormat = SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault())
             val formattedDate = simpleDateFormat.format(Date(video.timestamp))
 
-            binding.root.findViewById<TextView>(R.id.tvTitle)?.text = formattedDate
+            binding.tvTitle.text = formattedDate
         }
     }
 }

@@ -6,6 +6,7 @@ import com.example.gnssandopticalflowapp.model.VideoInfo
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.core.content.edit
+import java.io.File
 
 object VideoStorageUtil {
     private const val PREFS_NAME = "video_storage_prefs"
@@ -37,6 +38,24 @@ object VideoStorageUtil {
             videos.add(0, VideoInfo(videoPath, System.currentTimeMillis()))
             saveVideos(context, videos)
         }
+    }
+
+    fun deleteVideos(context: Context, videosToDelete: List<VideoInfo>): Int {
+        val pathsToDelete = videosToDelete.mapTo(mutableSetOf()) { it.path }
+        if (pathsToDelete.isEmpty()) return 0
+
+        val currentVideos = getVideos(context)
+        val remainingVideos = currentVideos.filterNot { it.path in pathsToDelete }
+        saveVideos(context, remainingVideos)
+
+        pathsToDelete.forEach { path ->
+            runCatching {
+                val file = File(path)
+                if (file.exists()) file.delete()
+            }
+        }
+
+        return currentVideos.size - remainingVideos.size
     }
 
     private fun saveVideos(context: Context, videos: List<VideoInfo>) {
