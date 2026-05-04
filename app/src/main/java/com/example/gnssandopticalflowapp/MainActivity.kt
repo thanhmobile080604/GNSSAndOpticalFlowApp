@@ -62,6 +62,8 @@ class MainActivity : AppCompatActivity() {
             StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build()
         )
 
+        viewModel.seedFakeLocationIfNeeded()
+
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 // Collect permissions status
@@ -122,4 +124,5 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
 }

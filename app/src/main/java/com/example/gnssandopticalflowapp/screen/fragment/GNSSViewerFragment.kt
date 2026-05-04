@@ -29,6 +29,7 @@ import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.Constants
 import com.example.gnssandopticalflowapp.common.checkIfFragmentAttached
 import com.example.gnssandopticalflowapp.common.dp
 import com.example.gnssandopticalflowapp.common.hide
@@ -58,11 +59,6 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Overlay
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
-import kotlin.math.abs
 
 @RequiresApi(Build.VERSION_CODES.R)
 class GNSSViewerFragment :
@@ -77,15 +73,13 @@ class GNSSViewerFragment :
     private var currentLocation: Location? = null
     private var userMarker: Marker? = null
     private val satelliteTracker = GnssSatelliteTracker()
-    // Set to true to force a test location (New York) for EarthRenderer testing
-    private var useTestLocation: Boolean = false
-    private val testLatitude = 40.712776
-    private val testLongitude = -74.005974
+    private val useTestLocation: Boolean = Constants.USE_FAKE_LOCATION
+    private var gnssStatusRegistered = false
     private var gnssMeasurementsRegistered = false
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            currentLocation = location
+            currentLocation = mainViewModel.getEffectiveLocation(location)
             updateMapLocation()
         }
 
@@ -98,6 +92,12 @@ class GNSSViewerFragment :
     }
 
     private fun hasLocationPermission(): Boolean {
+        if (useTestLocation) return true
+
+        return hasRealLocationPermission()
+    }
+
+    private fun hasRealLocationPermission(): Boolean {
         val permissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
@@ -161,6 +161,12 @@ class GNSSViewerFragment :
     }
 
     private fun startResolutionSequence() {
+        if (useTestLocation) {
+            mainViewModel.isResolvingDeviceSettings.value = false
+            startLocationUpdates()
+            return
+        }
+
         mainViewModel.isResolvingDeviceSettings.value = true
         requestGpsResolution()
     }
@@ -223,6 +229,12 @@ class GNSSViewerFragment :
         setupLocationManager()
         refreshCelesTrakDataIfNeeded()
 
+        if (useTestLocation) {
+            currentLocation = mainViewModel.getEffectiveLocation(null)
+            updateMapLocation()
+            if (!hasRealLocationPermission()) return
+        }
+
         // Request Location
         locationManager.requestLocationUpdates(
             LocationManager.GPS_PROVIDER,
@@ -238,7 +250,9 @@ class GNSSViewerFragment :
         )
 
         // Request GNSS Status
-        locationManager.registerGnssStatusCallback(safeContext().mainExecutor, gnssStatusCallback)
+        gnssStatusRegistered = runCatching {
+            locationManager.registerGnssStatusCallback(safeContext().mainExecutor, gnssStatusCallback)
+        }.getOrDefault(false)
         registerGnssMeasurements()
 
         // Check last known location immediately if it's fresh (within 2 minutes)
@@ -248,10 +262,10 @@ class GNSSViewerFragment :
         if (lastKnownMap != null) {
             val locationAge = System.currentTimeMillis() - lastKnownMap.time
             if (locationAge < 120000) { // Fresh if less than 2 minutes old
-                currentLocation = lastKnownMap
+                currentLocation = mainViewModel.getEffectiveLocation(lastKnownMap)
                 updateMapLocation()
                 // Center map once on initialization/resume if needed
-                val point = GeoPoint(lastKnownMap.latitude, lastKnownMap.longitude)
+                val point = GeoPoint(currentLocation!!.latitude, currentLocation!!.longitude)
                 binding.mapView.controller.animateTo(point)
             }
         }
@@ -260,7 +274,10 @@ class GNSSViewerFragment :
     private fun stopLocationUpdates() {
         if (::locationManager.isInitialized) {
             locationManager.removeUpdates(locationListener)
-            locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
+            if (gnssStatusRegistered) {
+                locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
+                gnssStatusRegistered = false
+            }
             if (gnssMeasurementsRegistered) {
                 locationManager.unregisterGnssMeasurementsCallback(gnssMeasurementsCallback)
                 gnssMeasurementsRegistered = false
@@ -304,9 +321,8 @@ class GNSSViewerFragment :
         val loc = currentLocation ?: return
         
         // Update ViewModel for real-time dialog updates
-        mainViewModel.currentLocation.postValue(loc)
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-        mainViewModel.currentTime.postValue(sdf.format(Date(loc.time)))
+        mainViewModel.postCurrentLocation(loc)
+        mainViewModel.postCurrentTime(loc.time)
 
         val point = GeoPoint(loc.latitude, loc.longitude)
         if (userMarker == null) {
@@ -326,7 +342,7 @@ class GNSSViewerFragment :
 
                 title = "Vị trí của bạn"
                 setOnMarkerClickListener { _, _ ->
-                    showLocationDetailsDialog(loc)
+                    showLocationDetailsDialog(currentLocation ?: loc)
                     true
                 }
             }
@@ -337,23 +353,12 @@ class GNSSViewerFragment :
         binding.mapView.invalidate()
 
         if (rendererSet) {
-            val latToUse = if (useTestLocation) testLatitude else loc.latitude
-            val lonToUse = if (useTestLocation) testLongitude else loc.longitude
-            earthRenderer.updateUserLocation(latToUse, lonToUse)
+            earthRenderer.updateUserLocation(loc.latitude, loc.longitude)
         }
     }
 
     private fun showLocationDetailsDialog(loc: Location) {
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-        sdf.timeZone = TimeZone.getDefault()
-        val baseLocal = sdf.format(Date(loc.time))
-        val tz = TimeZone.getDefault()
-        val offsetMillis = tz.getOffset(loc.time)
-        val sign = if (offsetMillis >= 0) "+" else "-"
-        val offHours = abs(offsetMillis) / 3600000
-        val offMinutes = (abs(offsetMillis) % 3600000) / 60000
-        val utcSuffix = "UTC$sign" + String.format("%02d:%02d", offHours, offMinutes)
-        val localTime = "$baseLocal $utcSuffix"
+        val localTime = mainViewModel.formatDisplayTime(loc.time)
         checkIfFragmentAttached {
             Map2DInformationDialog.showDialog(
                 fragmentManager = parentFragmentManager,
@@ -568,8 +573,9 @@ class GNSSViewerFragment :
         if (!hasLocationPermission()) return
 
         val loc = currentLocation ?: if (::locationManager.isInitialized) {
-            (locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER))
+            val lastKnown = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            if (lastKnown != null || useTestLocation) mainViewModel.getEffectiveLocation(lastKnown) else null
         } else null
 
         if (loc == null) {
@@ -649,21 +655,12 @@ class GNSSViewerFragment :
     private fun startRealTimeTicker() {
         viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
-                val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
                 // Use system time for ticking, or location time if one is available and fresh
                 val displayTime = currentLocation?.let { loc ->
                     val age = System.currentTimeMillis() - loc.time
                     if (age < 5000) loc.time else System.currentTimeMillis()
                 } ?: System.currentTimeMillis()
-                
-                val baseTime = sdf.format(Date(displayTime))
-                val tz = TimeZone.getDefault()
-                val offsetMillis = tz.getOffset(displayTime)
-                val sign = if (offsetMillis >= 0) "+" else "-"
-                val offHours = Math.abs(offsetMillis) / 3600000
-                val offMinutes = (Math.abs(offsetMillis) % 3600000) / 60000
-                val utcSuffix = "UTC$sign" + String.format("%02d:%02d", offHours, offMinutes)
-                mainViewModel.currentTime.value = "$baseTime $utcSuffix"
+                mainViewModel.setCurrentTime(displayTime)
                 delay(1000)
             }
         }

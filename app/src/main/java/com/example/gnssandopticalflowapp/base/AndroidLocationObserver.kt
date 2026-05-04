@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import androidx.core.content.ContextCompat
+import com.example.gnssandopticalflowapp.common.Constants
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +41,8 @@ class AndroidLocationObserver(
     }
 
     private fun checkLocationPermission(): Boolean {
+        if (Constants.USE_FAKE_LOCATION) return true
+
         val fineLocationGranted = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.ACCESS_FINE_LOCATION
@@ -54,6 +57,8 @@ class AndroidLocationObserver(
     }
 
     private fun checkGpsEnabled(): Boolean {
+        if (Constants.USE_FAKE_LOCATION) return true
+
         return try {
             locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
         } catch (_: Exception) {
