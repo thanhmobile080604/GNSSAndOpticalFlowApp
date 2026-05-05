@@ -23,10 +23,12 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
     private val minDisplayVectorLength = 9.0
     private val vectorThickness = 4
     private var vectorDirectionSign = -1.0
+    private var subtractDominantMotion = true
     private var flowPts: Int = 0
     private var maxCorners: Int = 240
     private var qualityLevel: Double = 0.005
     private var minDistance: Double = 2.0
+    private var minTrackedMotionMagnitude: Double = 0.55
     private var updateFeatures: Boolean = false
     private var prevMv: Point? = null
     private var currMv: Point? = null
@@ -37,6 +39,8 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
     private val semaphore: Semaphore = Semaphore(1)
     private val ofOutput: OFOutput = OFOutput()
 
+    private data class TrackMotion(val start: Point, val dx: Double, val dy: Double)
+
     private fun statusInit() = MatOfByte()
 
     override fun setSensitivity(value: Int) {
@@ -46,6 +50,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
             maxCorners = (12 + (normalized * 408.0)).roundToInt()
             qualityLevel = (0.10 - (normalized * 0.095)).coerceIn(0.005, 0.10)
             minDistance = (14.0 - (normalized * 12.0)).coerceIn(2.0, 14.0)
+            minTrackedMotionMagnitude = (0.80 - (normalized * 0.50)).coerceIn(0.30, 0.80)
             updateFeatures = true
             semaphore.release()
         } catch (e: Exception) {
@@ -64,6 +69,7 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
 
     override fun setMovingMode(isMoving: Boolean) {
         vectorDirectionSign = if (isMoving) 1.0 else -1.0
+        subtractDominantMotion = !isMoving
     }
 
     private fun updatePoints(prevGray: Mat, currGray: Mat, prevPts: MatOfPoint2f) {
@@ -71,6 +77,13 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
         val corners = MatOfPoint()
         Imgproc.goodFeaturesToTrack(prevGray, corners, maxCorners, qualityLevel, minDistance)
         prevPts.fromArray(*corners.toArray())
+    }
+
+    private fun median(list: List<Double>): Double {
+        if (list.isEmpty()) return 0.0
+        val sorted = list.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
     }
 
     override fun run(newFrame: Mat): OFOutput {
@@ -111,9 +124,10 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
         val prevPtsArray = prevPts.toArray()
         val currPtsArray = currPts.toArray()
 
-        // collect per-point motions and filter by status and error
-        val dxList = ArrayList<Double>()
-        val dyList = ArrayList<Double>()
+        // Track all reliable points first so feature refresh is not driven by display filtering.
+        val trackedMotions = ArrayList<TrackMotion>()
+        val allDxList = ArrayList<Double>()
+        val allDyList = ArrayList<Double>()
         val errArray = err.toArray()
         for (i in statusArray.indices) {
             if (statusArray[i].toInt() == 1) {
@@ -123,46 +137,69 @@ class KLT(private val velLabel: TextView?) : OpticalFlow {
                     val pt2 = currPtsArray[i]
                     val dx = pt2.x - pt1.x
                     val dy = pt2.y - pt1.y
-                    dxList.add(dx)
-                    dyList.add(dy)
-                    var displayDx = dx * vectorDirectionSign * displayVectorLengthMultiplier
-                    var displayDy = dy * vectorDirectionSign * displayVectorLengthMultiplier
-                    val displayMagnitude = sqrt((displayDx * displayDx) + (displayDy * displayDy))
-                    if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
-                        val scaleUp = minDisplayVectorLength / displayMagnitude
-                        displayDx *= scaleUp
-                        displayDy *= scaleUp
-                    }
-                    val displayEnd = Point(pt1.x + displayDx, pt1.y + displayDy)
-                    Imgproc.line(currFrame, pt1, displayEnd, color, vectorThickness)
                     flowPts++
+                    trackedMotions.add(TrackMotion(pt1, dx, dy))
+                    allDxList.add(dx)
+                    allDyList.add(dy)
                 }
             }
         }
 
-        fun median(list: List<Double>): Double {
-            if (list.isEmpty()) return 0.0
-            val sorted = list.sorted()
-            val mid = sorted.size / 2
-            return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
+        val dominantDx = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDxList) else 0.0
+        val dominantDy = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDyList) else 0.0
+
+        // Only draw and aggregate motion above the jitter floor.
+        val dxList = ArrayList<Double>()
+        val dyList = ArrayList<Double>()
+        var motionPts = 0
+        for (motion in trackedMotions) {
+            val dx = motion.dx - dominantDx
+            val dy = motion.dy - dominantDy
+            val rawMagnitude = sqrt((dx * dx) + (dy * dy))
+            if (rawMagnitude < minTrackedMotionMagnitude) {
+                continue
+            }
+
+            dxList.add(dx)
+            dyList.add(dy)
+            var displayDx = dx * vectorDirectionSign * displayVectorLengthMultiplier
+            var displayDy = dy * vectorDirectionSign * displayVectorLengthMultiplier
+            val displayMagnitude = sqrt((displayDx * displayDx) + (displayDy * displayDy))
+            if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
+                val scaleUp = minDisplayVectorLength / displayMagnitude
+                displayDx *= scaleUp
+                displayDy *= scaleUp
+            }
+            val displayEnd = Point(motion.start.x + displayDx, motion.start.y + displayDy)
+            Imgproc.line(currFrame, motion.start, displayEnd, color, vectorThickness)
+            motionPts++
         }
 
-        if (flowPts > 0) {
+        if (motionPts > 0) {
             val medDx = median(dxList)
             val medDy = median(dyList)
+            val medianMagnitude = sqrt((medDx * medDx) + (medDy * medDy))
 
-            // smooth motion vector with previous estimate
-            val newMv = Point(
-                medDx * vectorDirectionSign / 5.0,
-                medDy * vectorDirectionSign / 5.0
-            )
-            if (prevMv == null) {
-                currMv = newMv
+            if (medianMagnitude >= minTrackedMotionMagnitude) {
+                // smooth motion vector with previous estimate
+                val newMv = Point(
+                    medDx * vectorDirectionSign / 5.0,
+                    medDy * vectorDirectionSign / 5.0
+                )
+                if (prevMv == null) {
+                    currMv = newMv
+                } else {
+                    // exponential smoothing
+                    currMv = Point(prevMv!!.x * 0.85 + newMv.x * 0.15, prevMv!!.y * 0.85 + newMv.y * 0.15)
+                }
+                prevMv = currMv
             } else {
-                // exponential smoothing
-                currMv = Point(prevMv!!.x * 0.85 + newMv.x * 0.15, prevMv!!.y * 0.85 + newMv.y * 0.15)
+                currMv = null
+                prevMv = null
             }
-            prevMv = currMv
+        } else {
+            currMv = null
+            prevMv = null
         }
 
         currGray.copyTo(prevGray)
