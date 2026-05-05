@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.base
+package com.example.gnssandopticalflowapp.common
 
 import kotlinx.coroutines.flow.Flow
 

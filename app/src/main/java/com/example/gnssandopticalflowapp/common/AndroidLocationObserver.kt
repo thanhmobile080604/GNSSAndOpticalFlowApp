@@ -1,11 +1,11 @@
-package com.example.gnssandopticalflowapp.base
+package com.example.gnssandopticalflowapp.common
 
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import androidx.core.content.ContextCompat
-import com.example.gnssandopticalflowapp.common.Constants
+import com.example.gnssandopticalflowapp.common.LocationObserver
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow

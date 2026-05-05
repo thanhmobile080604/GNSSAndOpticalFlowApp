@@ -12,8 +12,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.example.gnssandopticalflowapp.base.AndroidConnectivityObserver
-import com.example.gnssandopticalflowapp.base.AndroidLocationObserver
+import com.example.gnssandopticalflowapp.common.AndroidLocationObserver
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
 import com.example.gnssandopticalflowapp.screen.dialog.NoGPSDialog
 import com.example.gnssandopticalflowapp.screen.dialog.NoLocationDialog
@@ -33,9 +32,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var binding: ActivityMainBinding
-    private val network: AndroidConnectivityObserver by lazy {
-        AndroidConnectivityObserver(this)
-    }
 
     private val locationObserver: AndroidLocationObserver by lazy {
         AndroidLocationObserver(applicationContext)
