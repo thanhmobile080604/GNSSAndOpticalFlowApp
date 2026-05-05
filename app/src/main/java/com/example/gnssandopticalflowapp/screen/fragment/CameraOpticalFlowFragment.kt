@@ -26,7 +26,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.opencv.android.CameraBridgeViewBase
-import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.CvType
 import org.opencv.core.Mat
@@ -252,12 +251,7 @@ class CameraOpticalFlowFragment :
 
     override fun onResume() {
         super.onResume()
-        if (OpenCVLoader.initDebug()) {
-            Log.d(TAG, "OpenCV library found inside package. Using it!")
-            binding.cameraView.enableView()
-        } else {
-            Log.e(TAG, "OpenCV library not found!")
-        }
+        binding.cameraView.enableView()
         if (::imuEstimator.isInitialized) {
             imuEstimator.register()
         }
