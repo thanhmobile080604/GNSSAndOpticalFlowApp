@@ -14,7 +14,6 @@ import com.example.gnssandopticalflowapp.databinding.FragmentHomeBinding
 class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::inflate) {
 
     private lateinit var pagerAdapter: HomePagerAdapter
-    private var indicatorBaseX = 0f
     private var currentTabPosition = 0
 
     @SuppressLint("ClickableViewAccessibility")
@@ -24,9 +23,6 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
         viewPager.isUserInputEnabled = false
         viewPager.offscreenPageLimit = pagerAdapter.itemCount
         viewPager.registerOnPageChangeCallback(pageChangeCallback)
-        view.post {
-            indicatorBaseX = view.x
-        }
         updateTabState(0)
     }
 
