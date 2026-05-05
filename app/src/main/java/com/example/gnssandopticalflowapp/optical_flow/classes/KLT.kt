@@ -11,7 +11,7 @@ import java.util.concurrent.Semaphore
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-class KLT(private val velLabel: TextView?) : OpticalFlow {
+class KLT : OpticalFlow {
     private val prevGray: Mat = Mat()
     private val currGray: Mat = Mat()
     private val prevPts: MatOfPoint2f = MatOfPoint2f()

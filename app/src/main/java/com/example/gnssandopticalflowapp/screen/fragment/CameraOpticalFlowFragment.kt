@@ -86,7 +86,7 @@ class CameraOpticalFlowFragment :
 
     private fun initVars() {
         // first initialize with KLT optical flow
-        opticalFlow = KLT(binding.velPred)
+        opticalFlow = KLT()
         output = OFOutput()
 
         // init motion vector viewer
@@ -152,7 +152,7 @@ class CameraOpticalFlowFragment :
                 Farneback()
             } else {
                 ofAlgorithm.text = "KLT"
-                KLT(velPred)
+                KLT()
             }
             opticalFlow = selectedOpticalFlow
             applyOpticalFlowModeUi(useFarneback = ofType.isChecked)
