@@ -339,7 +339,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val opticalFlow: OpticalFlow = if (options.useFarneback) {
             Farneback()
         } else {
-            KLT(null)
+            KLT()
         }
 
         return opticalFlow.apply {
