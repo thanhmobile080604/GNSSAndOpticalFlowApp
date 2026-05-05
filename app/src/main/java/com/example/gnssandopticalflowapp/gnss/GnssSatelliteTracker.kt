@@ -5,9 +5,10 @@ import android.location.GnssStatus
 import android.location.Location
 import android.os.SystemClock
 import android.util.Log
-import com.example.gnssandopticalflowapp.gnss.gnss_source.CelesTrakSatelliteRepository
-import com.example.gnssandopticalflowapp.gnss.gnss_source.GnssSatellitePVTResolver
-import com.example.gnssandopticalflowapp.gnss.gnss_source.SatelliteCalculator
+import com.example.gnssandopticalflowapp.gnss.gnss_source.celes_trak.CelesTrakSatelliteRepository
+import com.example.gnssandopticalflowapp.gnss.gnss_source.pvt.GnssSatellitePVTResolver
+import com.example.gnssandopticalflowapp.gnss.gnss_source.approximation.SatelliteCalculator
+import com.example.gnssandopticalflowapp.gnss.gnss_source.celes_trak.Sgp4OrbitPropagator
 import com.example.gnssandopticalflowapp.model.OrbitRecord
 import com.example.gnssandopticalflowapp.model.ResolvedSatellitePosition
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
@@ -158,7 +159,8 @@ class GnssSatelliteTracker {
     }
 
     private fun resolveFromCelesTrak(orbit: OrbitRecord): ResolvedSatellitePosition? {
-        val orbitState = runCatching {
+        val sgp4State = Sgp4OrbitPropagator.propagate(orbit)
+        val orbitState = sgp4State ?: runCatching {
             SatelliteCalculator.calculateSatellitePositionFromMeanElements(
                 epochUtcMillis = orbit.epochUtcMillis,
                 meanMotionRevPerDay = orbit.meanMotionRevPerDay,
@@ -175,7 +177,7 @@ class GnssSatelliteTracker {
             longitude = orbitState.position.longitude,
             altitude = orbitState.position.altitude,
             speed = orbitState.speedMetersPerSecond,
-            positionSource = "CelesTrak GP",
+            positionSource = if (sgp4State != null) "CelesTrak SGP4" else "CelesTrak GP",
             ephemerisSource = buildEphemerisLabel(orbit)
         )
     }

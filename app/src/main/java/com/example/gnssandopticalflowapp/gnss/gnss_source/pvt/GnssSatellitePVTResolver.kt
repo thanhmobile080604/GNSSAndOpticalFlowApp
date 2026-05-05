@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.gnss.gnss_source
+package com.example.gnssandopticalflowapp.gnss.gnss_source.pvt
 
 import android.location.GnssMeasurement
 import com.example.gnssandopticalflowapp.model.ProbeResult

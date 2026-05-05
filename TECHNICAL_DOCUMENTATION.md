@@ -558,7 +558,7 @@ private fun drawOptFlowMap(flow: Mat, flowmap: Mat, step: Int, color: Scalar) {
 
 ### 4.1 Tổng quan
 
-Sensor Fusion kết hợp dữ liệu từ IMU (Inertial Measurement Unit) và Optical Flow để ước tính vị trí chính xác hơn.
+Ứng dụng hiện đọc dữ liệu IMU (Inertial Measurement Unit) song song với Optical Flow để phục vụ hiển thị vận tốc và phát hiện trạng thái di chuyển. Phần sensor fusion thực sự chưa được triển khai; placeholder fusion đã được gỡ khỏi code để tránh tạo hiểu nhầm rằng vị trí đang được hợp nhất từ hai nguồn cảm biến.
 
 ### 4.2 IMU Estimator
 
@@ -652,21 +652,9 @@ position[2] += velocity[2] * deltaTime
 p(t) = ∫ v(t) dt ≈ p(t-1) + v(t) * Δt
 ```
 
-### 4.3 Sensor Fusion (BasicFusion)
+### 4.3 Sensor Fusion
 
-Hiện tại BasicFusion là placeholder:
-
-```kotlin
-class BasicFusion : SensorFusion {
-    override fun getPosition(
-        imuVelocity: FloatArray,
-        imuPosition: FloatArray,
-        ofPosition: Point
-    ): FloatArray {
-        return FloatArray(3) // Placeholder
-    }
-}
-```
+Hiện tại chưa có class sensor fusion active trong app. Nếu cần kết hợp IMU và Optical Flow sau này, nên thêm lại một implementation thực sự thay vì dùng placeholder trả về giá trị rỗng.
 
 **Công thức fusion lý tưởng (để triển khai sau):**
 

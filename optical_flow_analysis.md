@@ -1,6 +1,6 @@
 # Phân tích Cơ chế Optical Flow trong Dự án
 
-Dự án **GNSSAndOpticalFlowApp** sử dụng kỹ thuật **Optical Flow** (Dòng quang học) để ước tính chuyển động của camera dựa trên sự thay đổi giữa các khung hình kề nhau. Dữ liệu này sau đó được kết hợp với cảm biến IMU (Gia tốc kế, Con quay hồi chuyển) thông qua **Sensor Fusion** để tăng độ chính xác của việc đo vận tốc và vị trí.
+Dự án **GNSSAndOpticalFlowApp** sử dụng kỹ thuật **Optical Flow** (Dòng quang học) để ước tính chuyển động của camera dựa trên sự thay đổi giữa các khung hình kề nhau. Ứng dụng cũng đọc dữ liệu IMU (Gia tốc kế, Con quay hồi chuyển), nhưng hiện chưa có bước Sensor Fusion active để hợp nhất IMU với Optical Flow.
 
 Trong ứng dụng, có **2 chế độ (mode)** tính toán vector chuyển động chính:
 
@@ -44,7 +44,7 @@ Trong ứng dụng, có **2 chế độ (mode)** tính toán vector chuyển đ�
 ## Ý nghĩa của "Motion Vector" trong Project
 *   **Ước tính vị trí:** Cả hai chế độ đều trả về một `Point` mô tả sự thay đổi vị trí trung bình. 
 *   **Visualization (`MotionVectorViz`):** Lớp này nhận các điểm vị trí mới, nối chúng lại thành một đường liên tục (trailers) trên một bản đồ đen để bạn xem được lộ trình di chuyển của camera (giống như vẽ đường đi).
-*   **Kết hợp IMU:** Chế độ KLT thường được ưu tiên để kết hợp với `IMUEstimator` vì nó cung cấp dữ liệu ổn định về các "mốc" (landmarkers) trong không gian.
+*   **IMU:** `IMUEstimator` hiện được dùng để đọc vận tốc/gia tốc và hỗ trợ phát hiện trạng thái di chuyển; chưa có implementation fusion active với Optical Flow.
 
 ---
 

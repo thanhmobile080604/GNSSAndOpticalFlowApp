@@ -10,5 +10,7 @@ data class OrbitRecord(
     val eccentricity: Double,
     val argOfPerigeeDeg: Double,
     val meanAnomalyDeg: Double,
-    val meanMotionRevPerDay: Double
+    val meanMotionRevPerDay: Double,
+    val tleLine1: String? = null,
+    val tleLine2: String? = null
 )

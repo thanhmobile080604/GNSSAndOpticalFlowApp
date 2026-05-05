@@ -64,12 +64,21 @@ class Map3DInformationDialog :
             }
         tvUsedInFix.text =
             "Usage status: ${if (satellite.usedInFix) "In use" else "Not in use"}"
-        tvSource.text = "Source: ${satellite.positionSource}"
+        tvSource.text = "Source: ${formatPositionSource(satellite.positionSource)}"
         tvLatitude.text = "Latitude: $formattedLatitude°"
         tvLongitude.text = "Longitude: $formattedLongitude°"
         tvAltitude.text = "Altitude: $formattedAltitude m"
         tvVelocity.text = "Speed: $formattedSpeed "
         tvEphemeris.text = "Ephemeris: ${satellite.ephemerisSource ?: "N/A"}"
+    }
+
+    private fun formatPositionSource(source: String): String {
+        return when {
+            source.equals("CelesTrak SGP4", ignoreCase = true) -> "CelesTrak + SGP4"
+            source.equals("CelesTrak GP", ignoreCase = true) -> "CelesTrak + Approx"
+            source.equals("Approximate", ignoreCase = true) -> "Approx"
+            else -> source
+        }
     }
 
     override fun DialogMap3dInformationBinding.initListener() {

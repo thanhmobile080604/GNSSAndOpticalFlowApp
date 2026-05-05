@@ -14,13 +14,11 @@ import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentCameraOpticalFlowBinding
 import com.example.gnssandopticalflowapp.model.OFOutput
-import com.example.gnssandopticalflowapp.optical_flow.classes.BasicFusion
 import com.example.gnssandopticalflowapp.optical_flow.classes.Farneback
 import com.example.gnssandopticalflowapp.optical_flow.classes.IMUEstimator
 import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.optical_flow.classes.MotionVectorViz
 import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
-import com.example.gnssandopticalflowapp.optical_flow.inter.SensorFusion
 import com.example.gnssandopticalflowapp.util.VideoEncoder
 import com.example.gnssandopticalflowapp.util.VideoStorageUtil
 import kotlinx.coroutines.Job
@@ -45,8 +43,6 @@ class CameraOpticalFlowFragment :
     private var output: OFOutput? = null
     private lateinit var opticalFlow: OpticalFlow
     private lateinit var imuEstimator: IMUEstimator
-    private lateinit var fusion: SensorFusion
-    private var fuseOutput: FloatArray? = null
     private lateinit var mvViewer: MotionVectorViz
     private var frameCount: Int = 0
     private val updateInterval: Int = 30 // frames between automatic feature updates
@@ -93,10 +89,6 @@ class CameraOpticalFlowFragment :
         // first initialize with KLT optical flow
         opticalFlow = KLT(binding.velPred)
         output = OFOutput()
-
-        // init fusion algorithm
-        fusion = BasicFusion()
-        fuseOutput = FloatArray(3)
 
         // init motion vector viewer
         mvViewer = MotionVectorViz(400, 400)
@@ -396,7 +388,6 @@ class CameraOpticalFlowFragment :
         }
         // get IMU variables
         val velocity = imuEstimator.getVelocity()
-        val imuPosition = imuEstimator.getPosition()
         if (!isMovingModeManualOverride && useIndoorPhoneMotionDetection) {
             updateMovingModeFromPhoneMotion()
         }
@@ -420,11 +411,8 @@ class CameraOpticalFlowFragment :
         output = currentOutput
 
         if (currentOutput != null && currentOutput.ofFrame != null) {
-            // fuse the IMU sensor with the Optical Flow
             val pos = currentOutput.position
             if (pos != null) {
-                fuseOutput = fusion.getPosition(velocity, imuPosition, pos)
-                // get Motion Vector Mat to present
                 val mv = mvViewer.getMotionVector(pos)
                 mvMat = mv
 

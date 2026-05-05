@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.gnss.gnss_source
+package com.example.gnssandopticalflowapp.gnss.gnss_source.approximation
 
 import android.location.GnssStatus
 import com.example.gnssandopticalflowapp.model.OrbitStateResult
@@ -21,7 +21,7 @@ object SatelliteCalculator {
     private const val SECONDS_PER_DAY = 86400.0
 
     /**
-     * Returns the approximate orbital radius (from Earth's center in meters) and the 
+     * Returns the approximate orbital radius (from Earth's center in meters) and the
      * orbital speed (in m/s) based on the constellation type and SVID.
      */
     fun getOrbitRadiusAndSpeed(constellationType: Int, svid: Int): Pair<Double, Double> {
@@ -50,7 +50,7 @@ object SatelliteCalculator {
     }
 
     /**
-     * Calculates the Latitude, Longitude, Altitude, and ECEF coordinates 
+     * Calculates the Latitude, Longitude, Altitude, and ECEF coordinates
      * of a satellite given the observer's location, azimuth, and elevation.
      */
     fun calculateSatellitePosition(
@@ -154,8 +154,25 @@ object SatelliteCalculator {
         if (velocityX == null || velocityY == null || velocityZ == null) return null
         return sqrt(
             (velocityX * velocityX) +
-                (velocityY * velocityY) +
-                (velocityZ * velocityZ)
+                    (velocityY * velocityY) +
+                    (velocityZ * velocityZ)
+        )
+    }
+
+    fun calculateSatellitePositionFromTeme(
+        temeX: Double,
+        temeY: Double,
+        temeZ: Double,
+        observationUtcMillis: Long = System.currentTimeMillis()
+    ): SatellitePositionResult {
+        val earthRotationAngle = calculateGreenwichSiderealAngleRadians(observationUtcMillis)
+        val cosTheta = cos(earthRotationAngle)
+        val sinTheta = sin(earthRotationAngle)
+
+        return calculateSatellitePositionFromEcef(
+            ecefX = (cosTheta * temeX) + (sinTheta * temeY),
+            ecefY = (-sinTheta * temeX) + (cosTheta * temeY),
+            ecefZ = temeZ
         )
     }
 
