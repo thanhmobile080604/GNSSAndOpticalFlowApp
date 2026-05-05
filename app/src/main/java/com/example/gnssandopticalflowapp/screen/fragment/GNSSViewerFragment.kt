@@ -37,7 +37,7 @@ import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
-import com.example.gnssandopticalflowapp.renderer.EarthRenderer
+import com.example.gnssandopticalflowapp.gnss.renderer.EarthRenderer
 import com.example.gnssandopticalflowapp.gnss.GnssSatelliteTracker
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog

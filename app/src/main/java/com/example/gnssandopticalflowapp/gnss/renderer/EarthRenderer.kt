@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.renderer
+package com.example.gnssandopticalflowapp.gnss.renderer
 
 import android.content.Context
 import android.location.GnssStatus
