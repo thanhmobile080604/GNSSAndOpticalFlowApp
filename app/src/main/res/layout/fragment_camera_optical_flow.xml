@@ -278,7 +278,7 @@
                     android:maxHeight="6dp"
                     android:minHeight="6dp"
                     android:progress="50"
-                    android:progressDrawable="@drawable/seekbar_opacity"
+                    android:progressDrawable="@drawable/seekbar_purple_sensitivity"
                     android:thumb="@drawable/ripple_purple_gradient_thumb" />
 
                 <TextView
@@ -300,7 +300,7 @@
                     android:maxHeight="6dp"
                     android:minHeight="6dp"
                     android:progress="50"
-                    android:progressDrawable="@drawable/seekbar_opacity"
+                    android:progressDrawable="@drawable/seekbar_purple_sensitivity"
                     android:thumb="@drawable/ripple_purple_gradient_thumb" />
 
             </LinearLayout>

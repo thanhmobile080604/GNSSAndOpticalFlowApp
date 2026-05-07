@@ -1,5 +1,6 @@
 package com.example.gnssandopticalflowapp.screen.dialog
 
+import android.widget.SeekBar
 import androidx.fragment.app.FragmentManager
 import com.example.gnssandopticalflowapp.base.BaseDialogFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
@@ -15,8 +16,10 @@ class VideoProcessOptionsDialog :
         isCancelable = true
         switchMoving.isChecked = false
         switchAlgorithm.isChecked = false
+        sensitivityBar.progress = DEFAULT_SENSITIVITY
         updateMovingValue(isMoving = false)
         updateAlgorithmValue(useFarneback = false)
+        updateSensitivityValue(DEFAULT_SENSITIVITY)
     }
 
     override fun DialogVideoProcessOptionsBinding.initListener() {
@@ -28,6 +31,15 @@ class VideoProcessOptionsDialog :
             updateAlgorithmValue(useFarneback = isChecked)
         }
 
+        sensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                updateSensitivityValue(progress)
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
+
         tvCancel.setSingleClick {
             dismissAllowingStateLoss()
         }
@@ -35,7 +47,8 @@ class VideoProcessOptionsDialog :
         tvApply.setSingleClick {
             val options = VideoProcessOptions(
                 isMoving = switchMoving.isChecked,
-                useFarneback = switchAlgorithm.isChecked
+                useFarneback = switchAlgorithm.isChecked,
+                sensitivity = sensitivityBar.progress.coerceIn(0, 100)
             )
             onApplyOptions?.invoke(options)
             dismissAllowingStateLoss()
@@ -61,8 +74,13 @@ class VideoProcessOptionsDialog :
         binding.tvAlgorithmValue.text = if (useFarneback) "Farneback" else "KLT"
     }
 
+    private fun updateSensitivityValue(sensitivity: Int) {
+        binding.tvSensitivity.text = "Sensitivity: ${sensitivity.coerceIn(0, 100)}"
+    }
+
     companion object {
         private const val TAG = "VideoProcessOptionsDialog"
+        private const val DEFAULT_SENSITIVITY = 50
 
         fun show(
             fragmentManager: FragmentManager,

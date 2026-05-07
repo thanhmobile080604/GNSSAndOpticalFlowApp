@@ -32,6 +32,7 @@ import org.opencv.core.Mat
 import kotlin.math.sqrt
 import androidx.core.graphics.createBitmap
 import java.io.File
+import java.util.Locale
 
 class CameraOpticalFlowFragment :
     BaseFragment<FragmentCameraOpticalFlowBinding>(FragmentCameraOpticalFlowBinding::inflate),
@@ -392,10 +393,10 @@ class CameraOpticalFlowFragment :
         val zVelocity = velocity[2]
 
         // Get the magnitude of the velocity vector
-        val speedMph = sqrt((xVelocity * xVelocity + yVelocity * yVelocity + zVelocity * zVelocity).toDouble()).toFloat()
+        val motionMagnitude = sqrt((xVelocity * xVelocity + yVelocity * yVelocity + zVelocity * zVelocity).toDouble()).toFloat()
 
         activity?.runOnUiThread {
-            binding.velPred.text = speedMph.toString()
+            binding.velPred.text = formatThreeDigitValue(motionMagnitude)
         }
 
         // get OF output
@@ -470,6 +471,15 @@ class CameraOpticalFlowFragment :
                     applyMovingMode(isMoving = detectedMoving, manualOverride = false)
                 }
             }
+        }
+    }
+
+    private fun formatThreeDigitValue(value: Float): String {
+        val safeValue = if (value.isFinite()) value.coerceIn(0f, 999f) else 0f
+        return when {
+            safeValue < 10f -> String.format(Locale.US, "%.2f", safeValue)
+            safeValue < 100f -> String.format(Locale.US, "%.1f", safeValue)
+            else -> String.format(Locale.US, "%.0f", safeValue)
         }
     }
 }

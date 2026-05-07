@@ -25,6 +25,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.android.Utils
+import org.opencv.core.Core
 import org.opencv.core.Mat
 import org.opencv.imgproc.Imgproc
 import org.opencv.videoio.VideoCapture
@@ -171,22 +172,35 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val totalFrames = validFrameCount(capture.get(Videoio.CAP_PROP_FRAME_COUNT))
             .takeIf { it > 0L }
             ?: estimatedTotalFrames(metadata, fps)
-        val encoder = VideoEncoder(outputFile.absolutePath, width, height, encoderFrameRate(fps))
         val opticalFlow = createOpticalFlow(options)
         val sourceMat = Mat()
         val rgbaMat = Mat()
+        val orientedMat = Mat()
+        var encoder: VideoEncoder? = null
+        var rotationDegrees = 0
         var framesProcessed = 0L
 
         try {
-            encoder.start()
             while (copyJob?.isActive == true && capture.read(sourceMat)) {
                 if (sourceMat.empty()) break
 
                 convertCaptureFrameToRgba(sourceMat, rgbaMat)
+                if (encoder == null) {
+                    rotationDegrees = rotationForDecodedFrame(rgbaMat.cols(), rgbaMat.rows(), metadata)
+                    encoder = VideoEncoder(
+                        outputFile.absolutePath,
+                        displayWidth(rgbaMat.cols(), rgbaMat.rows(), rotationDegrees),
+                        displayHeight(rgbaMat.cols(), rgbaMat.rows(), rotationDegrees),
+                        encoderFrameRate(fps)
+                    ).also { it.start() }
+                }
+
+                val frameForProcessing = rotateFrameForDisplay(rgbaMat, orientedMat, rotationDegrees)
+                val activeEncoder = encoder ?: continue
                 encodeProcessedFrame(
                     opticalFlow = opticalFlow,
-                    rgbaMat = rgbaMat,
-                    encoder = encoder,
+                    rgbaMat = frameForProcessing,
+                    encoder = activeEncoder,
                     presentationTimeUs = framesProcessed * frameDurationUs
                 )
 
@@ -199,8 +213,9 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         } finally {
             sourceMat.release()
             rgbaMat.release()
+            orientedMat.release()
             capture.release()
-            encoder.release()
+            encoder?.release()
         }
 
         return framesProcessed > 0 && outputFile.length() > 100
@@ -216,6 +231,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(sourceFile.absolutePath)
+            val metadata = readVideoProgressMetadata(sourceFile)
             val frameCount = retriever
                 .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)
                 ?.toLongOrNull()
@@ -223,8 +239,9 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 ?: return false
 
             val firstFrame = retriever.getFrameAtIndex(0) ?: return false
-            val width = firstFrame.width
-            val height = firstFrame.height
+            val rotationDegrees = rotationForDecodedFrame(firstFrame.width, firstFrame.height, metadata)
+            val width = displayWidth(firstFrame.width, firstFrame.height, rotationDegrees)
+            val height = displayHeight(firstFrame.width, firstFrame.height, rotationDegrees)
             firstFrame.recycle()
 
             val fps = validFps(
@@ -236,6 +253,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             val encoder = VideoEncoder(outputFile.absolutePath, width, height, encoderFrameRate(fps))
             val opticalFlow = createOpticalFlow(options)
             val rgbaMat = Mat()
+            val orientedMat = Mat()
             var framesProcessed = 0L
 
             try {
@@ -248,9 +266,10 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                     for (bitmap in bitmaps) {
                         try {
                             Utils.bitmapToMat(bitmap, rgbaMat)
+                            val frameForProcessing = rotateFrameForDisplay(rgbaMat, orientedMat, rotationDegrees)
                             encodeProcessedFrame(
                                 opticalFlow = opticalFlow,
-                                rgbaMat = rgbaMat,
+                                rgbaMat = frameForProcessing,
                                 encoder = encoder,
                                 presentationTimeUs = framesProcessed * frameDurationUs
                             )
@@ -265,6 +284,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 }
             } finally {
                 rgbaMat.release()
+                orientedMat.release()
                 encoder.release()
             }
 
@@ -285,10 +305,12 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(sourceFile.absolutePath)
+            val metadata = readVideoProgressMetadata(sourceFile)
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             val firstFrame = retriever.getFrameAtTime(0) ?: return false
-            val width = firstFrame.width
-            val height = firstFrame.height
+            val rotationDegrees = rotationForDecodedFrame(firstFrame.width, firstFrame.height, metadata)
+            val width = displayWidth(firstFrame.width, firstFrame.height, rotationDegrees)
+            val height = displayHeight(firstFrame.width, firstFrame.height, rotationDegrees)
             firstFrame.recycle()
 
             val fps = 30.0
@@ -297,6 +319,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             val encoder = VideoEncoder(outputFile.absolutePath, width, height, encoderFrameRate(fps))
             val opticalFlow = createOpticalFlow(options)
             val rgbaMat = Mat()
+            val orientedMat = Mat()
             var currentTimeUs = 0L
             var framesProcessed = 0L
 
@@ -307,9 +330,10 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                     if (bitmap != null) {
                         try {
                             Utils.bitmapToMat(bitmap, rgbaMat)
+                            val frameForProcessing = rotateFrameForDisplay(rgbaMat, orientedMat, rotationDegrees)
                             encodeProcessedFrame(
                                 opticalFlow = opticalFlow,
-                                rgbaMat = rgbaMat,
+                                rgbaMat = frameForProcessing,
                                 encoder = encoder,
                                 presentationTimeUs = framesProcessed * frameDurationUs
                             )
@@ -323,6 +347,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 }
             } finally {
                 rgbaMat.release()
+                orientedMat.release()
                 encoder.release()
             }
 
@@ -343,7 +368,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         }
 
         return opticalFlow.apply {
-            setSensitivity(50)
+            setSensitivity(options.sensitivity)
             setMovingMode(options.isMoving)
         }
     }
@@ -355,6 +380,17 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             1 -> Imgproc.cvtColor(sourceMat, rgbaMat, Imgproc.COLOR_GRAY2RGBA)
             else -> sourceMat.copyTo(rgbaMat)
         }
+    }
+
+    private fun rotateFrameForDisplay(input: Mat, output: Mat, rotationDegrees: Int): Mat {
+        when (normalizeRotationDegrees(rotationDegrees)) {
+            90 -> Core.rotate(input, output, Core.ROTATE_90_CLOCKWISE)
+            180 -> Core.rotate(input, output, Core.ROTATE_180)
+            270 -> Core.rotate(input, output, Core.ROTATE_90_COUNTERCLOCKWISE)
+            else -> return input
+        }
+
+        return output
     }
 
     private fun encodeProcessedFrame(
@@ -426,6 +462,17 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 fps = validFps(
                     retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
                         ?.toDoubleOrNull()
+                ),
+                width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                    ?.toIntOrNull()
+                    ?: 0,
+                height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                    ?.toIntOrNull()
+                    ?: 0,
+                rotationDegrees = normalizeRotationDegrees(
+                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                        ?.toIntOrNull()
+                        ?: 0
                 )
             )
         } catch (e: Exception) {
@@ -441,6 +488,45 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         if (metadata.durationMs <= 0L) return 0L
 
         return ((metadata.durationMs * 1000L) / frameDurationUs(fps)).coerceAtLeast(1L)
+    }
+
+    private fun rotationForDecodedFrame(
+        frameWidth: Int,
+        frameHeight: Int,
+        metadata: VideoProgressMetadata
+    ): Int {
+        val rotationDegrees = normalizeRotationDegrees(metadata.rotationDegrees)
+        if (rotationDegrees == 0) return 0
+
+        val swapsAxes = rotationDegrees == 90 || rotationDegrees == 270
+        val metadataWidth = metadata.width
+        val metadataHeight = metadata.height
+        if (swapsAxes &&
+            metadataWidth > 0 &&
+            metadataHeight > 0 &&
+            frameWidth == metadataHeight &&
+            frameHeight == metadataWidth
+        ) {
+            return 0
+        }
+
+        return rotationDegrees
+    }
+
+    private fun displayWidth(width: Int, height: Int, rotationDegrees: Int): Int {
+        return if (normalizeRotationDegrees(rotationDegrees) in setOf(90, 270)) height else width
+    }
+
+    private fun displayHeight(width: Int, height: Int, rotationDegrees: Int): Int {
+        return if (normalizeRotationDegrees(rotationDegrees) in setOf(90, 270)) width else height
+    }
+
+    private fun normalizeRotationDegrees(rotationDegrees: Int): Int {
+        val normalized = ((rotationDegrees % 360) + 360) % 360
+        return when (normalized) {
+            90, 180, 270 -> normalized
+            else -> 0
+        }
     }
 
     override fun onDestroyView() {

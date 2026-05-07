@@ -12,7 +12,7 @@
         android:layout_height="0dp"
         android:src="@color/white"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintDimensionRatio="344:420"
+        app:layout_constraintDimensionRatio="344:460"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
@@ -171,6 +171,42 @@
                 app:switchMinWidth="48dp"
                 app:thumbTint="@android:color/white"
                 app:trackTint="@color/switch_track_selector" />
+
+        </LinearLayout>
+
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#14000000" />
+
+        <LinearLayout
+            android:id="@+id/sensitivityRow"
+            android:layout_width="match_parent"
+            android:layout_height="62dp"
+            android:gravity="center_vertical"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvSensitivity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter_semi_bold"
+                android:text="Sensitivity"
+                android:textColor="@color/black"
+                android:textSize="15sp" />
+
+            <SeekBar
+                android:id="@+id/sensitivity_bar"
+                android:layout_width="match_parent"
+                android:layout_height="32dp"
+                android:layout_marginTop="4dp"
+                android:max="100"
+                android:maxHeight="6dp"
+                android:minHeight="6dp"
+                android:progress="50"
+                android:progressDrawable="@drawable/seekbar_black_sensitivity"
+                android:thumb="@drawable/ripple_black_gradient_thumb" />
 
         </LinearLayout>
 

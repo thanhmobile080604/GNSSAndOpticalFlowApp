@@ -83,7 +83,7 @@
         android:maxHeight="6dp"
         android:minHeight="6dp"
         android:progress="0"
-        android:progressDrawable="@drawable/seekbar_opacity"
+        android:progressDrawable="@drawable/seekbar_purple_sensitivity"
         android:thumb="@drawable/ripple_purple_gradient_thumb"
         app:layout_constraintBottom_toBottomOf="@id/ivVideoControl"
         app:layout_constraintEnd_toEndOf="parent"
