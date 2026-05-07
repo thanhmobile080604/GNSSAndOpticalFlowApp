@@ -1,5 +1,6 @@
 package com.example.gnssandopticalflowapp.screen.fragment
 
+import android.media.MediaMetadataRetriever
 import android.widget.Toast
 import androidx.recyclerview.widget.GridLayoutManager
 import com.example.gnssandopticalflowapp.R
@@ -51,6 +52,11 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         ivVideoCheck.setSingleClick {
             val selectedVideo = adapter.getSelectedVideo()
             if (selectedVideo != null) {
+                if (!isValidVideo(selectedVideo.path)) {
+                    showToast("Video bị lỗi")
+                    return@setSingleClick
+                }
+
                 mainViewModel.selectedVideoPath.value = selectedVideo.path
                 navigateTo(R.id.videoOpticalFlowFragment)
             }
@@ -156,6 +162,35 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
 
     private fun showToast(message: String) {
         Toast.makeText(safeContext(), message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun isValidVideo(path: String): Boolean {
+        val file = File(path)
+        if (!file.exists() || !file.canRead() || file.length() <= 100L) return false
+
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(path)
+
+            val hasVideo = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes"
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()
+                ?: 0L
+            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                ?.toIntOrNull()
+                ?: 0
+            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                ?.toIntOrNull()
+                ?: 0
+            val firstFrame = retriever.getFrameAtTime(0)
+            firstFrame?.recycle()
+
+            hasVideo && durationMs > 0L && width > 0 && height > 0 && firstFrame != null
+        } catch (_: Exception) {
+            false
+        } finally {
+            retriever.release()
+        }
     }
 
     override fun initObserver() = Unit
