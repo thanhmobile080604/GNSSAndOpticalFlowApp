@@ -5,6 +5,8 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.bumptech.glide.request.RequestOptions
+import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.databinding.ItemVideoThumbBinding
 import com.example.gnssandopticalflowapp.model.VideoInfo
 import java.text.SimpleDateFormat
@@ -119,7 +121,13 @@ class VideoListAdapter(
         fun bind(video: VideoInfo, isSelected: Boolean) {
             Glide.with(binding.thumbGallery.context)
                 .load(video.path)
-                .centerCrop()
+                .apply(
+                    RequestOptions()
+                        .frame(1_000_000)
+                        .centerCrop()
+                        .placeholder(R.drawable.ic_video_placeholder)
+                        .error(R.drawable.ic_video_error)
+                )
                 .into(binding.thumbGallery)
 
             binding.blackOverlay.visibility = if (isSelected) View.VISIBLE else View.GONE
