@@ -53,14 +53,18 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent">
 
-            <org.opencv.android.JavaCameraView
+            <androidx.camera.view.PreviewView
                 android:id="@+id/camera_view"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent" />
+                android:layout_height="match_parent"
+                app:implementationMode="compatible"
+                app:scaleType="fillCenter" />
 
-            <View
+            <ImageView
+                android:id="@+id/camera_output_overlay"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent" />
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop" />
 
         </FrameLayout>
 
