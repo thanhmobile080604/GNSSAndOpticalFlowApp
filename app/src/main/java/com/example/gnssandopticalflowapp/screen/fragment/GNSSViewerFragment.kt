@@ -188,6 +188,7 @@ class GNSSViewerFragment :
         binding.ivSearchClear.hide()
         binding.btnStartNavigation.isEnabled = false
         binding.btnStartNavigation.alpha = 0.55f
+        etSearchLocation.textCursorDrawable?.setTint(Color.WHITE)
 
         initOpenGLES()
         applyVisibilityState() // Restore UI state from is3DMode
@@ -397,7 +398,10 @@ class GNSSViewerFragment :
             }
             binding.mapView.overlays.add(userMarker)
             binding.mapView.controller.setCenter(point)
+        } else if (navigationActive && !is3DMode) {
+            binding.mapView.controller.animateTo(point)
         }
+        
         userMarker?.position = point
         binding.mapView.invalidate()
 
@@ -429,6 +433,18 @@ class GNSSViewerFragment :
     }
 
     private fun setupSearchInteractions() = with(binding) {
+        etSearchLocation.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus && etSearchLocation.text?.toString()?.trim().isNullOrEmpty()) {
+                showRecentSearches()
+            }
+        }
+
+        etSearchLocation.setOnClickListener {
+            if (etSearchLocation.text?.toString()?.trim().isNullOrEmpty()) {
+                showRecentSearches()
+            }
+        }
+
         etSearchLocation.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -441,7 +457,11 @@ class GNSSViewerFragment :
 
                 searchJob?.cancel()
                 if (query.length < 3) {
-                    clearSearchResults()
+                    if (query.isEmpty() && etSearchLocation.hasFocus()) {
+                        showRecentSearches()
+                    } else {
+                        clearSearchResults()
+                    }
                     return
                 }
 
@@ -475,7 +495,7 @@ class GNSSViewerFragment :
             } else {
                 searchJob?.cancel()
                 etSearchLocation.text?.clear()
-                clearSearchResults()
+                showRecentSearches()
             }
         }
 
@@ -583,8 +603,8 @@ class GNSSViewerFragment :
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(16.dp, 0, 16.dp, 0)
             text = message
-            setTextColor(Color.rgb(189, 174, 229))
             textSize = 13f
+            setTextColor(Color.WHITE)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         })
         searchResultsPanel.show()
@@ -595,7 +615,52 @@ class GNSSViewerFragment :
         binding.searchResultsPanel.hide()
     }
 
+    private fun getRecentSearches(): List<SearchPlace> {
+        val prefs = safeContext().getSharedPreferences("recent_searches", Context.MODE_PRIVATE)
+        val historyJson = prefs.getString("history", "[]") ?: "[]"
+        return try {
+            val array = org.json.JSONArray(historyJson)
+            val list = mutableListOf<SearchPlace>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(SearchPlace(obj.getString("name"), obj.getDouble("lat"), obj.getDouble("lon")))
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveRecentSearch(place: SearchPlace) {
+        val current = getRecentSearches().toMutableList()
+        current.removeAll { it.name == place.name }
+        current.add(0, place)
+        if (current.size > 3) {
+            current.subList(3, current.size).clear()
+        }
+        val newArray = org.json.JSONArray()
+        for (p in current) {
+            val obj = org.json.JSONObject()
+            obj.put("name", p.name)
+            obj.put("lat", p.latitude)
+            obj.put("lon", p.longitude)
+            newArray.put(obj)
+        }
+        val prefs = safeContext().getSharedPreferences("recent_searches", Context.MODE_PRIVATE)
+        prefs.edit().putString("history", newArray.toString()).apply()
+    }
+
+    private fun showRecentSearches() {
+        val recent = getRecentSearches()
+        if (recent.isNotEmpty()) {
+            renderSearchResults(recent)
+        } else {
+            clearSearchResults()
+        }
+    }
+
     private fun selectPlace(place: SearchPlace) {
+        saveRecentSearch(place)
         selectedPlace = place
         cachedRoute = null
         navigationActive = false
@@ -1047,6 +1112,16 @@ class GNSSViewerFragment :
     override fun FragmentGnssViewerBinding.initListener() {
         setupSearchInteractions()
 
+        binding.mapView.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                if (binding.etSearchLocation.hasFocus() || binding.searchResultsPanel.visibility == View.VISIBLE) {
+                    hideKeyboard()
+                    binding.searchResultsPanel.hide()
+                }
+            }
+            false
+        }
+
         // Overlay for double tap on MapView
         val mapOverlay = object : Overlay() {
             override fun onDoubleTap(e: MotionEvent, mapView: MapView): Boolean {
@@ -1134,6 +1209,10 @@ class GNSSViewerFragment :
             if (event.pointerCount == 1) {
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
+                        if (binding.etSearchLocation.hasFocus() || binding.searchResultsPanel.visibility == View.VISIBLE) {
+                            hideKeyboard()
+                            binding.searchResultsPanel.hide()
+                        }
                         previousX = event.x
                         previousY = event.y
                         isMultiTouch = false
