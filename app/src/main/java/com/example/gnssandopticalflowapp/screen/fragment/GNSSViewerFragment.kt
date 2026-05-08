@@ -68,6 +68,7 @@ import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
 import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
@@ -402,10 +403,11 @@ class GNSSViewerFragment :
 
         selectedPlace?.let {
             updateRoutePreviewFromDirectDistance()
+            val shouldDrawRoute = routeLine != null || navigationActive
             if (cachedRoute == null && routeJob?.isActive != true) {
-                requestRouteUpdate(force = true, drawRoute = false)
+                requestRouteUpdate(force = true, drawRoute = shouldDrawRoute)
             }
-            if (navigationActive) {
+            if (shouldDrawRoute) {
                 requestRouteUpdate(force = false, drawRoute = true)
             }
         }
@@ -468,12 +470,25 @@ class GNSSViewerFragment :
         }
 
         ivSearchClear.setSingleClick {
-            etSearchLocation.text?.clear()
-            clearSearchResults()
+            if (selectedPlace != null || navigationActive) {
+                resetRouteMode()
+            } else {
+                searchJob?.cancel()
+                etSearchLocation.text?.clear()
+                clearSearchResults()
+            }
         }
 
         btnStartNavigation.setSingleClick {
-            startNavigation()
+            if (navigationActive) {
+                resetRouteMode()
+            } else {
+                startNavigation()
+            }
+        }
+
+        routeBottomBar.setSingleClick {
+            showSelectedRouteOnMap2D()
         }
     }
 
@@ -491,7 +506,7 @@ class GNSSViewerFragment :
     private fun searchPlaces(query: String): List<SearchPlace> {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val url = URL(
-            "https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=5&q=$encodedQuery"
+            "https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=12&q=$encodedQuery"
         )
         val connection = (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = 8000
@@ -593,6 +608,7 @@ class GNSSViewerFragment :
         binding.etSearchLocation.setText(shortPlaceName(place.name))
         binding.etSearchLocation.setSelection(binding.etSearchLocation.text?.length ?: 0)
         ignoreSearchTextChanges = false
+        binding.ivSearchClear.show()
         clearSearchResults()
         hideKeyboard()
 
@@ -604,7 +620,10 @@ class GNSSViewerFragment :
 
         binding.btnStartNavigation.text = "Start"
         updateRoutePreviewFromDirectDistance()
-        requestRouteUpdate(force = true, drawRoute = false)
+        currentLocation?.let { loc ->
+            drawRouteLine(listOf(GeoPoint(loc.latitude, loc.longitude), point))
+        }
+        requestRouteUpdate(force = true, drawRoute = true)
     }
 
     private fun updateTargetMarker(place: SearchPlace, point: GeoPoint) {
@@ -639,6 +658,35 @@ class GNSSViewerFragment :
         binding.etSearchLocation.clearFocus()
     }
 
+    private fun resetRouteMode() = with(binding) {
+        searchJob?.cancel()
+        routeJob?.cancel()
+        selectedPlace = null
+        cachedRoute = null
+        navigationActive = false
+        lastRouteRequestAt = 0L
+        lastRouteOrigin = null
+
+        clearRouteLine()
+        targetMarker?.let { mapView.overlays.remove(it) }
+        targetMarker = null
+        mapView.invalidate()
+
+        ignoreSearchTextChanges = true
+        etSearchLocation.text?.clear()
+        ignoreSearchTextChanges = false
+
+        ivSearchClear.hide()
+        clearSearchResults()
+        routeBottomBar.hide()
+        tvRouteTitle.text = "Destination"
+        tvRouteMeta.text = "0 m - 0 min"
+        btnStartNavigation.text = "Start"
+        btnStartNavigation.isEnabled = false
+        btnStartNavigation.alpha = 0.55f
+        hideKeyboard()
+    }
+
     private fun startNavigation() {
         val place = selectedPlace
         val loc = currentLocation
@@ -652,8 +700,11 @@ class GNSSViewerFragment :
         }
 
         navigationActive = true
-        binding.btnStartNavigation.text = "Navigating"
+        binding.btnStartNavigation.text = "Cancel"
         binding.btnStartNavigation.alpha = 1f
+        if (is3DMode) toggle3DMode()
+        binding.mapView.controller.setZoom(18.0)
+        binding.mapView.controller.animateTo(GeoPoint(loc.latitude, loc.longitude))
         if (!is3DMode) {
             binding.routeBottomBar.show()
         }
@@ -782,14 +833,64 @@ class GNSSViewerFragment :
         }
     }
 
+    private fun showSelectedRouteOnMap2D() {
+        val points = selectedRoutePoints()
+        if (points.isEmpty()) return
+
+        val switchedFrom3D = is3DMode
+        if (switchedFrom3D) toggle3DMode()
+        if (routeLine == null && points.size > 1) {
+            drawRouteLine(points)
+        }
+        clearSearchResults()
+        hideKeyboard()
+
+        binding.mapView.postDelayed(
+            { zoomToRoutePoints(points) },
+            if (switchedFrom3D) 350L else 0L
+        )
+    }
+
+    private fun selectedRoutePoints(): List<GeoPoint> {
+        routeLine?.actualPoints?.takeIf { it.isNotEmpty() }?.let { return it.toList() }
+        cachedRoute?.points?.takeIf { it.isNotEmpty() }?.let { return it }
+
+        val place = selectedPlace ?: return emptyList()
+        val destination = GeoPoint(place.latitude, place.longitude)
+        val loc = currentLocation ?: return listOf(destination)
+        return listOf(GeoPoint(loc.latitude, loc.longitude), destination)
+    }
+
+    private fun zoomToRoutePoints(points: List<GeoPoint>) {
+        if (points.isEmpty()) return
+
+        val bounds = if (points.size == 1) {
+            val point = points.first()
+            BoundingBox(
+                point.latitude + 0.001,
+                point.longitude + 0.001,
+                point.latitude - 0.001,
+                point.longitude - 0.001
+            )
+        } else {
+            BoundingBox.fromGeoPointsSafe(points)
+        }
+
+        binding.mapView.zoomToBoundingBox(bounds, true, 72.dp)
+    }
+
     private fun drawRouteLine(points: List<GeoPoint>) {
         if (points.isEmpty()) return
         if (routeLine == null) {
-            routeLine = Polyline().apply {
+            routeLine = Polyline(binding.mapView).apply {
                 outlinePaint.color = Color.rgb(123, 92, 255)
                 outlinePaint.strokeWidth = 9f
                 outlinePaint.strokeCap = Paint.Cap.ROUND
                 outlinePaint.strokeJoin = Paint.Join.ROUND
+                setOnClickListener { _, _, _ ->
+                    showSelectedRouteOnMap2D()
+                    true
+                }
             }
             binding.mapView.overlays.add(0, routeLine)
         }

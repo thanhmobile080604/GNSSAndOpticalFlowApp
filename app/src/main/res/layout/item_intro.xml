@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:clipChildren="false"
+    android:clipToPadding="false"
+    android:elevation="14dp"
+    android:padding="6dp">
+
+    <ImageView
+        android:id="@+id/bgPurple"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/bg_modal_glass"/>
+
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/ivIntroImage"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:adjustViewBounds="true"
+        app:layout_constraintStart_toStartOf="@id/bgPurple"
+        app:layout_constraintTop_toTopOf="@id/bgPurple"
+        app:layout_constraintBottom_toBottomOf="@id/bgPurple"
+        app:layout_constraintEnd_toEndOf="@id/bgPurple"
+        android:src="@color/black"
+        android:layout_margin="4dp"
+        app:round="32dp"
+        android:scaleType="centerCrop" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
