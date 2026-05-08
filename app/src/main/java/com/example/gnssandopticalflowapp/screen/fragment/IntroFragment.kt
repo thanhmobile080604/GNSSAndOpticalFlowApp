@@ -19,7 +19,5 @@ class IntroFragment : BaseFragment<FragmentIntroBinding>(FragmentIntroBinding::i
 
     override fun initObserver() = Unit
 
-    override fun onBack() {
-        requireActivity().finish()
-    }
+    override fun onBack() = Unit
 }

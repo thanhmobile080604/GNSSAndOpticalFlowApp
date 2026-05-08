@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.navigation.NavOptions
+import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.fragment.findNavController
 import androidx.viewbinding.ViewBinding
 import com.example.gnssandopticalflowapp.MainViewModel
@@ -97,7 +98,9 @@ abstract class BaseFragment<T : ViewBinding>(private val bindingInflater: (Layou
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?,
     ): View? {
         binding = bindingInflater.invoke(inflater, container, false)
-        activity?.onBackPressedDispatcher?.addCallback(viewLifecycleOwner, backPressedCallback)
+        if (parentFragment is NavHostFragment) {
+            activity?.onBackPressedDispatcher?.addCallback(viewLifecycleOwner, backPressedCallback)
+        }
         binding.initView()
         activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         return binding.root
