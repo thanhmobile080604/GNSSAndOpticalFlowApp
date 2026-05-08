@@ -146,7 +146,8 @@
         android:thumb="@drawable/ripple_glow_purple_thumb"
         app:layout_constraintEnd_toEndOf="@id/controlPanel"
         app:layout_constraintStart_toEndOf="@+id/ivVideoControl"
-        app:layout_constraintTop_toTopOf="@id/ivVideoControl" />
+        app:layout_constraintTop_toTopOf="@id/ivVideoControl"
+        app:layout_constraintBottom_toBottomOf="@id/ivVideoControl"/>
 
     <TextView
         android:id="@+id/tvTimer"
