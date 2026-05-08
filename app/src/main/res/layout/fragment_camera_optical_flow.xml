@@ -438,7 +438,6 @@
                     android:id="@+id/ivVideRecord"
                     android:layout_width="58dp"
                     android:layout_height="58dp"
-                    android:background="@drawable/bg_record_button_glow"
                     android:padding="8dp"
                     android:scaleType="centerInside"
                     android:src="@drawable/ic_start_record_purple" />

@@ -23,7 +23,6 @@
         android:id="@+id/ivThumb"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:background="@drawable/bg_glass_icon_button"
         android:padding="12dp"
         android:scaleType="fitCenter"
         android:src="@drawable/ic_information"
@@ -76,8 +75,8 @@
         android:fontFamily="@font/inter_bold"
         android:maxLines="1"
         android:text="Time: "
-        android:textColor="#BDAEE5"
-        android:textSize="15sp"
+        android:textColor="@color/white"
+        android:textSize="14sp"
         app:layout_constraintEnd_toEndOf="@id/tvLongitude"
         app:layout_constraintStart_toStartOf="@id/tvLongitude"
         app:layout_constraintTop_toBottomOf="@id/tvLongitude" />

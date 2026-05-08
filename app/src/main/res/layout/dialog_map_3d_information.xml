@@ -23,7 +23,6 @@
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_marginTop="18dp"
-        android:background="@drawable/bg_glass_icon_button"
         android:padding="12dp"
         android:scaleType="fitCenter"
         android:src="@drawable/ic_information"
