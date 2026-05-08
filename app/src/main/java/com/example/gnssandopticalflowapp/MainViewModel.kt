@@ -7,6 +7,11 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import com.example.gnssandopticalflowapp.common.Constants
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -19,6 +24,11 @@ class MainViewModel :
     val currentTab = MutableLiveData<Int>(0)
     val isGnss3DMode = MutableLiveData(false)
     val selectedVideoPath = MutableLiveData<String>()
+    val videoLibraryUpdated = MutableLiveData<Long>()
+    val videoProcessingMessage = MutableLiveData<String?>()
+    val processedVideoPathToOpen = MutableLiveData<String?>()
+    val videoProcessingScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    var videoUploadJob: Job? = null
     
     private val _currentLocation = MutableLiveData<Location?>()
     val currentLocation: LiveData<Location?> = _currentLocation
@@ -82,5 +92,10 @@ class MainViewModel :
             time = System.currentTimeMillis()
             elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
         }
+    }
+
+    override fun onCleared() {
+        videoProcessingScope.cancel()
+        super.onCleared()
     }
 }

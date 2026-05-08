@@ -32,6 +32,7 @@ object VideoStorageUtil {
         return list
     }
 
+    @Synchronized
     fun addVideo(context: Context, videoPath: String) {
         val videos = getVideos(context).toMutableList()
         if (videos.none { it.path == videoPath }) {
@@ -40,6 +41,7 @@ object VideoStorageUtil {
         }
     }
 
+    @Synchronized
     fun deleteVideos(context: Context, videosToDelete: List<VideoInfo>): Int {
         val pathsToDelete = videosToDelete.mapTo(mutableSetOf()) { it.path }
         if (pathsToDelete.isEmpty()) return 0

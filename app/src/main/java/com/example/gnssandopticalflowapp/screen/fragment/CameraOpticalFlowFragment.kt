@@ -396,6 +396,7 @@ class CameraOpticalFlowFragment :
             MediaScannerConnection.scanFile(safeContext(), arrayOf(recordedFilePath), null) { _, _ -> }
             
             VideoStorageUtil.addVideo(safeContext(), recordedFilePath)
+            mainViewModel.videoLibraryUpdated.value = System.currentTimeMillis()
             
             // Brief delay to ensure file lock is released
             binding.root.postDelayed({

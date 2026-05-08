@@ -57,7 +57,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
     }
 
     private fun updateTabIcons(selectedTab: Int) = with(binding) {
-        val selectedColor = Color.WHITE
+        val selectedColor = Color.BLACK
         val idleColor = Color.rgb(173, 154, 223)
 
         earthButton.setColorFilter(if (selectedTab == 0) selectedColor else idleColor)

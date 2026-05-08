@@ -1,5 +1,6 @@
 package com.example.gnssandopticalflowapp.screen.fragment
 
+import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
 import android.net.Uri
@@ -7,7 +8,6 @@ import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.safeContext
@@ -21,8 +21,8 @@ import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
 import com.example.gnssandopticalflowapp.screen.dialog.VideoProcessOptionsDialog
 import com.example.gnssandopticalflowapp.util.VideoEncoder
 import com.example.gnssandopticalflowapp.util.VideoStorageUtil
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.android.Utils
@@ -37,7 +37,6 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(FragmentHomeOpticalFlowBinding::inflate) {
-    private var copyJob: Job? = null
     private val batchFrameSize = 8
     private val progressUpdateIntervalFrames = 30L
 
@@ -52,10 +51,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
     override fun FragmentHomeOpticalFlowBinding.initListener() {
         btnFunc1.setSingleClick {
-            if (isProcessingVideo()) {
-                showProcessingToast()
-                return@setSingleClick
-            }
             navigateTo(R.id.cameraOpticalFlowFragment)
         }
 
@@ -84,35 +79,48 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             return
         }
 
-        showLoadingDialog("Copying video...") {
-            copyJob?.cancel()
-        }
-        
-        copyJob = lifecycleScope.launch(Dispatchers.IO) {
+        val appContext = safeContext().applicationContext
+        showUploadLoading("Copying video...")
+
+        val uploadJob = mainViewModel.videoProcessingScope.launch(Dispatchers.IO) {
             try {
-                val cacheDir = safeContext().cacheDir
+                val cacheDir = appContext.cacheDir
                 val videosDir = File(cacheDir, "videos")
                 if (!videosDir.exists()) videosDir.mkdirs()
                 
                 val sourceFile = File(videosDir, "temp_source_${System.currentTimeMillis()}.mp4")
-                safeContext().contentResolver.openInputStream(uri)?.use { input ->
+                appContext.contentResolver.openInputStream(uri)?.use { input ->
                     FileOutputStream(sourceFile).use { output ->
                         input.copyTo(output)
                     }
                 }
                 
-                processVideoOffline(sourceFile, options)
+                processVideoOffline(sourceFile, options, appContext)
                 
+            } catch (_: CancellationException) {
+                withContext(Dispatchers.Main) {
+                    dismissUploadLoading()
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    dismissLoadingDialog()
+                    dismissUploadLoading()
                 }
+            }
+        }
+        mainViewModel.videoUploadJob = uploadJob
+        uploadJob.invokeOnCompletion {
+            if (mainViewModel.videoUploadJob === uploadJob) {
+                mainViewModel.videoUploadJob = null
             }
         }
     }
 
-    private suspend fun processVideoOffline(sourceFile: File, options: VideoProcessOptions) {
+    private suspend fun processVideoOffline(
+        sourceFile: File,
+        options: VideoProcessOptions,
+        appContext: Context
+    ) {
         withContext(Dispatchers.Main) {
             showProcessingProgress(0)
         }
@@ -131,22 +139,21 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             sourceFile.delete()
         }
 
-        if (processed && copyJob?.isActive == true) {
-            MediaScannerConnection.scanFile(safeContext(), arrayOf(outputFile.absolutePath), null) { _, _ -> }
+        if (processed && isProcessingVideo()) {
+            MediaScannerConnection.scanFile(appContext, arrayOf(outputFile.absolutePath), null) { _, _ -> }
 
             withContext(Dispatchers.Main) {
                 showProcessingProgress(100)
-                dismissLoadingDialog()
-                VideoStorageUtil.addVideo(safeContext(), outputFile.absolutePath)
+                VideoStorageUtil.addVideo(appContext, outputFile.absolutePath)
+                mainViewModel.videoLibraryUpdated.value = System.currentTimeMillis()
                 kotlinx.coroutines.delay(500)
-                mainViewModel.selectedVideoPath.value = outputFile.absolutePath
-                navigateTo(R.id.videoOpticalFlowFragment)
+                mainViewModel.processedVideoPathToOpen.value = outputFile.absolutePath
             }
         } else {
             Log.d("VIDEO-PROCESS", "Processing cancelled.")
             outputFile.delete()
             withContext(Dispatchers.Main) {
-                dismissLoadingDialog()
+                dismissUploadLoading()
             }
         }
     }
@@ -155,7 +162,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         outputFile: File,
         block: suspend () -> Boolean
     ): Boolean {
-        if (copyJob?.isActive != true) return false
+        if (!isProcessingVideo()) return false
         outputFile.delete()
         return block()
     }
@@ -195,7 +202,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         var framesProcessed = 0L
 
         try {
-            while (copyJob?.isActive == true && capture.read(sourceMat)) {
+            while (isProcessingVideo() && capture.read(sourceMat)) {
                 if (sourceMat.empty()) break
 
                 convertCaptureFrameToRgba(sourceMat, rgbaMat)
@@ -272,7 +279,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
             try {
                 encoder.start()
-                while (copyJob?.isActive == true && framesProcessed < frameCount) {
+                while (isProcessingVideo() && framesProcessed < frameCount) {
                     val requestCount = minOf(batchFrameSize.toLong(), frameCount - framesProcessed).toInt()
                     val bitmaps = retriever.getFramesAtIndex(framesProcessed.toInt(), requestCount)
                     if (bitmaps.isNullOrEmpty()) break
@@ -293,7 +300,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                             bitmap.recycle()
                         }
 
-                        if (copyJob?.isActive != true) break
+                        if (!isProcessingVideo()) break
                     }
                 }
             } finally {
@@ -339,7 +346,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
             try {
                 encoder.start()
-                while (copyJob?.isActive == true && currentTimeUs < durationMs * 1000L) {
+                while (isProcessingVideo() && currentTimeUs < durationMs * 1000L) {
                     val bitmap = retriever.getFrameAtTime(currentTimeUs, MediaMetadataRetriever.OPTION_CLOSEST)
                     if (bitmap != null) {
                         try {
@@ -388,7 +395,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     }
 
     private fun isProcessingVideo(): Boolean {
-        return copyJob?.isActive == true
+        return mainViewModel.videoUploadJob?.isActive == true
     }
 
     private fun showProcessingToast() {
@@ -397,6 +404,14 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             "Đang loading, chờ xử lý xong rồi thử lại",
             Toast.LENGTH_SHORT
         ).show()
+    }
+
+    private fun showUploadLoading(message: String) {
+        mainViewModel.videoProcessingMessage.value = message
+    }
+
+    private fun dismissUploadLoading() {
+        mainViewModel.videoProcessingMessage.value = null
     }
 
     private fun convertCaptureFrameToRgba(sourceMat: Mat, rgbaMat: Mat) {
@@ -447,7 +462,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     }
 
     private fun showProcessingProgress(progress: Int) {
-        showLoadingDialog("Processing: ${progress.coerceIn(0, 100)}%")
+        showUploadLoading("Processing: ${progress.coerceIn(0, 100)}%")
     }
 
     private fun validFps(rawFps: Double?, fallback: Double = 30.0): Double {
@@ -557,7 +572,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
     override fun onDestroyView() {
         super.onDestroyView()
-        copyJob?.cancel()
     }
 
     override fun initObserver() {

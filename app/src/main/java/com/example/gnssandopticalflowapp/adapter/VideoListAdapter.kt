@@ -23,9 +23,19 @@ class VideoListAdapter(
     private var editMode: Boolean = false
 
     fun setData(newVideos: List<VideoInfo>) {
+        val selectedPath = getSelectedVideo()?.path
+        val editSelectedPaths = selectedPaths.toSet()
+
         videos = newVideos.toMutableList()
-        clearSelection(notify = false)
+        if (editMode) {
+            selectedPaths.clear()
+            selectedPaths.addAll(editSelectedPaths.intersect(videos.map { it.path }.toSet()))
+        } else {
+            selectedPosition = videos.indexOfFirst { it.path == selectedPath }
+        }
+
         notifyDataSetChanged()
+        onSelectionChanged(getSelectedVideos())
     }
 
     fun getSelectedVideo(): VideoInfo? {

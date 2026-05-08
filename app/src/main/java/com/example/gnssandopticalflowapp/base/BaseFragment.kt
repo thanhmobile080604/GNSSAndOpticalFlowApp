@@ -20,7 +20,6 @@ import androidx.viewbinding.ViewBinding
 import com.example.gnssandopticalflowapp.MainViewModel
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.common.checkIfFragmentAttached
-import com.example.gnssandopticalflowapp.screen.dialog.LoadingDialog
 
 abstract class BaseFragment<T : ViewBinding>(private val bindingInflater: (LayoutInflater, ViewGroup?, Boolean) -> T) :
     Fragment() {
@@ -125,31 +124,8 @@ abstract class BaseFragment<T : ViewBinding>(private val bindingInflater: (Layou
         }
     }
 
-    private var loadingDialog: LoadingDialog? = null
-
-    protected fun showLoadingDialog(message: String, onCancel: (() -> Unit)? = null) {
-        if (loadingDialog == null || !loadingDialog!!.isAdded) {
-            loadingDialog = LoadingDialog().apply {
-                this.cancelCallback = {
-                    onCancel?.invoke()
-                    dismissLoadingDialog()
-                }
-            }
-            loadingDialog?.show(childFragmentManager, "LoadingDialog")
-        }
-        loadingDialog?.setMessage(message)
-    }
-
-    protected fun dismissLoadingDialog() {
-        if (loadingDialog?.isAdded == true) {
-            loadingDialog?.dismissAllowingStateLoss()
-        }
-        loadingDialog = null
-    }
-
     override fun onDestroyView() {
         super.onDestroyView()
-        dismissLoadingDialog()
         backPressedCallback.remove()
     }
 

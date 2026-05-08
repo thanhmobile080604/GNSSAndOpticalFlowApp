@@ -182,10 +182,7 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
             val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
                 ?.toIntOrNull()
                 ?: 0
-            val firstFrame = retriever.getFrameAtTime(0)
-            firstFrame?.recycle()
-
-            hasVideo && durationMs > 0L && width > 0 && height > 0 && firstFrame != null
+            hasVideo && durationMs > 0L && width > 0 && height > 0
         } catch (_: Exception) {
             false
         } finally {
@@ -193,5 +190,10 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         }
     }
 
-    override fun initObserver() = Unit
+    override fun initObserver() {
+        mainViewModel.videoLibraryUpdated.observe(viewLifecycleOwner) {
+            loadVideos()
+            updateToolbarState()
+        }
+    }
 }

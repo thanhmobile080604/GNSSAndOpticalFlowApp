@@ -67,7 +67,7 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
 import org.osmdroid.events.ZoomEvent
-import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
@@ -106,19 +106,6 @@ class GNSSViewerFragment :
     private var gnssMeasurementsRegistered = false
     private val routeRefreshIntervalMs = 8000L
     private val routeRefreshDistanceMeters = 25.0
-    private val darkMapTileSource = XYTileSource(
-        "CartoDarkMatter",
-        0,
-        20,
-        256,
-        ".png",
-        arrayOf(
-            "https://a.basemaps.cartocdn.com/dark_all/",
-            "https://b.basemaps.cartocdn.com/dark_all/",
-            "https://c.basemaps.cartocdn.com/dark_all/"
-        ),
-        "© OpenStreetMap contributors © CARTO"
-    )
 
     private data class SearchPlace(
         val name: String,
@@ -189,7 +176,7 @@ class GNSSViewerFragment :
             ctx.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
         )
 
-        binding.mapView.setTileSource(darkMapTileSource)
+        binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
         binding.mapView.setMultiTouchControls(true)
         binding.mapView.setBuiltInZoomControls(false)
         binding.mapView.controller.setZoom(18.0)
