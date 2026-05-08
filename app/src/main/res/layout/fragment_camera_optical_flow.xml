@@ -53,25 +53,35 @@
         app:layout_constraintStart_toEndOf="@id/ivBack"
         app:layout_constraintTop_toBottomOf="@id/tvTitle" />
 
-    <androidx.cardview.widget.CardView
-        android:id="@+id/cvCamera"
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/bgGlass"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        app:round="20dp"
         android:layout_marginTop="18dp"
-        app:cardBackgroundColor="@android:color/transparent"
-        app:cardCornerRadius="30dp"
-        app:cardElevation="16dp"
-        app:cardUseCompatPadding="false"
+        android:src="@drawable/bg_camera_glass_frame"
         app:layout_constraintDimensionRatio="398:430"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/ivBack"
-        app:layout_constraintWidth_percent="0.93">
+        app:layout_constraintWidth_percent="0.93"/>
+
+    <androidx.cardview.widget.CardView
+        android:id="@+id/cvCamera"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="34dp"
+        android:layout_margin="2dp"
+        app:cardUseCompatPadding="false"
+        app:layout_constraintTop_toTopOf="@id/bgGlass"
+        app:layout_constraintBottom_toBottomOf="@id/bgGlass"
+        app:layout_constraintEnd_toEndOf="@id/bgGlass"
+        app:layout_constraintStart_toStartOf="@id/bgGlass">
 
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@drawable/bg_camera_glass_frame"
             android:padding="2dp">
 
             <androidx.camera.view.PreviewView
@@ -92,21 +102,6 @@
                 android:layout_height="112dp"
                 android:layout_gravity="top"
                 android:background="@drawable/bg_camera_top_scrim" />
-
-            <TextView
-                android:id="@+id/tvLiveBadge"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:layout_gravity="top|start"
-                android:layout_marginStart="14dp"
-                android:layout_marginTop="14dp"
-                android:background="@drawable/bg_live_badge"
-                android:fontFamily="@font/inter_black"
-                android:gravity="center"
-                android:paddingHorizontal="12dp"
-                android:text="LIVE"
-                android:textColor="@color/white"
-                android:textSize="12sp" />
 
             <TextView
                 android:id="@+id/tvTimer"

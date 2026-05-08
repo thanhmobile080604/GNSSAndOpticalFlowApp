@@ -24,29 +24,169 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <androidx.constraintlayout.utils.widget.ImageFilterView
+    <LinearLayout
+        android:id="@+id/searchBar"
         android:layout_width="0dp"
-        android:layout_height="0dp"
+        android:layout_height="52dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="42dp"
+        android:background="@drawable/bg_video_control_panel"
+        android:elevation="14dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageView
+            android:id="@+id/ivSearchIcon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_search_24"
+            app:tint="#E7DEFF" />
+
+        <EditText
+            android:id="@+id/etSearchLocation"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
+            android:ellipsize="end"
+            android:fontFamily="@font/inter_bold"
+            android:hint="Search location"
+            android:imeOptions="actionSearch"
+            android:inputType="text"
+            android:maxLines="1"
+            android:padding="0dp"
+            android:singleLine="true"
+            android:textColor="@color/white"
+            android:textColorHint="#A999D8"
+            android:textSize="15sp" />
+
+        <ImageView
+            android:id="@+id/ivSearchClear"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/bg_glass_icon_button"
+            android:padding="11dp"
+            android:src="@drawable/ic_close"
+            android:visibility="gone"
+            app:tint="@color/white" />
+
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/searchResultsPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_glass_panel"
+        android:elevation="14dp"
+        android:overScrollMode="never"
+        android:scrollbars="none"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/searchBar">
+
+        <LinearLayout
+            android:id="@+id/searchResultsList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingVertical="6dp" />
+
+    </ScrollView>
+
+    <LinearLayout
+        android:id="@+id/routeBottomBar"
+        android:layout_width="0dp"
+        android:layout_height="86dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="22dp"
+        android:background="@drawable/bg_video_control_panel"
+        android:elevation="14dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="12dp"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvRouteTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="@font/inter_black"
+                android:maxLines="1"
+                android:text="Destination"
+                android:textColor="@color/white"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/tvRouteMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:ellipsize="end"
+                android:fontFamily="@font/inter_bold"
+                android:maxLines="1"
+                android:text="0 m - 0 min"
+                android:textColor="#BDAEE5"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/btnStartNavigation"
+            android:layout_width="112dp"
+            android:layout_height="46dp"
+            android:background="@drawable/bg_gradient_update_button"
+            android:fontFamily="@font/inter_black"
+            android:gravity="center"
+            android:text="Start"
+            android:textColor="@color/white"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/currentLocationBubble"
+        android:layout_width="54dp"
+        android:layout_height="54dp"
         android:background="@drawable/bg_map_pin_glass"
         android:src="@color/transparent"
-        app:layout_constraintBottom_toBottomOf="@id/icPin"
-        app:layout_constraintEnd_toEndOf="@id/icPin"
-        app:layout_constraintStart_toStartOf="@id/icPin"
-        app:layout_constraintTop_toTopOf="@id/icPin"
+        app:layout_constraintBottom_toTopOf="@id/routeBottomBar"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_goneMarginBottom="30dp"
+        android:layout_marginEnd="18dp"
+        android:layout_marginBottom="16dp"
         app:round="40dp" />
 
     <ImageView
         android:id="@+id/icPin"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="40dp"
-        app:layout_constraintHorizontal_bias="0.26"
-        android:padding="4dp"
-        android:src="@drawable/ic_pin"
-        app:layout_constraintDimensionRatio="1"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintWidth_percent="0.1" />
+        android:layout_width="54dp"
+        android:layout_height="54dp"
+        android:padding="13dp"
+        android:src="@drawable/ic_current_location"
+        app:layout_constraintBottom_toBottomOf="@id/currentLocationBubble"
+        app:layout_constraintEnd_toEndOf="@id/currentLocationBubble"
+        app:layout_constraintStart_toStartOf="@id/currentLocationBubble"
+        app:layout_constraintTop_toTopOf="@id/currentLocationBubble"
+        app:tint="@color/white" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

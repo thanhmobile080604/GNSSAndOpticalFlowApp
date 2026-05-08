@@ -1,8 +1,6 @@
 package com.example.gnssandopticalflowapp.screen.fragment
 
 import android.annotation.SuppressLint
-import android.graphics.drawable.TransitionDrawable
-import android.view.View
 import androidx.core.content.ContextCompat
 import androidx.viewpager2.widget.ViewPager2
 import com.example.gnssandopticalflowapp.R
@@ -14,7 +12,6 @@ import com.example.gnssandopticalflowapp.databinding.FragmentHomeBinding
 class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::inflate) {
 
     private lateinit var pagerAdapter: HomePagerAdapter
-    private var currentTabPosition = 0
 
     @SuppressLint("ClickableViewAccessibility")
     override fun FragmentHomeBinding.initView() {
@@ -23,7 +20,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
         viewPager.isUserInputEnabled = false
         viewPager.offscreenPageLimit = pagerAdapter.itemCount
         viewPager.registerOnPageChangeCallback(pageChangeCallback)
-        updateTabState(0)
+        updateTabState()
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -36,41 +33,21 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
         }
     }
 
-    override fun initObserver() {
-    }
+    override fun initObserver() = Unit
 
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
             super.onPageSelected(position)
             mainViewModel.currentTab.value = position
-            updateTabState(position)
+            updateTabState()
         }
     }
 
-    private fun updateTabState(targetPosition: Int) = with(binding) {
-        val movingToRight = targetPosition > currentTabPosition
-
-        val newBg = ContextCompat.getDrawable(
-            root.context,
-            if (movingToRight) {
-                R.drawable.bg_blue_gradient_40_right
-            } else {
-                R.drawable.bg_blue_gradient_40_left
-            }
-        )
-
-        val oldBg = view.background ?: newBg
-
-        val transitionDrawable = TransitionDrawable(arrayOf(oldBg, newBg))
-
-        view.background = transitionDrawable
-        transitionDrawable.startTransition(300) // 300ms mượt
+    private fun updateTabState() = with(binding) {
+        view.background = ContextCompat.getDrawable(root.context, R.drawable.bg_bottom_nav_glass)
     }
 
-    override fun onBack() {
-
-    }
-
+    override fun onBack() = Unit
 
     override fun onDestroyView() {
         binding.viewPager.unregisterOnPageChangeCallback(pageChangeCallback)

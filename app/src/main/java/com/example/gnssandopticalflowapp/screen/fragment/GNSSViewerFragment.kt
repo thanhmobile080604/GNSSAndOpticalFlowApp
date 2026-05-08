@@ -6,6 +6,8 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.location.GnssMeasurementsEvent
 import android.location.GnssStatus
 import android.location.Location
@@ -13,12 +15,18 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
@@ -47,9 +55,14 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.LocationSettingsRequest
 import com.google.android.gms.location.Priority
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
@@ -59,6 +72,11 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Overlay
+import org.osmdroid.views.overlay.Polyline
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.util.Locale
 
 @RequiresApi(Build.VERSION_CODES.R)
 class GNSSViewerFragment :
@@ -72,10 +90,34 @@ class GNSSViewerFragment :
     private lateinit var locationManager: LocationManager
     private var currentLocation: Location? = null
     private var userMarker: Marker? = null
+    private var targetMarker: Marker? = null
+    private var routeLine: Polyline? = null
+    private var selectedPlace: SearchPlace? = null
+    private var cachedRoute: RouteInfo? = null
+    private var navigationActive = false
+    private var ignoreSearchTextChanges = false
+    private var searchJob: Job? = null
+    private var routeJob: Job? = null
+    private var lastRouteRequestAt = 0L
+    private var lastRouteOrigin: GeoPoint? = null
     private val satelliteTracker = GnssSatelliteTracker()
     private val useTestLocation: Boolean = Constants.USE_FAKE_LOCATION
     private var gnssStatusRegistered = false
     private var gnssMeasurementsRegistered = false
+    private val routeRefreshIntervalMs = 8000L
+    private val routeRefreshDistanceMeters = 25.0
+
+    private data class SearchPlace(
+        val name: String,
+        val latitude: Double,
+        val longitude: Double
+    )
+
+    private data class RouteInfo(
+        val points: List<GeoPoint>,
+        val distanceMeters: Double,
+        val durationSeconds: Double
+    )
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -139,6 +181,11 @@ class GNSSViewerFragment :
         binding.mapView.controller.setZoom(18.0)
         // Default position before location arrives
         binding.mapView.controller.setCenter(GeoPoint(21.028511, 105.804817)) // Hanoi fallback
+        binding.searchResultsPanel.hide()
+        binding.routeBottomBar.hide()
+        binding.ivSearchClear.hide()
+        binding.btnStartNavigation.isEnabled = false
+        binding.btnStartNavigation.alpha = 0.55f
 
         initOpenGLES()
         applyVisibilityState() // Restore UI state from is3DMode
@@ -331,7 +378,7 @@ class GNSSViewerFragment :
                 // Resize icon to a fixed size
                 val iconSize = 40.dp
                 context?.let { ctx ->
-                    getDrawable(ctx, R.drawable.ic_position)?.let { drawable ->
+                    getDrawable(ctx, R.drawable.ic_current_location)?.let { drawable ->
                         val bitmap = createBitmap(iconSize, iconSize)
                         val canvas = Canvas(bitmap)
                         drawable.setBounds(0, 0, canvas.width, canvas.height)
@@ -340,7 +387,7 @@ class GNSSViewerFragment :
                     }
                 }
 
-                title = "Vị trí của bạn"
+                title = "Current location"
                 setOnMarkerClickListener { _, _ ->
                     showLocationDetailsDialog(currentLocation ?: loc)
                     true
@@ -351,6 +398,16 @@ class GNSSViewerFragment :
         }
         userMarker?.position = point
         binding.mapView.invalidate()
+
+        selectedPlace?.let {
+            updateRoutePreviewFromDirectDistance()
+            if (cachedRoute == null && routeJob?.isActive != true) {
+                requestRouteUpdate(force = true, drawRoute = false)
+            }
+            if (navigationActive) {
+                requestRouteUpdate(force = false, drawRoute = true)
+            }
+        }
 
         if (rendererSet) {
             earthRenderer.updateUserLocation(loc.latitude, loc.longitude)
@@ -366,6 +423,423 @@ class GNSSViewerFragment :
                 time = localTime
             )
         }
+    }
+
+    private fun setupSearchInteractions() = with(binding) {
+        etSearchLocation.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
+            override fun afterTextChanged(s: Editable?) {
+                if (ignoreSearchTextChanges) return
+
+                val query = s?.toString()?.trim().orEmpty()
+                ivSearchClear.visibility = if (query.isEmpty()) View.GONE else View.VISIBLE
+
+                searchJob?.cancel()
+                if (query.length < 3) {
+                    clearSearchResults()
+                    return
+                }
+
+                showSearchMessage("Searching...")
+                searchJob = viewLifecycleOwner.lifecycleScope.launch {
+                    delay(350L)
+                    performPlaceSearch(query)
+                }
+            }
+        })
+
+        etSearchLocation.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                val query = etSearchLocation.text?.toString()?.trim().orEmpty()
+                if (query.length >= 3) {
+                    searchJob?.cancel()
+                    searchJob = viewLifecycleOwner.lifecycleScope.launch {
+                        performPlaceSearch(query)
+                    }
+                }
+                hideKeyboard()
+                true
+            } else {
+                false
+            }
+        }
+
+        ivSearchClear.setSingleClick {
+            etSearchLocation.text?.clear()
+            clearSearchResults()
+        }
+
+        btnStartNavigation.setSingleClick {
+            startNavigation()
+        }
+    }
+
+    private suspend fun performPlaceSearch(query: String) {
+        val places = runCatching {
+            withContext(Dispatchers.IO) { searchPlaces(query) }
+        }.getOrElse {
+            emptyList()
+        }
+
+        if (!isAdded || binding.etSearchLocation.text?.toString()?.trim() != query) return
+        renderSearchResults(places)
+    }
+
+    private fun searchPlaces(query: String): List<SearchPlace> {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val url = URL(
+            "https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=5&q=$encodedQuery"
+        )
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8000
+            readTimeout = 8000
+            requestMethod = "GET"
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "GNSSAndOpticalFlowApp/1.0")
+        }
+
+        return connection.useTextResponse { body ->
+            val results = JSONArray(body)
+            buildList {
+                for (index in 0 until results.length()) {
+                    val item = results.getJSONObject(index)
+                    val name = item.optString("display_name").takeIf { it.isNotBlank() } ?: continue
+                    val latitude = item.optString("lat").toDoubleOrNull() ?: continue
+                    val longitude = item.optString("lon").toDoubleOrNull() ?: continue
+                    add(SearchPlace(name = name, latitude = latitude, longitude = longitude))
+                }
+            }
+        }
+    }
+
+    private fun renderSearchResults(places: List<SearchPlace>) = with(binding.searchResultsList) {
+        removeAllViews()
+        if (places.isEmpty()) {
+            showSearchMessage("No results")
+            return
+        }
+
+        places.forEachIndexed { index, place ->
+            addView(createSearchResultRow(place))
+            if (index < places.lastIndex) {
+                addView(View(context).apply {
+                    setBackgroundColor(Color.argb(34, 255, 255, 255))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        1
+                    ).apply {
+                        marginStart = 14.dp
+                        marginEnd = 14.dp
+                    }
+                })
+            }
+        }
+        binding.searchResultsPanel.show()
+    }
+
+    private fun createSearchResultRow(place: SearchPlace): TextView {
+        return TextView(safeContext()).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                58.dp
+            )
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            maxLines = 2
+            setPadding(16.dp, 0, 16.dp, 0)
+            text = place.name
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setOnClickListener { selectPlace(place) }
+        }
+    }
+
+    private fun showSearchMessage(message: String) = with(binding) {
+        searchResultsList.removeAllViews()
+        searchResultsList.addView(TextView(safeContext()).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                52.dp
+            )
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(16.dp, 0, 16.dp, 0)
+            text = message
+            setTextColor(Color.rgb(189, 174, 229))
+            textSize = 13f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        })
+        searchResultsPanel.show()
+    }
+
+    private fun clearSearchResults() {
+        binding.searchResultsList.removeAllViews()
+        binding.searchResultsPanel.hide()
+    }
+
+    private fun selectPlace(place: SearchPlace) {
+        selectedPlace = place
+        cachedRoute = null
+        navigationActive = false
+        routeJob?.cancel()
+        lastRouteRequestAt = 0L
+        lastRouteOrigin = null
+        clearRouteLine()
+
+        ignoreSearchTextChanges = true
+        binding.etSearchLocation.setText(shortPlaceName(place.name))
+        binding.etSearchLocation.setSelection(binding.etSearchLocation.text?.length ?: 0)
+        ignoreSearchTextChanges = false
+        clearSearchResults()
+        hideKeyboard()
+
+        val point = GeoPoint(place.latitude, place.longitude)
+        updateTargetMarker(place, point)
+        if (is3DMode) toggle3DMode()
+        binding.mapView.controller.setZoom(17.0)
+        binding.mapView.controller.animateTo(point)
+
+        binding.btnStartNavigation.text = "Start"
+        updateRoutePreviewFromDirectDistance()
+        requestRouteUpdate(force = true, drawRoute = false)
+    }
+
+    private fun updateTargetMarker(place: SearchPlace, point: GeoPoint) {
+        if (targetMarker == null) {
+            targetMarker = Marker(binding.mapView).apply {
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                icon = buildMarkerIcon(R.drawable.ic_target_location, 46)
+            }
+            binding.mapView.overlays.add(targetMarker)
+        }
+
+        targetMarker?.position = point
+        targetMarker?.title = shortPlaceName(place.name)
+        binding.mapView.invalidate()
+    }
+
+    private fun buildMarkerIcon(drawableRes: Int, sizeDp: Int) = context?.let { ctx ->
+        getDrawable(ctx, drawableRes)?.let { drawable ->
+            val sizePx = sizeDp.dp
+            val bitmap = createBitmap(sizePx, sizePx)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.draw(canvas)
+            bitmap.toDrawable(ctx.resources)
+        }
+    }
+
+    private fun hideKeyboard() {
+        val inputMethodManager =
+            safeContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        inputMethodManager.hideSoftInputFromWindow(binding.etSearchLocation.windowToken, 0)
+        binding.etSearchLocation.clearFocus()
+    }
+
+    private fun startNavigation() {
+        val place = selectedPlace
+        val loc = currentLocation
+        if (place == null) {
+            Toast.makeText(safeContext(), "Choose a destination first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (loc == null) {
+            Toast.makeText(safeContext(), "Waiting for current location...", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        navigationActive = true
+        binding.btnStartNavigation.text = "Navigating"
+        binding.btnStartNavigation.alpha = 1f
+        binding.routeBottomBar.show()
+        requestRouteUpdate(force = true, drawRoute = true)
+    }
+
+    private fun updateRoutePreviewFromDirectDistance() {
+        val place = selectedPlace ?: return
+        val loc = currentLocation
+        val distance = if (loc != null) {
+            distanceMeters(loc.latitude, loc.longitude, place.latitude, place.longitude)
+        } else {
+            0.0
+        }
+        val duration = estimateDurationSeconds(distance)
+
+        binding.tvRouteTitle.text = shortPlaceName(place.name)
+        binding.tvRouteMeta.text = if (loc != null) {
+            "${formatDistance(distance)} - ${formatDuration(duration)}"
+        } else {
+            "Waiting for current location"
+        }
+        binding.btnStartNavigation.isEnabled = loc != null
+        binding.btnStartNavigation.alpha = if (loc != null) 1f else 0.55f
+        binding.routeBottomBar.show()
+    }
+
+    private fun requestRouteUpdate(force: Boolean, drawRoute: Boolean) {
+        val loc = currentLocation ?: return
+        val place = selectedPlace ?: return
+        val origin = GeoPoint(loc.latitude, loc.longitude)
+        val destination = GeoPoint(place.latitude, place.longitude)
+        val now = System.currentTimeMillis()
+        val movedMeters = lastRouteOrigin?.distanceToAsDouble(origin) ?: Double.MAX_VALUE
+        val isTooSoon = now - lastRouteRequestAt < routeRefreshIntervalMs
+
+        if (!force && routeJob?.isActive == true) return
+        if (!force && isTooSoon && movedMeters < routeRefreshDistanceMeters) return
+
+        lastRouteRequestAt = now
+        lastRouteOrigin = origin
+        routeJob?.cancel()
+        routeJob = viewLifecycleOwner.lifecycleScope.launch {
+            val route = runCatching {
+                withContext(Dispatchers.IO) { fetchRoute(origin, destination) }
+            }.getOrNull()
+            val activePlace = selectedPlace
+            if (!isAdded ||
+                activePlace == null ||
+                activePlace.latitude != destination.latitude ||
+                activePlace.longitude != destination.longitude
+            ) {
+                return@launch
+            }
+
+            if (route != null && route.points.isNotEmpty()) {
+                cachedRoute = route
+                updateRouteSummary(route)
+                if (drawRoute || navigationActive) {
+                    drawRouteLine(route.points)
+                }
+            } else {
+                updateRoutePreviewFromDirectDistance()
+                if (drawRoute || navigationActive) {
+                    drawRouteLine(listOf(origin, destination))
+                }
+            }
+        }
+    }
+
+    private fun fetchRoute(origin: GeoPoint, destination: GeoPoint): RouteInfo? {
+        val url = URL(
+            "https://router.project-osrm.org/route/v1/driving/" +
+                "${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}" +
+                "?overview=full&geometries=geojson"
+        )
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10000
+            readTimeout = 10000
+            requestMethod = "GET"
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "GNSSAndOpticalFlowApp/1.0")
+        }
+
+        return connection.useTextResponse { body ->
+            val root = JSONObject(body)
+            val routes = root.optJSONArray("routes") ?: return@useTextResponse null
+            if (routes.length() == 0) return@useTextResponse null
+
+            val firstRoute = routes.getJSONObject(0)
+            val geometry = firstRoute.getJSONObject("geometry")
+            val coordinates = geometry.getJSONArray("coordinates")
+            val points = buildList {
+                for (index in 0 until coordinates.length()) {
+                    val coordinate = coordinates.getJSONArray(index)
+                    add(GeoPoint(coordinate.getDouble(1), coordinate.getDouble(0)))
+                }
+            }
+            RouteInfo(
+                points = points,
+                distanceMeters = firstRoute.optDouble("distance", 0.0),
+                durationSeconds = firstRoute.optDouble("duration", 0.0)
+            )
+        }
+    }
+
+    private inline fun <T> HttpURLConnection.useTextResponse(block: (String) -> T): T {
+        return try {
+            val stream = if (responseCode in 200..299) inputStream else errorStream
+            val body = stream.bufferedReader().use { it.readText() }
+            block(body)
+        } finally {
+            disconnect()
+        }
+    }
+
+    private fun updateRouteSummary(route: RouteInfo) {
+        binding.tvRouteMeta.text =
+            "${formatDistance(route.distanceMeters)} - ${formatDuration(route.durationSeconds)}"
+        binding.btnStartNavigation.isEnabled = true
+        binding.btnStartNavigation.alpha = 1f
+        binding.routeBottomBar.show()
+    }
+
+    private fun drawRouteLine(points: List<GeoPoint>) {
+        if (points.isEmpty()) return
+        if (routeLine == null) {
+            routeLine = Polyline().apply {
+                outlinePaint.color = Color.rgb(123, 92, 255)
+                outlinePaint.strokeWidth = 9f
+                outlinePaint.strokeCap = Paint.Cap.ROUND
+                outlinePaint.strokeJoin = Paint.Join.ROUND
+            }
+            binding.mapView.overlays.add(0, routeLine)
+        }
+
+        routeLine?.setPoints(points)
+        binding.mapView.invalidate()
+    }
+
+    private fun clearRouteLine() {
+        routeLine?.let { binding.mapView.overlays.remove(it) }
+        routeLine = null
+        binding.mapView.invalidate()
+    }
+
+    private fun distanceMeters(
+        startLatitude: Double,
+        startLongitude: Double,
+        endLatitude: Double,
+        endLongitude: Double
+    ): Double {
+        val results = FloatArray(1)
+        Location.distanceBetween(
+            startLatitude,
+            startLongitude,
+            endLatitude,
+            endLongitude,
+            results
+        )
+        return results[0].toDouble()
+    }
+
+    private fun estimateDurationSeconds(distanceMeters: Double): Double {
+        val averageUrbanSpeedMetersPerSecond = 9.7
+        return distanceMeters / averageUrbanSpeedMetersPerSecond
+    }
+
+    private fun formatDistance(distanceMeters: Double): String {
+        return if (distanceMeters < 1000.0) {
+            "${distanceMeters.toInt().coerceAtLeast(0)} m"
+        } else {
+            String.format(Locale.US, "%.1f km", distanceMeters / 1000.0)
+        }
+    }
+
+    private fun formatDuration(durationSeconds: Double): String {
+        val totalMinutes = (durationSeconds / 60.0).toInt().coerceAtLeast(1)
+        val hours = totalMinutes / 60
+        val minutes = totalMinutes % 60
+        return if (hours > 0) {
+            "${hours}h ${minutes}min"
+        } else {
+            "$totalMinutes min"
+        }
+    }
+
+    private fun shortPlaceName(name: String): String {
+        return name.substringBefore(",").trim().ifBlank { name }
     }
 
     private fun applyVisibilityState() {
@@ -437,6 +911,8 @@ class GNSSViewerFragment :
 
     @SuppressLint("ClickableViewAccessibility")
     override fun FragmentGnssViewerBinding.initListener() {
+        setupSearchInteractions()
+
         // Overlay for double tap on MapView
         val mapOverlay = object : Overlay() {
             override fun onDoubleTap(e: MotionEvent, mapView: MapView): Boolean {
@@ -678,7 +1154,11 @@ class GNSSViewerFragment :
 
     override fun onDestroyView() {
         super.onDestroyView()
+        searchJob?.cancel()
+        routeJob?.cancel()
         stopLocationUpdates()
         userMarker = null
+        targetMarker = null
+        routeLine = null
     }
 }
