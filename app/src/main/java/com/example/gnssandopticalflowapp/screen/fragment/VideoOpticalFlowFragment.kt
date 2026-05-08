@@ -21,7 +21,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.checkIfFragmentAttached
+import com.example.gnssandopticalflowapp.common.hide
 import com.example.gnssandopticalflowapp.common.safeContext
+import com.example.gnssandopticalflowapp.common.setSingleClick
+import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentVideoOpticalFlowBinding
 import kotlinx.coroutines.Runnable
 import java.io.File
@@ -34,6 +37,10 @@ class VideoOpticalFlowFragment :
     private var player: ExoPlayer? = null
     private var isPlaying = true
     private val progressUpdateIntervalMs = 250L
+
+    private var videoWidth = 0
+    private var videoHeight = 0
+    private var isRotated = false
 
     private val handler = Handler(Looper.getMainLooper())
     private val updateProgressAction = object : Runnable {
@@ -87,8 +94,8 @@ class VideoOpticalFlowFragment :
                 )
 
                 checkIfFragmentAttached {
-                    val videoWidth = videoSize.width
-                    val videoHeight = videoSize.height
+                    videoWidth = videoSize.width
+                    videoHeight = videoSize.height
 
                     if (videoWidth <= 0 || videoHeight <= 0) return@checkIfFragmentAttached
 
@@ -110,6 +117,14 @@ class VideoOpticalFlowFragment :
                     layoutParams.dimensionRatio = "$ratioWidth:$ratioHeight"
 
                     binding.videoGroup.layoutParams = layoutParams
+
+                    isRotated = false
+                    binding.videoGroup.rotation = 0f
+                    binding.videoGroup.scaleX = 1f
+                    binding.videoGroup.scaleY = 1f
+
+                    if (videoWidth > 0 && videoHeight > 0 && videoWidth > videoHeight) ivFullScreen.show()
+                    else ivFullScreen.hide()
                 }
             }
 
@@ -156,6 +171,40 @@ class VideoOpticalFlowFragment :
     }
 
     override fun FragmentVideoOpticalFlowBinding.initListener() {
+        ivFullScreen.setSingleClick {
+            if (videoWidth > 0 && videoHeight > 0 && videoWidth > videoHeight) {
+                isRotated = !isRotated
+                if (isRotated) {
+                    val currentHeight = videoGroup.height.toFloat()
+                    val currentWidth = videoGroup.width.toFloat()
+
+                    val hAvail = ivVideoControl.top.toFloat() - ivBack.bottom.toFloat() - (24f * resources.displayMetrics.density)
+                    val wAvail = currentWidth
+
+                    if (currentHeight > 0 && currentWidth > 0) {
+                        val scaleW = wAvail / currentHeight
+                        val scaleH = hAvail / currentWidth
+                        val scale = minOf(scaleW, scaleH)
+
+                        videoGroup.animate()
+                            .rotation(90f)
+                            .scaleX(scale)
+                            .scaleY(scale)
+                            .setDuration(300)
+                            .start()
+                    } else {
+                        videoGroup.rotation = 90f
+                    }
+                } else {
+                    videoGroup.animate()
+                        .rotation(0f)
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setDuration(300)
+                        .start()
+                }
+            }
+        }
         ivBack.setOnClickListener { onBack() }
 
         ivVideoControl.setOnClickListener {
