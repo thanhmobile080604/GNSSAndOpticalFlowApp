@@ -4,7 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/white">
+    android:background="@drawable/bg_camera_bubble_gradient">
 
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/viewPager"
@@ -27,7 +27,7 @@
         app:layout_constraintDimensionRatio="223:78"
         app:layout_constraintWidth_percent="0.42"
         app:layout_constraintVertical_bias="0.98"
-        android:background="@drawable/bg_blue_gradient_40_left"/>
+        android:background="@drawable/bg_bottom_nav_glass" />
 
     <ImageView
         android:id="@+id/earthButton"
@@ -40,7 +40,7 @@
         android:layout_margin="6dp"
         android:padding="8dp"
         android:src="@drawable/ic_earth"
-        app:tint="@color/black"/>
+        app:tint="@color/white" />
 
     <ImageView
         android:id="@+id/opticalFlowButton"

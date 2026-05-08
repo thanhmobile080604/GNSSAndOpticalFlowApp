@@ -1,29 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:animateLayoutChanges="true"
-    android:background="@color/black_60">
+    android:background="#CC05030A">
 
-    <androidx.constraintlayout.utils.widget.ImageFilterView
+    <View
         android:id="@+id/bg_parent"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:src="@color/white"
-        app:round="40dp"
+        android:background="@drawable/bg_modal_glass"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintDimensionRatio="344:266"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintWidth_percent="0.84" />
+        app:layout_constraintWidth_percent="0.86" />
 
     <ImageView
         android:id="@+id/ivThumb"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginTop="14dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/bg_glass_icon_button"
+        android:padding="12dp"
         android:scaleType="fitCenter"
         android:src="@drawable/ic_map"
         app:layout_constraintDimensionRatio="1"
@@ -34,13 +35,17 @@
 
     <TextView
         android:id="@+id/tvDeleteItem"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginHorizontal="22dp"
         android:layout_marginTop="12dp"
-        android:fontFamily="@font/inter_bold"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter_black"
+        android:gravity="center"
+        android:maxLines="1"
         android:text="No Location Permission"
-        android:textColor="@color/black"
-        android:textSize="20sp"
+        android:textColor="@color/white"
+        android:textSize="21sp"
         app:layout_constraintEnd_toEndOf="@id/bg_parent"
         app:layout_constraintStart_toStartOf="@id/bg_parent"
         app:layout_constraintTop_toBottomOf="@id/ivThumb" />
@@ -50,42 +55,38 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="28dp"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="10dp"
         android:fontFamily="@font/inter_medium"
         android:gravity="center"
         android:text="Please grant location permission to use app"
-        android:textColor="#33393F"
-        android:textSize="16sp"
+        android:textColor="#BDAEE5"
+        android:textSize="15sp"
         app:layout_constraintEnd_toEndOf="@id/bg_parent"
         app:layout_constraintStart_toStartOf="@id/bg_parent"
         app:layout_constraintTop_toBottomOf="@id/tvDeleteItem" />
 
-
     <TextView
         android:id="@+id/tvOpenSetting"
         android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginTop="12dp"
-        android:background="@drawable/bg_black_purple_gradient"
-        android:fontFamily="@font/inter_bold"
-        android:gravity="center"
-        android:text="Open Setting"
-        android:focusable="true"
-        android:clickable="true"
-        android:textColor="@color/white"
-        android:paddingHorizontal="10dp"
-        android:singleLine="true"
-        android:maxLines="1"
-        android:ellipsize="marquee"
+        android:layout_height="48dp"
         android:layout_marginHorizontal="20dp"
+        android:layout_marginTop="12dp"
         android:layout_marginBottom="16dp"
-        android:marqueeRepeatLimit="marquee_forever"
-        android:textSize="16sp"
+        android:background="@drawable/bg_gradient_update_button"
+        android:clickable="true"
+        android:ellipsize="end"
+        android:focusable="true"
+        android:fontFamily="@font/inter_black"
+        android:gravity="center"
+        android:maxLines="1"
+        android:paddingHorizontal="10dp"
+        android:text="Open Setting"
+        android:textColor="@color/white"
+        android:textSize="15sp"
         app:layout_constraintBottom_toBottomOf="@id/bg_parent"
         app:layout_constraintEnd_toEndOf="@id/bg_parent"
         app:layout_constraintHorizontal_chainStyle="packed"
         app:layout_constraintStart_toStartOf="@id/bg_parent"
         app:layout_constraintTop_toBottomOf="@id/tvAreYouSure" />
-
 
 </androidx.constraintlayout.widget.ConstraintLayout>

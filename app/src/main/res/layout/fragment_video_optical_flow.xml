@@ -4,14 +4,17 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/bg_main">
+    android:background="@drawable/bg_camera_bubble_gradient">
 
     <ImageView
         android:id="@+id/ivBack"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:layout_marginStart="16dp"
-        android:layout_marginTop="40dp"
+        android:layout_marginTop="38dp"
+        android:background="@drawable/bg_glass_icon_button"
+        android:foreground="?attr/selectableItemBackgroundBorderless"
+        android:padding="12dp"
         android:scaleX="-1"
         android:src="@drawable/ic_arrow_right"
         app:layout_constraintStart_toStartOf="parent"
@@ -20,14 +23,18 @@
 
     <TextView
         android:id="@+id/tvVideoDate"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:fontFamily="@font/inter_extra_bold"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="18dp"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter_black"
+        android:maxLines="1"
         android:textColor="@color/white"
-        android:textSize="18sp"
+        android:textSize="19sp"
         app:layout_constraintBottom_toBottomOf="@id/ivBack"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintStart_toEndOf="@id/ivBack"
         app:layout_constraintTop_toTopOf="@id/ivBack"
         tools:text="19:40 26/11/2025" />
 
@@ -35,73 +42,98 @@
         android:id="@+id/videoGroup"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginHorizontal="20dp"
-        android:layout_marginVertical="12dp"
-        app:cardCornerRadius="12dp"
-        app:layout_constraintBottom_toTopOf="@id/ivVideoControl"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="18dp"
+        android:layout_marginBottom="16dp"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="30dp"
+        app:cardElevation="16dp"
+        app:layout_constraintBottom_toTopOf="@id/controlPanel"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/ivBack">
 
-        <androidx.media3.ui.AspectRatioFrameLayout
-            android:id="@+id/aspectRatioFrameLayout"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            app:resize_mode="fill">
+            android:background="@drawable/bg_camera_glass_frame"
+            android:padding="2dp">
 
-            <TextureView
-                android:id="@+id/videoView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent" />
-
-            <ImageView
-                android:id="@+id/ivRender"
+            <androidx.media3.ui.AspectRatioFrameLayout
+                android:id="@+id/aspectRatioFrameLayout"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:scaleType="fitCenter"
-                android:visibility="gone" />
+                app:resize_mode="fill">
 
-        </androidx.media3.ui.AspectRatioFrameLayout>
+                <TextureView
+                    android:id="@+id/videoView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <ImageView
+                    android:id="@+id/ivRender"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitCenter"
+                    android:visibility="gone" />
+
+            </androidx.media3.ui.AspectRatioFrameLayout>
+
+        </FrameLayout>
+
     </androidx.cardview.widget.CardView>
+
+    <View
+        android:id="@+id/controlPanel"
+        android:layout_width="0dp"
+        android:layout_height="90dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="32dp"
+        android:background="@drawable/bg_video_control_panel"
+        android:elevation="12dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
     <ImageView
         android:id="@+id/ivVideoControl"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginStart="30dp"
-        android:layout_marginBottom="50dp"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:layout_marginStart="18dp"
+        android:background="@drawable/bg_glass_icon_button"
+        android:padding="12dp"
         android:src="@drawable/ic_pause_video"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="@id/controlPanel"
+        app:layout_constraintStart_toStartOf="@id/controlPanel"
+        app:layout_constraintTop_toTopOf="@id/controlPanel"
         app:tint="@color/white" />
 
     <SeekBar
         android:id="@+id/videoProgress"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
+        android:layout_height="36dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="18dp"
         android:max="100"
-        android:maxHeight="6dp"
-        android:minHeight="6dp"
+        android:maxHeight="7dp"
+        android:minHeight="7dp"
         android:progress="0"
-        android:progressDrawable="@drawable/seekbar_purple_sensitivity"
-        android:thumb="@drawable/ripple_purple_gradient_thumb"
-        app:layout_constraintBottom_toBottomOf="@id/ivVideoControl"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginEnd="8dp"
-        android:layout_marginStart="4dp"
+        android:progressDrawable="@drawable/seekbar_glass_purple"
+        android:thumb="@drawable/ripple_glow_purple_thumb"
+        app:layout_constraintEnd_toEndOf="@id/controlPanel"
         app:layout_constraintStart_toEndOf="@+id/ivVideoControl"
-        app:layout_constraintTop_toTopOf="@id/ivVideoControl"/>
+        app:layout_constraintTop_toTopOf="@id/ivVideoControl" />
 
     <TextView
         android:id="@+id/tvTimer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        app:layout_constraintEnd_toEndOf="@id/videoProgress"
-        app:layout_constraintTop_toBottomOf="@id/videoProgress"
+        android:layout_marginEnd="22dp"
+        android:fontFamily="@font/inter_extra_bold"
         android:text="00:00/00:00"
-        android:textColor="@color/white"
-        android:fontFamily="@font/inter_bold"
-        android:layout_marginEnd="12dp"/>
-
+        android:textColor="#E7DEFF"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toEndOf="@id/controlPanel"
+        app:layout_constraintTop_toBottomOf="@id/videoProgress" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

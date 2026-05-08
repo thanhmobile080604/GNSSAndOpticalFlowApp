@@ -3,8 +3,9 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="10sp"
-    android:padding="2dp">
+    android:layout_margin="6dp"
+    android:background="@drawable/bg_gallery_item"
+    android:padding="6dp">
 
     <androidx.constraintlayout.utils.widget.ImageFilterView
         android:id="@+id/thumb_gallery"
@@ -17,42 +18,47 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:round="20dp" />
+        app:round="16dp" />
 
     <androidx.constraintlayout.utils.widget.ImageFilterView
         android:id="@+id/blackOverlay"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:src="@color/black_60"
+        android:src="@color/video_selected_overlay"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="@id/thumb_gallery"
         app:layout_constraintEnd_toEndOf="@id/thumb_gallery"
         app:layout_constraintStart_toStartOf="@id/thumb_gallery"
         app:layout_constraintTop_toTopOf="@id/thumb_gallery"
-        app:round="20dp" />
+        app:round="16dp" />
 
     <ImageView
         android:id="@+id/check"
-        android:layout_width="20sp"
-        android:layout_height="20sp"
-        android:layout_margin="10sp"
-        android:src="@drawable/ic_tick_blue_shadow"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_margin="8dp"
+        android:background="@drawable/bg_glass_icon_button"
+        android:padding="5dp"
+        android:src="@drawable/ic_check"
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="@id/thumb_gallery"
-        app:layout_constraintTop_toTopOf="@id/thumb_gallery" />
-
+        app:layout_constraintTop_toTopOf="@id/thumb_gallery"
+        app:tint="@color/white" />
 
     <TextView
         android:id="@+id/tvTitle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
+        android:layout_marginTop="7dp"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter_bold"
         android:gravity="center"
-        android:textColor="@color/white"
-        android:textSize="12sp"
+        android:maxLines="1"
         android:text="Date Title"
-        app:layout_constraintTop_toBottomOf="@id/thumb_gallery"
+        android:textColor="#E7DEFF"
+        android:textSize="11sp"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintTop_toBottomOf="@id/thumb_gallery" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -41,4 +41,5 @@
     <color name="main_gradient_start">#C34EFE</color>
     <color name="main_gradient_end">#4570FE</color>
     <color name="color_80B356F9">#80B356F9</color>
+    <color name="video_selected_overlay">#994B1FE8</color>
 </resources>
