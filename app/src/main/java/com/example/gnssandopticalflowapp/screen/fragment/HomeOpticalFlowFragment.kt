@@ -5,6 +5,7 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
@@ -51,10 +52,18 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
     override fun FragmentHomeOpticalFlowBinding.initListener() {
         btnFunc1.setSingleClick {
+            if (isProcessingVideo()) {
+                showProcessingToast()
+                return@setSingleClick
+            }
             navigateTo(R.id.cameraOpticalFlowFragment)
         }
 
         btnFunc2.setSingleClick {
+            if (isProcessingVideo()) {
+                showProcessingToast()
+                return@setSingleClick
+            }
             videoPickerLauncher.launch("video/*")
         }
 
@@ -70,6 +79,11 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     }
 
     private fun handleVideoSelection(uri: Uri, options: VideoProcessOptions) {
+        if (isProcessingVideo()) {
+            showProcessingToast()
+            return
+        }
+
         showLoadingDialog("Copying video...") {
             copyJob?.cancel()
         }
@@ -371,6 +385,18 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             setSensitivity(options.sensitivity)
             setMovingMode(options.isMoving)
         }
+    }
+
+    private fun isProcessingVideo(): Boolean {
+        return copyJob?.isActive == true
+    }
+
+    private fun showProcessingToast() {
+        Toast.makeText(
+            safeContext(),
+            "Đang loading, chờ xử lý xong rồi thử lại",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun convertCaptureFrameToRgba(sourceMat: Mat, rgbaMat: Mat) {

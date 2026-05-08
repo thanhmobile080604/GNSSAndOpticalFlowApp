@@ -23,7 +23,7 @@
 
     <TextView
         android:id="@+id/tvTitle"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="14dp"
         android:layout_marginEnd="14dp"
@@ -32,11 +32,12 @@
         android:maxLines="1"
         android:text="Video Storage"
         android:textColor="@color/white"
+        app:layout_constraintHorizontal_bias="0.44"
         android:textSize="24sp"
-        app:layout_constraintBottom_toBottomOf="@id/ivBack"
-        app:layout_constraintEnd_toStartOf="@id/tvEdit"
-        app:layout_constraintStart_toEndOf="@id/ivBack"
-        app:layout_constraintTop_toTopOf="@id/ivBack" />
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="44dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <TextView
         android:id="@+id/tvCancel"
@@ -47,14 +48,12 @@
         android:fontFamily="@font/inter_extra_bold"
         android:gravity="center"
         android:minWidth="82dp"
-        android:paddingHorizontal="14dp"
         android:text="Cancel"
         android:textColor="@color/white"
         android:textSize="14sp"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="@id/ivBack"
+        app:layout_constraintBottom_toBottomOf="@id/tvTitle"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="@id/ivBack" />
+        app:layout_constraintTop_toTopOf="@id/tvTitle" />
 
     <TextView
         android:id="@+id/tvEdit"
@@ -89,21 +88,21 @@
 
     <ImageView
         android:id="@+id/ivTrash"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
         android:layout_marginEnd="16dp"
         android:background="@drawable/bg_glass_icon_button"
         android:padding="10dp"
         android:src="@drawable/ic_trash"
-        app:layout_constraintBottom_toBottomOf="@id/ivBack"
+        app:layout_constraintBottom_toBottomOf="@id/tvTitle"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="@id/ivBack"
+        app:layout_constraintTop_toTopOf="@id/tvTitle"
         app:tint="@color/white" />
 
     <ImageView
         android:id="@+id/ivShare"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
         android:layout_marginEnd="8dp"
         android:background="@drawable/bg_glass_icon_button"
         android:padding="11dp"
@@ -124,7 +123,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/ivBack"
+        app:layout_constraintTop_toBottomOf="@id/tvTitle"
         tools:listitem="@layout/item_video_thumb" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
