@@ -182,7 +182,7 @@
         android:layout_width="54dp"
         android:layout_height="54dp"
         android:padding="13dp"
-        android:src="@drawable/ic_current_location"
+        android:src="@drawable/ic_pin"
         app:layout_constraintBottom_toBottomOf="@id/currentLocationBubble"
         app:layout_constraintEnd_toEndOf="@id/currentLocationBubble"
         app:layout_constraintStart_toStartOf="@id/currentLocationBubble"

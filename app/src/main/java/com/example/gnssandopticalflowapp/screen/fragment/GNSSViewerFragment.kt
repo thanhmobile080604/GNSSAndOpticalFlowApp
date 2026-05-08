@@ -178,6 +178,7 @@ class GNSSViewerFragment :
 
         binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
         binding.mapView.setMultiTouchControls(true)
+        binding.mapView.setBuiltInZoomControls(false)
         binding.mapView.controller.setZoom(18.0)
         // Default position before location arrives
         binding.mapView.controller.setCenter(GeoPoint(21.028511, 105.804817)) // Hanoi fallback
@@ -653,7 +654,9 @@ class GNSSViewerFragment :
         navigationActive = true
         binding.btnStartNavigation.text = "Navigating"
         binding.btnStartNavigation.alpha = 1f
-        binding.routeBottomBar.show()
+        if (!is3DMode) {
+            binding.routeBottomBar.show()
+        }
         requestRouteUpdate(force = true, drawRoute = true)
     }
 
@@ -675,7 +678,9 @@ class GNSSViewerFragment :
         }
         binding.btnStartNavigation.isEnabled = loc != null
         binding.btnStartNavigation.alpha = if (loc != null) 1f else 0.55f
-        binding.routeBottomBar.show()
+        if (!is3DMode) {
+            binding.routeBottomBar.show()
+        }
     }
 
     private fun requestRouteUpdate(force: Boolean, drawRoute: Boolean) {
@@ -772,7 +777,9 @@ class GNSSViewerFragment :
             "${formatDistance(route.distanceMeters)} - ${formatDuration(route.durationSeconds)}"
         binding.btnStartNavigation.isEnabled = true
         binding.btnStartNavigation.alpha = 1f
-        binding.routeBottomBar.show()
+        if (!is3DMode) {
+            binding.routeBottomBar.show()
+        }
     }
 
     private fun drawRouteLine(points: List<GeoPoint>) {
@@ -847,10 +854,14 @@ class GNSSViewerFragment :
             binding.mapView.hide()
             binding.myGLSurfaceView.show()
             binding.myGLSurfaceView.alpha = 1f
+            setTwoDControlsVisible(false)
+            mainViewModel.isGnss3DMode.value = true
         } else {
             binding.mapView.show()
             binding.mapView.alpha = 1f
             binding.myGLSurfaceView.hide()
+            setTwoDControlsVisible(true)
+            mainViewModel.isGnss3DMode.value = false
         }
     }
 
@@ -858,6 +869,8 @@ class GNSSViewerFragment :
         is3DMode = !is3DMode
 
         if (is3DMode) {
+            setTwoDControlsVisible(false)
+            mainViewModel.isGnss3DMode.value = true
             binding.mapView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             binding.myGLSurfaceView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             binding.mapView.animate()
@@ -882,6 +895,7 @@ class GNSSViewerFragment :
                 .start()
 
         } else {
+            mainViewModel.isGnss3DMode.value = false
             binding.myGLSurfaceView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             binding.mapView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
@@ -901,11 +915,30 @@ class GNSSViewerFragment :
                         .setInterpolator(AccelerateDecelerateInterpolator())
                         .withEndAction {
                             binding.mapView.setLayerType(View.LAYER_TYPE_NONE, null)
+                            setTwoDControlsVisible(true)
                             binding.mapView.invalidate()
                         }
                         .start()
                 }
                 .start()
+        }
+    }
+
+    private fun setTwoDControlsVisible(visible: Boolean) = with(binding) {
+        if (visible) {
+            searchBar.show()
+            currentLocationBubble.show()
+            icPin.show()
+            if (selectedPlace != null) {
+                routeBottomBar.show()
+            }
+        } else {
+            searchBar.hide()
+            searchResultsPanel.hide()
+            routeBottomBar.hide()
+            currentLocationBubble.show()
+            icPin.show()
+            hideKeyboard()
         }
     }
 
@@ -1154,6 +1187,7 @@ class GNSSViewerFragment :
 
     override fun onDestroyView() {
         super.onDestroyView()
+        mainViewModel.isGnss3DMode.value = false
         searchJob?.cancel()
         routeJob?.cancel()
         stopLocationUpdates()

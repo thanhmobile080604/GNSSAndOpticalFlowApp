@@ -17,6 +17,7 @@ import kotlin.math.abs
 class MainViewModel :
     ViewModel() {
     val currentTab = MutableLiveData<Int>(0)
+    val isGnss3DMode = MutableLiveData(false)
     val selectedVideoPath = MutableLiveData<String>()
     
     private val _currentLocation = MutableLiveData<Location?>()
