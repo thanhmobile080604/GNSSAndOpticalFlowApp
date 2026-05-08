@@ -37,89 +37,60 @@
         app:layout_constraintStart_toEndOf="@id/ivBack"
         app:layout_constraintTop_toTopOf="@id/ivBack" />
 
-    <TextView
-        android:id="@+id/tvCameraMode"
-        android:layout_width="wrap_content"
-        android:layout_height="24dp"
-        android:layout_marginStart="14dp"
-        android:layout_marginTop="2dp"
-        android:background="@drawable/bg_glass_chip"
-        android:fontFamily="@font/inter_extra_bold"
-        android:gravity="center"
-        android:paddingHorizontal="10dp"
-        android:text="Live Camera"
-        android:textColor="#DCCBFF"
-        android:textSize="11sp"
-        app:layout_constraintStart_toEndOf="@id/ivBack"
-        app:layout_constraintTop_toBottomOf="@id/tvTitle" />
-
     <androidx.constraintlayout.utils.widget.ImageFilterView
         android:id="@+id/bgGlass"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        app:round="20dp"
         android:layout_marginTop="18dp"
         android:src="@drawable/bg_camera_glass_frame"
         app:layout_constraintDimensionRatio="398:430"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/ivBack"
-        app:layout_constraintWidth_percent="0.93"/>
+        app:layout_constraintWidth_percent="0.93"
+        app:round="20dp" />
 
     <androidx.cardview.widget.CardView
         android:id="@+id/cvCamera"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        app:cardBackgroundColor="@android:color/transparent"
-        app:cardCornerRadius="34dp"
         android:layout_margin="2dp"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="28dp"
         app:cardUseCompatPadding="false"
-        app:layout_constraintTop_toTopOf="@id/bgGlass"
         app:layout_constraintBottom_toBottomOf="@id/bgGlass"
         app:layout_constraintEnd_toEndOf="@id/bgGlass"
-        app:layout_constraintStart_toStartOf="@id/bgGlass">
+        app:layout_constraintStart_toStartOf="@id/bgGlass"
+        app:layout_constraintTop_toTopOf="@id/bgGlass">
 
-        <FrameLayout
+        <androidx.camera.view.PreviewView
+            android:id="@+id/camera_view"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="2dp">
+            app:implementationMode="compatible"
+            app:scaleType="fillCenter" />
 
-            <androidx.camera.view.PreviewView
-                android:id="@+id/camera_view"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                app:implementationMode="compatible"
-                app:scaleType="fillCenter" />
+        <ImageView
+            android:id="@+id/camera_output_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop" />
 
-            <ImageView
-                android:id="@+id/camera_output_overlay"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="centerCrop" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="112dp"
-                android:layout_gravity="top"
-                android:background="@drawable/bg_camera_top_scrim" />
-
-            <TextView
-                android:id="@+id/tvTimer"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:layout_gravity="top|end"
-                android:layout_marginTop="14dp"
-                android:layout_marginEnd="14dp"
-                android:background="@drawable/bg_timer_chip"
-                android:fontFamily="@font/inter_extra_bold"
-                android:gravity="center"
-                android:minWidth="74dp"
-                android:paddingHorizontal="12dp"
-                android:text="00:00"
-                android:textColor="@color/white"
-                android:textSize="13sp" />
-
-        </FrameLayout>
+        <TextView
+            android:id="@+id/tvTimer"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="14dp"
+            android:layout_marginEnd="14dp"
+            android:background="@drawable/bg_timer_chip"
+            android:fontFamily="@font/inter_extra_bold"
+            android:gravity="center"
+            android:minWidth="74dp"
+            android:paddingHorizontal="12dp"
+            android:text="00:00"
+            android:textColor="@color/white"
+            android:textSize="13sp" />
 
     </androidx.cardview.widget.CardView>
 
@@ -157,14 +128,21 @@
                 android:orientation="horizontal"
                 android:paddingHorizontal="12dp">
 
-                <androidx.constraintlayout.utils.widget.ImageFilterView
-                    android:id="@+id/motion_vector"
+                <androidx.cardview.widget.CardView
+                    android:id="@+id/motion_vector_card"
                     android:layout_width="66dp"
                     android:layout_height="66dp"
-                    android:background="@drawable/bg_motion_preview"
-                    android:padding="8dp"
-                    app:round="22dp"
-                    app:srcCompat="@drawable/ic_optical_flow" />
+                    app:cardCornerRadius="22dp"
+                    app:cardElevation="0dp"
+                    app:cardUseCompatPadding="false">
+
+                    <ImageView
+                        android:id="@+id/motion_vector"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="centerCrop" />
+
+                </androidx.cardview.widget.CardView>
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -174,16 +152,6 @@
                     android:gravity="center_vertical"
                     android:orientation="vertical">
 
-                    <TextView
-                        android:id="@+id/tvVelocityLabel"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:ellipsize="end"
-                        android:fontFamily="@font/inter_extra_bold"
-                        android:maxLines="1"
-                        android:text="Velocity"
-                        android:textColor="#BFAAFF"
-                        android:textSize="11sp" />
 
                     <TextView
                         android:id="@+id/vel_pred"
@@ -251,15 +219,6 @@
                     android:paddingHorizontal="8dp">
 
                     <TextView
-                        android:id="@+id/tvAlgorithmLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="@font/inter_bold"
-                        android:text="Algorithm"
-                        android:textColor="#A999D8"
-                        android:textSize="11sp" />
-
-                    <TextView
                         android:id="@+id/ofAlgorithm"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -295,15 +254,6 @@
                     android:paddingHorizontal="8dp">
 
                     <TextView
-                        android:id="@+id/Test"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="@font/inter_bold"
-                        android:text="Mode"
-                        android:textColor="#A999D8"
-                        android:textSize="11sp" />
-
-                    <TextView
                         android:id="@+id/tvManualLabel"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -335,15 +285,6 @@
                     android:gravity="center"
                     android:orientation="vertical"
                     android:paddingHorizontal="8dp">
-
-                    <TextView
-                        android:id="@+id/tvMovingLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="@font/inter_bold"
-                        android:text="Motion"
-                        android:textColor="#A999D8"
-                        android:textSize="11sp" />
 
                     <TextView
                         android:id="@+id/tvMotionStateLabel"
