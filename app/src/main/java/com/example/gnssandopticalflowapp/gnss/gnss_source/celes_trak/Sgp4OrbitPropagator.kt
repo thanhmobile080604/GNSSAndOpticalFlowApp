@@ -40,6 +40,8 @@ object Sgp4OrbitPropagator {
                     velocityZ = pv.velocity.z
                 ) ?: 0.0
             )
+        }.onFailure { e ->
+            android.util.Log.e("SGP4", "Orekit propagation failed", e)
         }.getOrNull()
     }
 

@@ -30,6 +30,10 @@ import com.example.gnssandopticalflowapp.screen.dialog.NoGPSDialog
 import com.example.gnssandopticalflowapp.screen.dialog.NoLocationDialog
 import kotlinx.coroutines.launch
 import org.opencv.android.OpenCVLoader
+import org.orekit.data.DataContext
+import org.orekit.data.DirectoryCrawler
+import java.io.File
+import java.io.FileOutputStream
 import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
@@ -86,6 +90,7 @@ class MainActivity : AppCompatActivity() {
         )
 
         viewModel.seedFakeLocationIfNeeded()
+        setupOrekit()
         setupVideoProcessingOverlay()
         observeVideoProcessingOverlay()
         observeProcessedVideoReady()
@@ -167,6 +172,28 @@ class MainActivity : AppCompatActivity() {
             binding.processingBubble.animate().cancel()
         }
         super.onDestroy()
+    }
+
+    private fun setupOrekit() {
+        try {
+            val orekitDir = File(cacheDir, "orekit-data")
+            if (!orekitDir.exists()) {
+                orekitDir.mkdirs()
+            }
+            val targetFile = File(orekitDir, "tai-utc.dat")
+            if (!targetFile.exists()) {
+                assets.open("tai-utc.dat").use { input ->
+                    FileOutputStream(targetFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+            val manager = DataContext.getDefault().dataProvidersManager
+            manager.addProvider(DirectoryCrawler(orekitDir))
+            Log.d("Orekit", "Orekit data loaded successfully")
+        } catch (e: Exception) {
+            Log.e("Orekit", "Failed to load Orekit data", e)
+        }
     }
 
     private fun setupVideoProcessingOverlay() {

@@ -405,8 +405,13 @@ class GNSSViewerFragment :
         userMarker?.position = point
         binding.mapView.invalidate()
 
-        selectedPlace?.let {
-            updateRoutePreviewFromDirectDistance()
+        selectedPlace?.let { place ->
+            val route = cachedRoute
+            if (route != null && loc != null) {
+                updateRoutePreviewFromCachedRoute(route, loc)
+            } else {
+                updateRoutePreviewFromDirectDistance()
+            }
             val shouldDrawRoute = routeLine != null || navigationActive
             if (cachedRoute == null && routeJob?.isActive != true) {
                 requestRouteUpdate(force = true, drawRoute = shouldDrawRoute)
@@ -784,16 +789,45 @@ class GNSSViewerFragment :
         } else {
             0.0
         }
-        val duration = estimateDurationSeconds(distance)
 
         binding.tvRouteTitle.text = shortPlaceName(place.name)
         binding.tvRouteMeta.text = if (loc != null) {
-            "${formatDistance(distance)} - ${formatDuration(duration)}"
+            formatDistance(distance)
         } else {
             "Waiting for current location"
         }
         binding.btnStartNavigation.isEnabled = loc != null
         binding.btnStartNavigation.alpha = if (loc != null) 1f else 0.55f
+        if (!is3DMode) {
+            binding.routeBottomBar.show()
+        }
+    }
+
+    private fun updateRoutePreviewFromCachedRoute(route: RouteInfo, currentLoc: Location) {
+        val place = selectedPlace ?: return
+        val currentPoint = GeoPoint(currentLoc.latitude, currentLoc.longitude)
+        
+        var minDistance = Double.MAX_VALUE
+        var closestIndex = 0
+        val routePoints = route.points
+        
+        for (i in routePoints.indices) {
+            val dist = currentPoint.distanceToAsDouble(routePoints[i])
+            if (dist < minDistance) {
+                minDistance = dist
+                closestIndex = i
+            }
+        }
+        
+        var remainingDistance = minDistance
+        for (i in closestIndex until routePoints.size - 1) {
+            remainingDistance += routePoints[i].distanceToAsDouble(routePoints[i+1])
+        }
+
+        binding.tvRouteTitle.text = shortPlaceName(place.name)
+        binding.tvRouteMeta.text = formatDistance(remainingDistance)
+        binding.btnStartNavigation.isEnabled = true
+        binding.btnStartNavigation.alpha = 1f
         if (!is3DMode) {
             binding.routeBottomBar.show()
         }
@@ -889,8 +923,7 @@ class GNSSViewerFragment :
     }
 
     private fun updateRouteSummary(route: RouteInfo) {
-        binding.tvRouteMeta.text =
-            "${formatDistance(route.distanceMeters)} - ${formatDuration(route.durationSeconds)}"
+        binding.tvRouteMeta.text = formatDistance(route.distanceMeters)
         binding.btnStartNavigation.isEnabled = true
         binding.btnStartNavigation.alpha = 1f
         if (!is3DMode) {
@@ -987,27 +1020,11 @@ class GNSSViewerFragment :
         return results[0].toDouble()
     }
 
-    private fun estimateDurationSeconds(distanceMeters: Double): Double {
-        val averageUrbanSpeedMetersPerSecond = 9.7
-        return distanceMeters / averageUrbanSpeedMetersPerSecond
-    }
-
     private fun formatDistance(distanceMeters: Double): String {
         return if (distanceMeters < 1000.0) {
             "${distanceMeters.toInt().coerceAtLeast(0)} m"
         } else {
             String.format(Locale.US, "%.1f km", distanceMeters / 1000.0)
-        }
-    }
-
-    private fun formatDuration(durationSeconds: Double): String {
-        val totalMinutes = (durationSeconds / 60.0).toInt().coerceAtLeast(1)
-        val hours = totalMinutes / 60
-        val minutes = totalMinutes % 60
-        return if (hours > 0) {
-            "${hours}h ${minutes}min"
-        } else {
-            "$totalMinutes min"
         }
     }
 
