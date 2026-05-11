@@ -16,6 +16,8 @@ import kotlin.math.abs
 
 class IntroFragment : BaseFragment<FragmentIntroBinding>(FragmentIntroBinding::inflate) {
 
+    private var isStartButtonRevealed = false
+
     private val introImages = listOf(
         R.drawable.img_map,
         R.drawable.img_gnss,
@@ -23,13 +25,23 @@ class IntroFragment : BaseFragment<FragmentIntroBinding>(FragmentIntroBinding::i
     )
 
     private val introPageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
+        override fun onPageScrolled(
+            position: Int,
+            positionOffset: Float,
+            positionOffsetPixels: Int
+        ) {
+            updateStartButtonVisibility(position + positionOffset)
+        }
+
         override fun onPageSelected(position: Int) {
             binding.introDots.setSelectedDot(position)
+            updateStartButtonVisibility(position.toFloat())
         }
     }
 
     override fun FragmentIntroBinding.initView() {
         mainViewModel.isResolvingDeviceSettings.value = true
+        updateStartButtonVisibility(0f)
         setupIntroCarousel()
         introDots.setSelectedDot(0)
     }
@@ -67,6 +79,27 @@ class IntroFragment : BaseFragment<FragmentIntroBinding>(FragmentIntroBinding::i
         )
         introImagePager.registerOnPageChangeCallback(introPageChangeCallback)
         introImagePager.setCurrentItem(0, false)
+    }
+
+    private fun updateStartButtonVisibility(pageOffset: Float) {
+        if (isStartButtonRevealed) {
+            binding.btnStartIntro.alpha = 1f
+            binding.btnStartIntro.isEnabled = true
+            return
+        }
+
+        val fadeStartPage = (introImages.lastIndex - 1).coerceAtLeast(0).toFloat()
+        val alpha = if (introImages.size <= 1) {
+            1f
+        } else {
+            (pageOffset - fadeStartPage).coerceIn(0f, 1f)
+        }
+
+        if (alpha >= 1f) {
+            isStartButtonRevealed = true
+        }
+        binding.btnStartIntro.alpha = alpha
+        binding.btnStartIntro.isEnabled = isStartButtonRevealed
     }
 
     override fun FragmentIntroBinding.initListener() {

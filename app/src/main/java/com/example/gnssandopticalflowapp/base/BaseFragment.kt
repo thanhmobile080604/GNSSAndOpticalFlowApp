@@ -151,20 +151,22 @@ abstract class BaseFragment<T : ViewBinding>(private val bindingInflater: (Layou
     }
 
     private fun buildNavOptions(inclusive: Boolean): NavOptions {
-        try {
-            return NavOptions.Builder().apply {
+        return try {
+            NavOptions.Builder().apply {
                 val currentDestination = findNavController().currentDestination?.id
+
                 if (inclusive && currentDestination != null) {
                     setPopUpTo(currentDestination, true)
                 }
-                setEnterAnim(R.anim.enter_from_right)
-                setExitAnim(R.anim.exit_to_left)
-                setPopEnterAnim(R.anim.enter_from_left)
-                setPopExitAnim(R.anim.exit_to_right)
+
+                setEnterAnim(R.anim.fade_in)
+                setExitAnim(R.anim.fade_out)
+                setPopEnterAnim(R.anim.fade_in)
+                setPopExitAnim(R.anim.fade_out)
             }.build()
         } catch (e: Exception) {
             Log.e("NavigationError", "Navigation failed: $e")
-            return navOptions
+            navOptions
         }
     }
 
