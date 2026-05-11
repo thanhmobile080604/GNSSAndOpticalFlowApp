@@ -260,7 +260,7 @@ object IgsBroadcastEphemerisRepository {
         nowUtcMillis: Long,
         androidSvid: (Int) -> Int
     ) where T : GNSSOrbitalElements {
-        val utc = TimeScalesFactory.utc
+        val utc = TimeScalesFactory.getUTC()
         messagesBySatellite.forEach { (satelliteId, messages) ->
             messages.forEach { message ->
                 val epochUtcMillis = message.date.toDate(utc).time
@@ -289,7 +289,7 @@ object IgsBroadcastEphemerisRepository {
         sourceUrl: String,
         nowUtcMillis: Long
     ) {
-        val utc = TimeScalesFactory.utc
+        val utc = TimeScalesFactory.getUTC()
         messagesBySatellite.forEach { (satelliteId, messages) ->
             messages.forEach { message ->
                 val epochUtcMillis = message.date.toDate(utc).time
@@ -347,16 +347,16 @@ object IgsBroadcastEphemerisRepository {
     }
 
     private fun configureGnssRolloverReference(nowUtcMillis: Long) {
-        if (GNSSDate.rolloverReference != null) return
+        if (GNSSDate.getRolloverReference() != null) return
 
         val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.US).apply {
             timeInMillis = nowUtcMillis
         }
-        GNSSDate.rolloverReference = DateComponents(
+        GNSSDate.setRolloverReference(DateComponents(
             calendar.get(Calendar.YEAR),
             calendar.get(Calendar.MONTH) + 1,
             calendar.get(Calendar.DAY_OF_MONTH)
-        )
+        ))
     }
 
     private fun buildRequest(
