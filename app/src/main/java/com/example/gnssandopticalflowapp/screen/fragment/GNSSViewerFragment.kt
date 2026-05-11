@@ -47,7 +47,9 @@ import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
 import com.example.gnssandopticalflowapp.gnss.renderer.EarthRenderer
 import com.example.gnssandopticalflowapp.gnss.GnssSatelliteTracker
+import com.example.gnssandopticalflowapp.model.RouteInfo
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
+import com.example.gnssandopticalflowapp.model.SearchPlace
 import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog
 import com.example.gnssandopticalflowapp.screen.dialog.Map3DInformationDialog
 import com.google.android.gms.common.api.ResolvableApiException
@@ -107,19 +109,6 @@ class GNSSViewerFragment :
     private var gnssMeasurementsRegistered = false
     private val routeRefreshIntervalMs = 8000L
     private val routeRefreshDistanceMeters = 25.0
-
-    private data class SearchPlace(
-        val name: String,
-        val latitude: Double,
-        val longitude: Double
-    )
-
-    private data class RouteInfo(
-        val points: List<GeoPoint>,
-        val distanceMeters: Double,
-        val durationSeconds: Double
-    )
-
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             currentLocation = mainViewModel.getEffectiveLocation(location)
