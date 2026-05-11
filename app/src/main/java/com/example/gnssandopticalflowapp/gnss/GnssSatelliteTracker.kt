@@ -17,6 +17,10 @@ import com.example.gnssandopticalflowapp.model.ResolvedSatellitePosition
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.model.SatelliteKey
 import com.example.gnssandopticalflowapp.model.SatellitePvtSnapshot
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 class GnssSatelliteTracker {
     private val latestSatellitePvt = mutableMapOf<SatelliteKey, SatellitePvtSnapshot>()
@@ -240,7 +244,7 @@ class GnssSatelliteTracker {
             altitude = orbitState.position.altitude,
             speed = orbitState.speedMetersPerSecond,
             positionSource = "IGS Broadcast",
-            ephemerisSource = "${record.sourceName} | ${record.satelliteId}"
+            ephemerisSource = buildBroadcastEphemerisLabel(record)
         )
     }
 
@@ -308,6 +312,14 @@ class GnssSatelliteTracker {
                 append(orbit.objectName)
             }
         }.ifBlank { null }
+    }
+
+    private fun buildBroadcastEphemerisLabel(record: BroadcastEphemerisRecord): String {
+        val epochUtc = SimpleDateFormat("yyyy-MM-dd HH:mm 'UTC'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(record.epochUtcMillis))
+
+        return "RINEX NAV | ${record.sourceName} | ${record.satelliteId} | epoch $epochUtc"
     }
 
     private fun removeStalePvt(now: Long) {
