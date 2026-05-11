@@ -74,6 +74,7 @@ class Map3DInformationDialog :
 
     private fun formatPositionSource(source: String): String {
         return when {
+            source.equals("IGS Broadcast", ignoreCase = true) -> "IGS Broadcast"
             source.equals("CelesTrak SGP4", ignoreCase = true) -> "CelesTrak + SGP4"
             source.equals("CelesTrak GP", ignoreCase = true) -> "CelesTrak + Approx"
             source.equals("Approximate", ignoreCase = true) -> "Approx"

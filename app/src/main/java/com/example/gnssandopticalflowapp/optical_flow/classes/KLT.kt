@@ -1,8 +1,7 @@
 package com.example.gnssandopticalflowapp.optical_flow.classes
 
 import android.util.Log
-import android.widget.TextView
-import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
+import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.model.OFOutput
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc

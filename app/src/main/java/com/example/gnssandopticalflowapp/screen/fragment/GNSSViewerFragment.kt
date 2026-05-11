@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
@@ -101,6 +102,7 @@ class GNSSViewerFragment :
     private var ignoreSearchTextChanges = false
     private var searchJob: Job? = null
     private var routeJob: Job? = null
+    private var externalOrbitRefreshJob: Job? = null
     private var lastRouteRequestAt = 0L
     private var lastRouteOrigin: GeoPoint? = null
     private val satelliteTracker = GnssSatelliteTracker()
@@ -109,6 +111,8 @@ class GNSSViewerFragment :
     private var gnssMeasurementsRegistered = false
     private val routeRefreshIntervalMs = 8000L
     private val routeRefreshDistanceMeters = 25.0
+    private val externalOrbitRetryDelayMs = 30_000L
+    private val externalOrbitRefreshAttempts = 3
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             currentLocation = mainViewModel.getEffectiveLocation(location)
@@ -266,7 +270,7 @@ class GNSSViewerFragment :
     private fun startLocationUpdates() {
         if (!hasLocationPermission()) return
         setupLocationManager()
-        refreshCelesTrakDataIfNeeded()
+        refreshExternalOrbitDataIfNeeded()
 
         if (useTestLocation) {
             currentLocation = mainViewModel.getEffectiveLocation(null)
@@ -322,12 +326,38 @@ class GNSSViewerFragment :
                 gnssMeasurementsRegistered = false
             }
         }
+        externalOrbitRefreshJob?.cancel()
+        externalOrbitRefreshJob = null
         satelliteTracker.clear()
     }
 
-    private fun refreshCelesTrakDataIfNeeded(forceRefresh: Boolean = false) {
-        viewLifecycleOwner.lifecycleScope.launch {
-            satelliteTracker.refreshCelesTrakDataIfNeeded(forceRefresh)
+    private fun refreshExternalOrbitDataIfNeeded(forceRefresh: Boolean = false) {
+        if (!forceRefresh && externalOrbitRefreshJob?.isActive == true) return
+
+        externalOrbitRefreshJob?.cancel()
+        externalOrbitRefreshJob = viewLifecycleOwner.lifecycleScope.launch {
+            repeat(externalOrbitRefreshAttempts) { attempt ->
+                val forceAttemptRefresh = forceRefresh || attempt > 0
+                val igsLoaded = satelliteTracker.refreshIgsBroadcastDataIfNeeded(
+                    forceRefresh = forceAttemptRefresh
+                )
+                val celesTrakLoaded = if (igsLoaded) {
+                    false
+                } else {
+                    satelliteTracker.refreshCelesTrakDataIfNeeded(
+                        forceRefresh = forceAttemptRefresh
+                    )
+                }
+                if (igsLoaded || celesTrakLoaded) return@launch
+
+                if (attempt < externalOrbitRefreshAttempts - 1) {
+                    Log.d(
+                        "GNSS_ORBIT",
+                        "retry in ${externalOrbitRetryDelayMs / 1000}s attempt=${attempt + 2}/$externalOrbitRefreshAttempts"
+                    )
+                    delay(externalOrbitRetryDelayMs)
+                }
+            }
         }
     }
 
@@ -336,7 +366,14 @@ class GNSSViewerFragment :
         if (!::locationManager.isInitialized || gnssMeasurementsRegistered) return
 
         val capabilities = runCatching { locationManager.gnssCapabilities }.getOrNull()
+        capabilities?.let {
+            Log.d(
+                "GNSS_CAPS",
+                "hasMeasurements=${it.hasMeasurements()} hasSatellitePvt=${readSatellitePvtCapability(it)}"
+            )
+        }
         if (capabilities?.hasMeasurements() == false) {
+            Log.d("GNSS_CAPS", "skip measurements callback: capability reports unsupported")
             return
         }
 
@@ -348,6 +385,16 @@ class GNSSViewerFragment :
         }.getOrDefault(false)
 
         gnssMeasurementsRegistered = registered
+        Log.d("GNSS_CAPS", "measurements callback registered=$registered")
+    }
+
+    private fun readSatellitePvtCapability(capabilities: android.location.GnssCapabilities): String {
+        return runCatching {
+            capabilities.javaClass
+                .getMethod("hasSatellitePvt")
+                .invoke(capabilities)
+                .toString()
+        }.getOrDefault("unavailable")
     }
 
     @SuppressLint("MissingPermission")

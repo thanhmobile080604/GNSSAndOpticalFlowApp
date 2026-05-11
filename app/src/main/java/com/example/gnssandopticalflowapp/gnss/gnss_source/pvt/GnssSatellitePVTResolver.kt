@@ -15,6 +15,9 @@ object GnssSatellitePVTResolver {
     @Volatile
     private var lookupFailed = false
 
+    @Volatile
+    private var lookupFailureReason: String? = null
+
     fun extractPvt(measurement: GnssMeasurement): SatellitePvtSnapshot? {
         return probeMeasurement(measurement).snapshot
     }
@@ -23,7 +26,8 @@ object GnssSatellitePVTResolver {
         val access = getReflectionAccess(measurement)
             ?: return ProbeResult(
                 snapshot = null,
-                reason = "SatellitePvt API unavailable on runtime or blocked by reflection"
+                reason = lookupFailureReason
+                    ?: "SatellitePvt API unavailable on runtime or blocked by reflection"
             )
 
         return try {
@@ -125,6 +129,8 @@ object GnssSatellitePVTResolver {
                 }
             } catch (error: Throwable) {
                 lookupFailed = true
+                lookupFailureReason =
+                    "GnssMeasurement SatellitePvt methods unavailable: ${error.javaClass.simpleName}"
                 null
             }
         }

@@ -1,7 +1,7 @@
 package com.example.gnssandopticalflowapp.optical_flow.classes
 
 import com.example.gnssandopticalflowapp.model.OFOutput
-import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
+import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
 import org.opencv.core.Mat
 import org.opencv.core.Point
 import org.opencv.core.Scalar

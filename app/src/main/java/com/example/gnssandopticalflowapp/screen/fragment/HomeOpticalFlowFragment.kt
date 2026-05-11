@@ -17,7 +17,7 @@ import com.example.gnssandopticalflowapp.model.VideoProcessOptions
 import com.example.gnssandopticalflowapp.model.VideoProgressMetadata
 import com.example.gnssandopticalflowapp.optical_flow.classes.Farneback
 import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
-import com.example.gnssandopticalflowapp.optical_flow.inter.OpticalFlow
+import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.screen.dialog.VideoProcessOptionsDialog
 import com.example.gnssandopticalflowapp.util.VideoEncoder
 import com.example.gnssandopticalflowapp.util.VideoStorageUtil

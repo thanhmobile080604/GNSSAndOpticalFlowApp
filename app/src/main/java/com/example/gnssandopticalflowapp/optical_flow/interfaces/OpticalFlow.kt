@@ -1,4 +1,4 @@
-package com.example.gnssandopticalflowapp.optical_flow.inter
+package com.example.gnssandopticalflowapp.optical_flow.interfaces
 
 import com.example.gnssandopticalflowapp.model.OFOutput
 import org.opencv.core.Mat

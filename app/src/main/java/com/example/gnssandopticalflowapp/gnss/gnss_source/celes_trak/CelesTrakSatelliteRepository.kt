@@ -1,6 +1,7 @@
 package com.example.gnssandopticalflowapp.gnss.gnss_source.celes_trak
 
 import android.location.GnssStatus
+import android.util.Log
 import com.example.gnssandopticalflowapp.model.CacheSnapshot
 import com.example.gnssandopticalflowapp.model.GroupRequest
 import com.example.gnssandopticalflowapp.model.OrbitRecord
@@ -34,6 +35,7 @@ object CelesTrakSatelliteRepository {
             val now = System.currentTimeMillis()
             val cached = cachedSnapshot
             if (!forceRefresh && cached != null && (now - cached.fetchedAtUtcMillis) < CACHE_TTL_MS) {
+                Log.d(TAG, "using cached records=${cached.records.size}")
                 return@withContext cached
             }
 
@@ -53,8 +55,10 @@ object CelesTrakSatelliteRepository {
                     fetchedAtUtcMillis = now
                 ).also { snapshot ->
                     cachedSnapshot = snapshot
+                    Log.d(TAG, "refresh ok records=${snapshot.records.size}")
                 }
             }.getOrElse {
+                Log.w(TAG, "refresh failed: ${it.javaClass.simpleName}: ${it.message}")
                 cached
             }
         }
@@ -83,6 +87,7 @@ object CelesTrakSatelliteRepository {
                 throw IllegalStateException("Unexpected response for group ${group.groupName}")
             }
 
+            Log.d(TAG, "group=${group.groupName} records=${records.size}")
             records
         } finally {
             connection.disconnect()
@@ -206,4 +211,6 @@ object CelesTrakSatelliteRepository {
         if (length < endIndex || startIndex < 0 || startIndex >= endIndex) return null
         return substring(startIndex, endIndex)
     }
+
+    private const val TAG = "GNSS_CELESTRAK"
 }
