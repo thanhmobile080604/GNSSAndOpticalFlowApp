@@ -63,6 +63,7 @@
             android:singleLine="true"
             android:textColor="@color/white"
             android:textColorHint="@color/white"
+            android:textCursorDrawable="@color/white"
             android:textSize="15sp" />
 
         <ImageView
@@ -101,8 +102,8 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="16dp"
-        android:elevation="14dp"
         android:layout_marginTop="12dp"
+        android:elevation="14dp"
         android:fadeScrollbars="false"
         android:fillViewport="false"
         android:overScrollMode="never"

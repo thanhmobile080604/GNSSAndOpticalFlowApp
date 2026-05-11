@@ -181,7 +181,6 @@ class GNSSViewerFragment :
         binding.ivSearchClear.hide()
         binding.btnStartNavigation.isEnabled = false
         binding.btnStartNavigation.alpha = 0.55f
-        etSearchLocation.textCursorDrawable?.setTint(Color.WHITE)
 
         initOpenGLES()
         applyVisibilityState() // Restore UI state from is3DMode
