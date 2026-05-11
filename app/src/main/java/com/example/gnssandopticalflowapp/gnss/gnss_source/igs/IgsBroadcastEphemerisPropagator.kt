@@ -26,7 +26,7 @@ object IgsBroadcastEphemerisPropagator {
         observationUtcMillis: Long = System.currentTimeMillis()
     ): OrbitStateResult? {
         return runCatching {
-            val utc = TimeScalesFactory.utc
+            val utc = TimeScalesFactory.getUTC()
             val date = AbsoluteDate(Date(observationUtcMillis), utc)
             val pv = propagateToEcef(record, date)
 
@@ -54,7 +54,7 @@ object IgsBroadcastEphemerisPropagator {
         return when (val message = record.message) {
             is GNSSOrbitalElements -> getGnssPropagator(record, message).propagateInEcef(date)
             is GLONASSNavigationMessage -> {
-                val context = DataContext.default
+                val context = DataContext.getDefault()
                 val pz90 = context.frames.getPZ9011(IERSConventions.IERS_2010, true)
                 getGlonassPropagator(record, message).propagate(date).getPVCoordinates(pz90)
             }
