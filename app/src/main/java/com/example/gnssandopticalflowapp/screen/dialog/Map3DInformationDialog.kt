@@ -69,7 +69,6 @@ class Map3DInformationDialog :
         tvLongitude.text = "Longitude: $formattedLongitude°"
         tvAltitude.text = "Altitude: $formattedAltitude m"
         tvVelocity.text = "Speed: $formattedSpeed "
-        tvEphemeris.text = "Ephemeris: ${satellite.ephemerisSource ?: "N/A"}"
     }
 
     private fun formatPositionSource(source: String): String {

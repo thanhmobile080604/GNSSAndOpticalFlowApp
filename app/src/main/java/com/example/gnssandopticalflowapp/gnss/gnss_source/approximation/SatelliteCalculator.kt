@@ -18,6 +18,7 @@ object SatelliteCalculator {
     private const val WGS84_E2 = 1.0 - (WGS84_B * WGS84_B) / (WGS84_A * WGS84_A)
     private const val WGS84_EP2 = (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_B * WGS84_B)
     private const val MU = 3.986004418e14 // Earth's gravitational constant (m^3/s^2)
+    private const val EARTH_ANGULAR_VELOCITY_RAD_PER_SEC = 7.2921150e-5
     private const val SECONDS_PER_DAY = 86400.0
 
     /**
@@ -156,6 +157,25 @@ object SatelliteCalculator {
             (velocityX * velocityX) +
                     (velocityY * velocityY) +
                     (velocityZ * velocityZ)
+        )
+    }
+
+    fun calculateInertialSpeedFromEcefState(
+        ecefX: Double,
+        ecefY: Double,
+        velocityX: Double?,
+        velocityY: Double?,
+        velocityZ: Double?
+    ): Double? {
+        if (velocityX == null || velocityY == null || velocityZ == null) return null
+
+        val inertialVelocityX = velocityX - (EARTH_ANGULAR_VELOCITY_RAD_PER_SEC * ecefY)
+        val inertialVelocityY = velocityY + (EARTH_ANGULAR_VELOCITY_RAD_PER_SEC * ecefX)
+        val inertialVelocityZ = velocityZ
+        return sqrt(
+            (inertialVelocityX * inertialVelocityX) +
+                (inertialVelocityY * inertialVelocityY) +
+                (inertialVelocityZ * inertialVelocityZ)
         )
     }
 

@@ -36,7 +36,9 @@ object IgsBroadcastEphemerisPropagator {
                     ecefY = pv.position.y,
                     ecefZ = pv.position.z
                 ),
-                speedMetersPerSecond = SatelliteCalculator.calculateSpeedFromEcefVelocity(
+                speedMetersPerSecond = SatelliteCalculator.calculateInertialSpeedFromEcefState(
+                    ecefX = pv.position.x,
+                    ecefY = pv.position.y,
                     velocityX = pv.velocity.x,
                     velocityY = pv.velocity.y,
                     velocityZ = pv.velocity.z

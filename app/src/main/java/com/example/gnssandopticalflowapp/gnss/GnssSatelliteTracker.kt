@@ -17,10 +17,6 @@ import com.example.gnssandopticalflowapp.model.ResolvedSatellitePosition
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.model.SatelliteKey
 import com.example.gnssandopticalflowapp.model.SatellitePvtSnapshot
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 
 class GnssSatelliteTracker {
     private val latestSatellitePvt = mutableMapOf<SatelliteKey, SatellitePvtSnapshot>()
@@ -213,10 +209,12 @@ class GnssSatelliteTracker {
             latitude = pos.latitude,
             longitude = pos.longitude,
             altitude = pos.altitude,
-            speed = SatelliteCalculator.calculateSpeedFromEcefVelocity(
-                snapshot.velocityXMetersPerSecond,
-                snapshot.velocityYMetersPerSecond,
-                snapshot.velocityZMetersPerSecond
+            speed = SatelliteCalculator.calculateInertialSpeedFromEcefState(
+                ecefX = snapshot.ecefX,
+                ecefY = snapshot.ecefY,
+                velocityX = snapshot.velocityXMetersPerSecond,
+                velocityY = snapshot.velocityYMetersPerSecond,
+                velocityZ = snapshot.velocityZMetersPerSecond
             ) ?: 0.0,
             positionSource = "Real GNSS PVT",
             ephemerisSource = GnssSatellitePVTResolver.getEphemerisSourceLabel(snapshot.ephemerisSource)
@@ -244,7 +242,7 @@ class GnssSatelliteTracker {
             altitude = orbitState.position.altitude,
             speed = orbitState.speedMetersPerSecond,
             positionSource = "IGS Broadcast",
-            ephemerisSource = buildBroadcastEphemerisLabel(record)
+            ephemerisSource = null
         )
     }
 
@@ -312,14 +310,6 @@ class GnssSatelliteTracker {
                 append(orbit.objectName)
             }
         }.ifBlank { null }
-    }
-
-    private fun buildBroadcastEphemerisLabel(record: BroadcastEphemerisRecord): String {
-        val epochUtc = SimpleDateFormat("yyyy-MM-dd HH:mm 'UTC'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date(record.epochUtcMillis))
-
-        return "RINEX NAV | ${record.sourceName} | ${record.satelliteId} | epoch $epochUtc"
     }
 
     private fun removeStalePvt(now: Long) {

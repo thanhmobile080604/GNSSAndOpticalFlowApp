@@ -10,13 +10,14 @@
         android:id="@+id/bg_parent"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:layout_marginBottom="-30dp"
+        android:layout_marginTop="-10dp"
         android:background="@drawable/bg_modal_glass"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintDimensionRatio="344:560"
+        app:layout_constraintBottom_toBottomOf="@id/infoContainer"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintWidth_percent="0.86" />
+        android:layout_marginHorizontal="20dp"
+        app:layout_constraintTop_toTopOf="@id/ivThumb"/>
 
     <ImageView
         android:id="@+id/ivThumb"
@@ -27,9 +28,11 @@
         android:scaleType="fitCenter"
         android:src="@drawable/ic_information"
         app:layout_constraintDimensionRatio="1"
-        app:layout_constraintEnd_toEndOf="@id/bg_parent"
-        app:layout_constraintStart_toStartOf="@id/bg_parent"
-        app:layout_constraintTop_toTopOf="@id/bg_parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintVertical_bias="0.14"
+        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintWidth_percent="0.2" />
 
     <ImageView
@@ -44,27 +47,15 @@
         app:layout_constraintTop_toTopOf="@id/bg_parent"
         app:tint="@color/white" />
 
-    <ScrollView
-        android:id="@+id/infoScroll"
+    <LinearLayout
+        android:id="@+id/infoContainer"
         android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginStart="28dp"
-        android:layout_marginEnd="28dp"
-        android:layout_marginBottom="28dp"
-        android:clipToPadding="false"
-        android:overScrollMode="never"
-        android:scrollbars="none"
-        app:layout_constraintBottom_toBottomOf="@id/bg_parent"
-        app:layout_constraintEnd_toEndOf="@id/bg_parent"
-        app:layout_constraintStart_toStartOf="@id/bg_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        app:layout_constraintEnd_toEndOf="@id/ivThumb"
+        app:layout_constraintWidth_percent="0.8"
+        app:layout_constraintStart_toStartOf="@id/ivThumb"
         app:layout_constraintTop_toBottomOf="@id/ivThumb">
-
-        <LinearLayout
-            android:id="@+id/infoContainer"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingBottom="4dp">
 
             <TextView
                 android:id="@+id/tvTotalSats"
@@ -195,18 +186,6 @@
                 android:textColor="#E7DEFF"
                 android:textSize="14sp" />
 
-            <TextView
-                android:id="@+id/tvEphemeris"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:fontFamily="@font/inter_bold"
-                android:text="Ephemeris: "
-                android:textColor="#E7DEFF"
-                android:textSize="14sp" />
-
-        </LinearLayout>
-
-    </ScrollView>
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
