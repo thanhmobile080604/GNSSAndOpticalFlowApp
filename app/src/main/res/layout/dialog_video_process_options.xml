@@ -11,12 +11,13 @@
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="@drawable/bg_modal_glass"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintDimensionRatio="344:480"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginTop="-10dp"
+        android:layout_marginBottom="-24dp"
+        app:layout_constraintBottom_toBottomOf="@id/buttonPanel"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintWidth_percent="0.86" />
+        app:layout_constraintTop_toTopOf="@id/ivThumb"/>
 
     <ImageView
         android:id="@+id/ivThumb"
@@ -28,14 +29,16 @@
         android:src="@drawable/ic_process"
         android:tint="@color/white"
         app:layout_constraintDimensionRatio="1"
-        app:layout_constraintEnd_toEndOf="@id/bgParent"
-        app:layout_constraintStart_toStartOf="@id/bgParent"
-        app:layout_constraintTop_toTopOf="@id/bgParent"
+        app:layout_constraintVertical_bias="0.2"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintWidth_percent="0.19" />
 
     <TextView
         android:id="@+id/tvTitle"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="24dp"
         android:layout_marginTop="12dp"
@@ -46,13 +49,13 @@
         android:text="Video Options"
         android:textColor="@color/white"
         android:textSize="22sp"
-        app:layout_constraintEnd_toEndOf="@id/bgParent"
-        app:layout_constraintStart_toStartOf="@id/bgParent"
+        app:layout_constraintEnd_toEndOf="@id/ivThumb"
+        app:layout_constraintStart_toStartOf="@id/ivThumb"
         app:layout_constraintTop_toBottomOf="@id/ivThumb" />
 
     <TextView
         android:id="@+id/tvSubtitle"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="28dp"
         android:layout_marginTop="6dp"
@@ -63,8 +66,8 @@
         android:text="Choose processing mode"
         android:textColor="#BDAEE5"
         android:textSize="14sp"
-        app:layout_constraintEnd_toEndOf="@id/bgParent"
-        app:layout_constraintStart_toStartOf="@id/bgParent"
+        app:layout_constraintEnd_toEndOf="@id/ivThumb"
+        app:layout_constraintStart_toStartOf="@id/ivThumb"
         app:layout_constraintTop_toBottomOf="@id/tvTitle" />
 
     <LinearLayout
@@ -76,9 +79,10 @@
         android:background="@drawable/bg_glass_card"
         android:orientation="vertical"
         android:paddingHorizontal="14dp"
+        app:layout_constraintWidth_percent="0.8"
         android:paddingVertical="8dp"
-        app:layout_constraintEnd_toEndOf="@id/bgParent"
-        app:layout_constraintStart_toStartOf="@id/bgParent"
+        app:layout_constraintEnd_toEndOf="@id/ivThumb"
+        app:layout_constraintStart_toStartOf="@id/ivThumb"
         app:layout_constraintTop_toBottomOf="@id/tvSubtitle">
 
         <LinearLayout
@@ -223,13 +227,12 @@
         android:id="@+id/buttonPanel"
         android:layout_width="0dp"
         android:layout_height="48dp"
-        android:layout_marginHorizontal="20dp"
+        android:layout_marginHorizontal="4dp"
         android:layout_marginTop="16dp"
         android:layout_marginBottom="18dp"
         android:orientation="horizontal"
-        app:layout_constraintBottom_toBottomOf="@id/bgParent"
-        app:layout_constraintEnd_toEndOf="@id/bgParent"
-        app:layout_constraintStart_toStartOf="@id/bgParent"
+        app:layout_constraintEnd_toEndOf="@id/optionsPanel"
+        app:layout_constraintStart_toStartOf="@id/optionsPanel"
         app:layout_constraintTop_toBottomOf="@id/optionsPanel">
 
         <TextView

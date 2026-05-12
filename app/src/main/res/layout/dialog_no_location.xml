@@ -10,13 +10,14 @@
         android:id="@+id/bg_parent"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginTop="-10dp"
+        android:layout_marginBottom="-18dp"
         android:background="@drawable/bg_modal_glass"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintDimensionRatio="344:266"
+        app:layout_constraintBottom_toBottomOf="@id/tvOpenSetting"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintWidth_percent="0.86" />
+        app:layout_constraintTop_toTopOf="@id/ivThumb" />
 
     <ImageView
         android:id="@+id/ivThumb"
@@ -26,10 +27,12 @@
         android:padding="12dp"
         android:scaleType="fitCenter"
         android:src="@drawable/ic_map"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintDimensionRatio="1"
-        app:layout_constraintEnd_toEndOf="@+id/bg_parent"
-        app:layout_constraintStart_toStartOf="@+id/bg_parent"
-        app:layout_constraintTop_toTopOf="@id/bg_parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.36"
         app:layout_constraintWidth_percent="0.2" />
 
     <TextView
@@ -70,7 +73,6 @@
         android:layout_height="48dp"
         android:layout_marginHorizontal="20dp"
         android:layout_marginTop="12dp"
-        android:layout_marginBottom="16dp"
         android:background="@drawable/bg_gradient_update_button"
         android:clickable="true"
         android:ellipsize="end"
@@ -82,9 +84,7 @@
         android:text="Open Setting"
         android:textColor="@color/white"
         android:textSize="15sp"
-        app:layout_constraintBottom_toBottomOf="@id/bg_parent"
         app:layout_constraintEnd_toEndOf="@id/bg_parent"
-        app:layout_constraintHorizontal_chainStyle="packed"
         app:layout_constraintStart_toStartOf="@id/bg_parent"
         app:layout_constraintTop_toBottomOf="@id/tvAreYouSure" />
 
