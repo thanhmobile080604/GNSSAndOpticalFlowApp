@@ -151,7 +151,7 @@ class CameraOpticalFlowFragment :
                 .setTargetRotation(rotation)
                 .build()
                 .also {
-                    it.setSurfaceProvider(binding.cameraView.surfaceProvider)
+                    it.surfaceProvider = binding.cameraView.surfaceProvider
                 }
 
             val analysis = ImageAnalysis.Builder()
