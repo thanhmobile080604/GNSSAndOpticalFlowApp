@@ -51,6 +51,7 @@ import com.example.gnssandopticalflowapp.gnss.GnssSatelliteTracker
 import com.example.gnssandopticalflowapp.model.RouteInfo
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.model.SearchPlace
+import com.example.gnssandopticalflowapp.screen.dialog.ErrorGNSSDialog
 import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog
 import com.example.gnssandopticalflowapp.screen.dialog.Map3DInformationDialog
 import com.google.android.gms.common.api.ResolvableApiException
@@ -103,12 +104,15 @@ class GNSSViewerFragment :
     private var searchJob: Job? = null
     private var routeJob: Job? = null
     private var externalOrbitRefreshJob: Job? = null
+    private var gnssErrorDialogJob: Job? = null
     private var lastRouteRequestAt = 0L
     private var lastRouteOrigin: GeoPoint? = null
     private val satelliteTracker = GnssSatelliteTracker()
     private val useTestLocation: Boolean = Constants.USE_FAKE_LOCATION
     private var gnssStatusRegistered = false
     private var gnssMeasurementsRegistered = false
+    private var lastGnssStatusSatelliteCount = 0
+    private var lastGnssMeasurementCount = 0
     private val routeRefreshIntervalMs = 8000L
     private val routeRefreshDistanceMeters = 25.0
     private val externalOrbitRetryDelayMs = 30_000L
@@ -148,6 +152,7 @@ class GNSSViewerFragment :
 
     private val gnssMeasurementsCallback = object : GnssMeasurementsEvent.Callback() {
         override fun onGnssMeasurementsReceived(eventArgs: GnssMeasurementsEvent) {
+            lastGnssMeasurementCount = eventArgs.measurements.size
             satelliteTracker.updateMeasurements(eventArgs)
         }
     }
@@ -155,6 +160,10 @@ class GNSSViewerFragment :
     @SuppressLint("NewApi")
     private val gnssStatusCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
+            lastGnssStatusSatelliteCount = status.satelliteCount
+            if (status.satelliteCount > 0) {
+                cancelGnssErrorDialogCheck()
+            }
             if (rendererSet) {
                 val satellites = satelliteTracker.buildSatelliteInfo(status, currentLocation)
                 earthRenderer.updateSatellites(satellites)
@@ -269,6 +278,8 @@ class GNSSViewerFragment :
     private fun startLocationUpdates() {
         if (!hasLocationPermission()) return
         setupLocationManager()
+        lastGnssStatusSatelliteCount = 0
+        lastGnssMeasurementCount = 0
         refreshExternalOrbitDataIfNeeded()
 
         if (useTestLocation) {
@@ -296,6 +307,9 @@ class GNSSViewerFragment :
             locationManager.registerGnssStatusCallback(safeContext().mainExecutor, gnssStatusCallback)
         }.getOrDefault(false)
         registerGnssMeasurements()
+        if (is3DMode) {
+            scheduleGnssErrorDialogCheck()
+        }
 
         // Check last known location immediately if it's fresh (within 2 minutes)
         val lastKnownMap = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
@@ -314,6 +328,7 @@ class GNSSViewerFragment :
     }
 
     private fun stopLocationUpdates() {
+        cancelGnssErrorDialogCheck()
         if (::locationManager.isInitialized) {
             locationManager.removeUpdates(locationListener)
             if (gnssStatusRegistered) {
@@ -327,6 +342,8 @@ class GNSSViewerFragment :
         }
         externalOrbitRefreshJob?.cancel()
         externalOrbitRefreshJob = null
+        lastGnssStatusSatelliteCount = 0
+        lastGnssMeasurementCount = 0
         satelliteTracker.clear()
     }
 
@@ -394,6 +411,38 @@ class GNSSViewerFragment :
                 .invoke(capabilities)
                 .toString()
         }.getOrDefault("unavailable")
+    }
+
+    private fun scheduleGnssErrorDialogCheck() {
+        if (useTestLocation || !hasLocationPermission() || hasGnssErrorDialogShownThisSession) return
+        if (gnssErrorDialogJob?.isActive == true) return
+
+        gnssErrorDialogJob = viewLifecycleOwner.lifecycleScope.launch {
+            delay(GNSS_ERROR_DIALOG_DELAY_MS)
+            if (!is3DMode || hasGnssErrorDialogShownThisSession) return@launch
+            if (hasUsableGnssFor3D()) return@launch
+
+            showGnssErrorDialogOnce()
+        }
+    }
+
+    private fun cancelGnssErrorDialogCheck() {
+        gnssErrorDialogJob?.cancel()
+        gnssErrorDialogJob = null
+    }
+
+    private fun hasUsableGnssFor3D(): Boolean {
+        return gnssStatusRegistered && lastGnssStatusSatelliteCount > 0
+    }
+
+    private fun showGnssErrorDialogOnce() {
+        if (hasGnssErrorDialogShownThisSession) return
+
+        checkIfFragmentAttached {
+            if (this@GNSSViewerFragment.parentFragmentManager.isStateSaved) return@checkIfFragmentAttached
+            hasGnssErrorDialogShownThisSession = true
+            ErrorGNSSDialog.show(this@GNSSViewerFragment.parentFragmentManager)
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -1074,12 +1123,14 @@ class GNSSViewerFragment :
             binding.myGLSurfaceView.alpha = 1f
             setTwoDControlsVisible(false)
             mainViewModel.isGnss3DMode.value = true
+            scheduleGnssErrorDialogCheck()
         } else {
             binding.mapView.show()
             binding.mapView.alpha = 1f
             binding.myGLSurfaceView.hide()
             setTwoDControlsVisible(true)
             mainViewModel.isGnss3DMode.value = false
+            cancelGnssErrorDialogCheck()
         }
     }
 
@@ -1087,6 +1138,7 @@ class GNSSViewerFragment :
         is3DMode = !is3DMode
 
         if (is3DMode) {
+            scheduleGnssErrorDialogCheck()
             setTwoDControlsVisible(false)
             mainViewModel.isGnss3DMode.value = true
             binding.mapView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
@@ -1113,6 +1165,7 @@ class GNSSViewerFragment :
                 .start()
 
         } else {
+            cancelGnssErrorDialogCheck()
             mainViewModel.isGnss3DMode.value = false
             binding.myGLSurfaceView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             binding.mapView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
@@ -1356,6 +1409,7 @@ class GNSSViewerFragment :
                 applyVisibilityState()
             } else {
                 // If on other tabs, FORCE HIDE GLSurfaceView to prevent punching through
+                cancelGnssErrorDialogCheck()
                 binding.myGLSurfaceView.hide()
             }
         }
@@ -1390,6 +1444,9 @@ class GNSSViewerFragment :
         if (hasLocationPermission()) {
             startLocationUpdates()
         }
+        if (is3DMode) {
+            scheduleGnssErrorDialogCheck()
+        }
         startRealTimeTicker()
     }
 
@@ -1409,6 +1466,7 @@ class GNSSViewerFragment :
 
     override fun onPause() {
         super.onPause()
+        cancelGnssErrorDialogCheck()
         binding.mapView.onPause()
         if (rendererSet) {
             binding.myGLSurfaceView.onPause()
@@ -1419,6 +1477,7 @@ class GNSSViewerFragment :
 
     override fun onDestroyView() {
         super.onDestroyView()
+        cancelGnssErrorDialogCheck()
         mainViewModel.isGnss3DMode.value = false
         searchJob?.cancel()
         routeJob?.cancel()
@@ -1426,5 +1485,10 @@ class GNSSViewerFragment :
         userMarker = null
         targetMarker = null
         routeLine = null
+    }
+
+    private companion object {
+        const val GNSS_ERROR_DIALOG_DELAY_MS = 10_000L
+        var hasGnssErrorDialogShownThisSession = false
     }
 }
