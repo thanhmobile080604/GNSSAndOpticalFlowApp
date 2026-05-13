@@ -306,7 +306,10 @@ class GNSSViewerFragment :
 
         // Request GNSS Status
         gnssStatusRegistered = runCatching {
-            locationManager.registerGnssStatusCallback(safeContext().mainExecutor, gnssStatusCallback)
+            locationManager.registerGnssStatusCallback(
+                safeContext().mainExecutor,
+                gnssStatusCallback
+            )
         }.getOrDefault(false)
         registerGnssMeasurements()
         if (is3DMode) {
@@ -387,7 +390,11 @@ class GNSSViewerFragment :
         capabilities?.let {
             Log.d(
                 "GNSS_CAPS",
-                "hasMeasurements=${it.hasMeasurements()} hasSatellitePvt=${readSatellitePvtCapability(it)}"
+                "hasMeasurements=${it.hasMeasurements()} hasSatellitePvt=${
+                    readSatellitePvtCapability(
+                        it
+                    )
+                }"
             )
         }
         if (capabilities?.hasMeasurements() == false) {
@@ -455,7 +462,7 @@ class GNSSViewerFragment :
 
     private fun updateMapLocation() {
         val loc = currentLocation ?: return
-        
+
         // Update ViewModel for real-time dialog updates
         mainViewModel.postCurrentLocation(loc)
         mainViewModel.postCurrentTime(loc.time)
@@ -487,7 +494,7 @@ class GNSSViewerFragment :
         } else if (navigationActive && !is3DMode) {
             binding.mapView.controller.animateTo(point)
         }
-        
+
         userMarker?.position = point
         binding.mapView.invalidate()
 
@@ -537,7 +544,9 @@ class GNSSViewerFragment :
         }
 
         etSearchLocation.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) =
+                Unit
+
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
 
             override fun afterTextChanged(s: Editable?) {
@@ -714,7 +723,13 @@ class GNSSViewerFragment :
             val list = mutableListOf<SearchPlace>()
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
-                list.add(SearchPlace(obj.getString("name"), obj.getDouble("lat"), obj.getDouble("lon")))
+                list.add(
+                    SearchPlace(
+                        obj.getString("name"),
+                        obj.getDouble("lat"),
+                        obj.getDouble("lon")
+                    )
+                )
             }
             list
         } catch (e: Exception) {
@@ -851,7 +866,8 @@ class GNSSViewerFragment :
             return
         }
         if (loc == null) {
-            Toast.makeText(safeContext(), "Waiting for current location...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(safeContext(), "Waiting for current location...", Toast.LENGTH_SHORT)
+                .show()
             return
         }
 
@@ -892,11 +908,11 @@ class GNSSViewerFragment :
     private fun updateRoutePreviewFromCachedRoute(route: RouteInfo, currentLoc: Location) {
         val place = selectedPlace ?: return
         val currentPoint = GeoPoint(currentLoc.latitude, currentLoc.longitude)
-        
+
         var minDistance = Double.MAX_VALUE
         var closestIndex = 0
         val routePoints = route.points
-        
+
         for (i in routePoints.indices) {
             val dist = currentPoint.distanceToAsDouble(routePoints[i])
             if (dist < minDistance) {
@@ -904,10 +920,10 @@ class GNSSViewerFragment :
                 closestIndex = i
             }
         }
-        
+
         var remainingDistance = minDistance
         for (i in closestIndex until routePoints.size - 1) {
-            remainingDistance += routePoints[i].distanceToAsDouble(routePoints[i+1])
+            remainingDistance += routePoints[i].distanceToAsDouble(routePoints[i + 1])
         }
 
         binding.tvRouteTitle.text = shortPlaceName(place.name)
@@ -965,8 +981,8 @@ class GNSSViewerFragment :
     private fun fetchRoute(origin: GeoPoint, destination: GeoPoint): RouteInfo? {
         val url = URL(
             "https://router.project-osrm.org/route/v1/driving/" +
-                "${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}" +
-                "?overview=full&geometries=geojson"
+                    "${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}" +
+                    "?overview=full&geometries=geojson"
         )
         val connection = (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = 10000
@@ -1200,17 +1216,17 @@ class GNSSViewerFragment :
     private fun setTwoDControlsVisible(visible: Boolean) = with(binding) {
         if (visible) {
             searchBar.show()
-            currentLocationBubble.show()
-            icPin.show()
+            arBubble.hide()
+            icAr.hide()
             if (selectedPlace != null) {
                 routeBottomBar.show()
             }
         } else {
             searchBar.hide()
+            arBubble.show()
+            icAr.show()
             searchResultsPanel.hide()
             routeBottomBar.hide()
-            currentLocationBubble.show()
-            icPin.show()
             hideKeyboard()
         }
     }
@@ -1420,6 +1436,7 @@ class GNSSViewerFragment :
             }
         }
     }
+
     private fun initOpenGLES() {
         val activityManager =
             safeContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager

@@ -8,6 +8,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.GnssMeasurementsEvent
 import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
@@ -17,16 +18,23 @@ import android.util.Log
 import android.view.Surface
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.checkIfFragmentAttached
 import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssArBinding
 import com.example.gnssandopticalflowapp.gnss.GnssSatelliteTracker
 import com.example.gnssandopticalflowapp.gnss.renderer.GNSSARRenderer
+import com.example.gnssandopticalflowapp.screen.dialog.ErrorGNSSDialog
 import com.google.ar.core.ArCoreApk
 import com.google.ar.core.Config
 import com.google.ar.core.Session
 import com.google.ar.core.exceptions.CameraNotAvailableException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.math.atan2
 import kotlin.math.hypot
 
@@ -49,9 +57,33 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
     private var gnssStatusRegistered = false
     private val satelliteTracker = GnssSatelliteTracker()
     private var currentLocation: Location? = null
+    private var gnssMeasurementsRegistered = false
+    private var externalOrbitRefreshJob: Job? = null
+    private var gnssErrorDialogJob: Job? = null
+    private var lastGnssStatusSatelliteCount = 0
+    private var renderSatellitesDisabledByGnssError = false
+
+    private val gnssMeasurementsCallback = object : GnssMeasurementsEvent.Callback() {
+        override fun onGnssMeasurementsReceived(eventArgs: GnssMeasurementsEvent) {
+            satelliteTracker.updateMeasurements(eventArgs)
+        }
+    }
 
     private val gnssStatusCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
+            lastGnssStatusSatelliteCount = status.satelliteCount
+            if (status.satelliteCount > 0) {
+                cancelGnssErrorDialogCheck()
+            } else {
+                renderer.updateSatellites(emptyList())
+                scheduleGnssErrorDialogCheck()
+            }
+
+            if (renderSatellitesDisabledByGnssError) {
+                renderer.updateSatellites(emptyList())
+                return
+            }
+
             val satList = satelliteTracker.buildSatelliteInfo(status, currentLocation)
             renderer.updateSatellites(satList)
         }
@@ -59,6 +91,7 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
 
     private val locationListener = LocationListener { location ->
         currentLocation = location
+        renderer.updateUserLocation(location)
     }
 
     override fun FragmentGnssArBinding.initView() {
@@ -206,10 +239,21 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
         if (!permissionsGranted || locationStarted) return
 
         startHeadingSensor()
+        lastGnssStatusSatelliteCount = 0
+        renderSatellitesDisabledByGnssError = false
+        refreshExternalOrbitDataIfNeeded()
 
         try {
             locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener)
+            runCatching {
+                locationManager?.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1000L, 0f, locationListener)
+            }.onFailure { error ->
+                Log.d(TAG, "Network location updates unavailable: ${error.message}")
+            }
+            updateLastKnownLocation()
             gnssStatusRegistered = locationManager?.registerGnssStatusCallback(gnssStatusCallback, null) == true
+            registerGnssMeasurements()
+            scheduleGnssErrorDialogCheck()
             locationStarted = true
         } catch (e: SecurityException) {
             Log.e(TAG, "Location permission missing", e)
@@ -218,14 +262,109 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
 
     private fun stopLocationAndHeading() {
         stopHeadingSensor()
+        cancelGnssErrorDialogCheck()
 
-        if (!locationStarted) return
+        if (!locationStarted) {
+            externalOrbitRefreshJob?.cancel()
+            externalOrbitRefreshJob = null
+            return
+        }
         locationManager?.removeUpdates(locationListener)
         if (gnssStatusRegistered) {
             runCatching { locationManager?.unregisterGnssStatusCallback(gnssStatusCallback) }
             gnssStatusRegistered = false
         }
+        if (gnssMeasurementsRegistered) {
+            runCatching { locationManager?.unregisterGnssMeasurementsCallback(gnssMeasurementsCallback) }
+            gnssMeasurementsRegistered = false
+        }
+        externalOrbitRefreshJob?.cancel()
+        externalOrbitRefreshJob = null
+        lastGnssStatusSatelliteCount = 0
+        satelliteTracker.clear()
+        currentLocation = null
+        renderer.updateUserLocation(null)
+        renderer.updateSatellites(emptyList())
         locationStarted = false
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun updateLastKnownLocation() {
+        val lastKnownLocation = locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            ?: locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            ?: return
+        val locationAge = System.currentTimeMillis() - lastKnownLocation.time
+        if (locationAge > LAST_KNOWN_LOCATION_MAX_AGE_MS) return
+
+        currentLocation = lastKnownLocation
+        renderer.updateUserLocation(lastKnownLocation)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun registerGnssMeasurements() {
+        if (gnssMeasurementsRegistered) return
+
+        gnssMeasurementsRegistered = runCatching {
+            locationManager?.registerGnssMeasurementsCallback(gnssMeasurementsCallback) == true
+        }.onFailure { error ->
+            Log.d(TAG, "GNSS measurements callback unavailable: ${error.message}")
+        }.getOrDefault(false)
+    }
+
+    private fun refreshExternalOrbitDataIfNeeded(forceRefresh: Boolean = false) {
+        if (!forceRefresh && externalOrbitRefreshJob?.isActive == true) return
+
+        externalOrbitRefreshJob?.cancel()
+        externalOrbitRefreshJob = viewLifecycleOwner.lifecycleScope.launch {
+            repeat(EXTERNAL_ORBIT_REFRESH_ATTEMPTS) { attempt ->
+                val forceAttemptRefresh = forceRefresh || attempt > 0
+                val igsLoaded = satelliteTracker.refreshIgsBroadcastDataIfNeeded(forceAttemptRefresh)
+                val celesTrakLoaded = if (igsLoaded) {
+                    false
+                } else {
+                    satelliteTracker.refreshCelesTrakDataIfNeeded(forceAttemptRefresh)
+                }
+                if (igsLoaded || celesTrakLoaded) return@launch
+
+                if (attempt < EXTERNAL_ORBIT_REFRESH_ATTEMPTS - 1) {
+                    delay(EXTERNAL_ORBIT_RETRY_DELAY_MS)
+                }
+            }
+        }
+    }
+
+    private fun scheduleGnssErrorDialogCheck() {
+        if (!permissionsGranted || hasGnssErrorDialogShownThisSession) return
+        if (gnssErrorDialogJob?.isActive == true) return
+
+        gnssErrorDialogJob = viewLifecycleOwner.lifecycleScope.launch {
+            delay(GNSS_ERROR_DIALOG_DELAY_MS)
+            if (!isResumed || hasGnssErrorDialogShownThisSession) return@launch
+            if (hasUsableGnssForAr()) return@launch
+
+            showGnssErrorDialogOnceAndDisableSatellites()
+        }
+    }
+
+    private fun cancelGnssErrorDialogCheck() {
+        gnssErrorDialogJob?.cancel()
+        gnssErrorDialogJob = null
+    }
+
+    private fun hasUsableGnssForAr(): Boolean {
+        return gnssStatusRegistered && lastGnssStatusSatelliteCount > 0
+    }
+
+    private fun showGnssErrorDialogOnceAndDisableSatellites() {
+        renderSatellitesDisabledByGnssError = true
+        renderer.updateSatellites(emptyList())
+
+        if (hasGnssErrorDialogShownThisSession) return
+        checkIfFragmentAttached {
+            if (this@GNSSARFragment.parentFragmentManager.isStateSaved) return@checkIfFragmentAttached
+            hasGnssErrorDialogShownThisSession = true
+            ErrorGNSSDialog.show(this@GNSSARFragment.parentFragmentManager)
+        }
     }
 
     private fun startHeadingSensor() {
@@ -274,5 +413,10 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
 
     private companion object {
         const val MIN_HEADING_VECTOR_LENGTH = 0.001
+        const val LAST_KNOWN_LOCATION_MAX_AGE_MS = 120_000L
+        const val EXTERNAL_ORBIT_RETRY_DELAY_MS = 30_000L
+        const val EXTERNAL_ORBIT_REFRESH_ATTEMPTS = 3
+        const val GNSS_ERROR_DIALOG_DELAY_MS = 10_000L
+        var hasGnssErrorDialogShownThisSession = false
     }
 }
