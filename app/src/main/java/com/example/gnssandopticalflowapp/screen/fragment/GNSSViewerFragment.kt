@@ -82,6 +82,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
+import androidx.core.content.edit
+import androidx.core.view.isVisible
 
 @RequiresApi(Build.VERSION_CODES.R)
 class GNSSViewerFragment :
@@ -736,7 +738,7 @@ class GNSSViewerFragment :
             newArray.put(obj)
         }
         val prefs = safeContext().getSharedPreferences("recent_searches", Context.MODE_PRIVATE)
-        prefs.edit().putString("history", newArray.toString()).apply()
+        prefs.edit { putString("history", newArray.toString()) }
     }
 
     private fun showRecentSearches() {
@@ -1219,7 +1221,7 @@ class GNSSViewerFragment :
 
         binding.mapView.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                if (binding.etSearchLocation.hasFocus() || binding.searchResultsPanel.visibility == View.VISIBLE) {
+                if (binding.etSearchLocation.hasFocus() || binding.searchResultsPanel.isVisible) {
                     hideKeyboard()
                     binding.searchResultsPanel.hide()
                 }
@@ -1314,7 +1316,7 @@ class GNSSViewerFragment :
             if (event.pointerCount == 1) {
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
-                        if (binding.etSearchLocation.hasFocus() || binding.searchResultsPanel.visibility == View.VISIBLE) {
+                        if (binding.etSearchLocation.hasFocus() || binding.searchResultsPanel.isVisible) {
                             hideKeyboard()
                             binding.searchResultsPanel.hide()
                         }
@@ -1359,6 +1361,10 @@ class GNSSViewerFragment :
 
         icPin.setSingleClick {
             recenterMap()
+        }
+
+        icAr.setSingleClick {
+            navigateTo(R.id.gnssARFragment)
         }
     }
 

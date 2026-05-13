@@ -31,7 +31,7 @@
         android:label="fragment_video_optical_flow"
         tools:layout="@layout/fragment_video_optical_flow" />
     <fragment
-        android:id="@+id/gnssViewerFragment2"
+        android:id="@+id/gnssViewerFragment"
         android:name="com.example.gnssandopticalflowapp.screen.fragment.GNSSViewerFragment"
         android:label="GnssViewerFragment"
         tools:ignore="NewApi" />
@@ -39,5 +39,10 @@
         android:id="@+id/videoListFragment"
         android:name="com.example.gnssandopticalflowapp.screen.fragment.VideoListFragment"
         android:label="VideoListFragment" />
+    <fragment
+        android:id="@+id/gnssARFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.GNSSARFragment"
+        android:label="fragment_gsss_ar"
+        tools:layout="@layout/fragment_gnss_ar" />
 
 </navigation>

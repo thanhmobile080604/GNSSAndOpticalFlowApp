@@ -213,4 +213,29 @@
         app:layout_constraintTop_toTopOf="@id/currentLocationBubble"
         app:tint="@color/white" />
 
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/arBubble"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_marginStart="18dp"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_map_pin_glass"
+        android:src="@color/transparent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_goneMarginBottom="30dp"
+        app:round="40dp" />
+
+    <ImageView
+        android:id="@+id/icAr"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:padding="8dp"
+        android:src="@drawable/ic_ar"
+        app:layout_constraintBottom_toBottomOf="@id/arBubble"
+        app:layout_constraintEnd_toEndOf="@id/arBubble"
+        app:layout_constraintStart_toStartOf="@id/arBubble"
+        app:layout_constraintTop_toTopOf="@id/arBubble"
+        app:tint="@color/white" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>
