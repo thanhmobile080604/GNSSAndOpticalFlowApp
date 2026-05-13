@@ -8,11 +8,6 @@
     android:keepScreenOn="true"
     tools:context=".screen.fragment.GNSSARFragment">
 
-    <androidx.camera.view.PreviewView
-        android:id="@+id/previewView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
-
     <android.opengl.GLSurfaceView
         android:id="@+id/arOverlayView"
         android:layout_width="match_parent"
@@ -26,9 +21,11 @@
         android:layout_marginStart="16dp"
         android:layout_marginTop="42dp"
         android:background="@drawable/bg_glass_icon_button"
+        android:elevation="32dp"
         android:padding="12dp"
         android:rotation="180"
         android:src="@drawable/ic_arrow_right"
+        android:translationZ="32dp"
         app:tint="@color/white" />
 
 </FrameLayout>

@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.PixelFormat
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -13,15 +12,10 @@ import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.opengl.Matrix
-import android.os.Bundle
+import android.opengl.GLSurfaceView
 import android.util.Log
 import android.view.Surface
 import android.widget.Toast
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.safeContext
@@ -29,16 +23,30 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssArBinding
 import com.example.gnssandopticalflowapp.gnss.GnssSatelliteTracker
 import com.example.gnssandopticalflowapp.gnss.renderer.GNSSARRenderer
+import com.google.ar.core.ArCoreApk
+import com.google.ar.core.Config
+import com.google.ar.core.Session
+import com.google.ar.core.exceptions.CameraNotAvailableException
+import kotlin.math.atan2
+import kotlin.math.hypot
 
-class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding::inflate), SensorEventListener {
+class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding::inflate),
+    SensorEventListener {
 
     private lateinit var renderer: GNSSARRenderer
-    private var cameraProvider: ProcessCameraProvider? = null
-    
+    private var arSession: Session? = null
+    private var installRequested = false
+    private var permissionsGranted = false
+    private var glSurfaceResumed = false
+
     private var sensorManager: SensorManager? = null
     private var rotationSensor: Sensor? = null
-    
+    private var headingSensorStarted = false
+    private var headingLocked = false
+
     private var locationManager: LocationManager? = null
+    private var locationStarted = false
+    private var gnssStatusRegistered = false
     private val satelliteTracker = GnssSatelliteTracker()
     private var currentLocation: Location? = null
 
@@ -55,19 +63,20 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
 
     override fun FragmentGnssArBinding.initView() {
         renderer = GNSSARRenderer()
-        
-        // Setup GLSurfaceView
+
         arOverlayView.setEGLContextClientVersion(2)
-        arOverlayView.setZOrderOnTop(true)
-        arOverlayView.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
-        arOverlayView.holder.setFormat(PixelFormat.TRANSLUCENT)
+        arOverlayView.setZOrderOnTop(false)
+        arOverlayView.setZOrderMediaOverlay(false)
+        arOverlayView.preserveEGLContextOnPause = true
         arOverlayView.setRenderer(renderer)
-        
+        arOverlayView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        ivBack.bringToFront()
+
         sensorManager = safeContext().getSystemService(Context.SENSOR_SERVICE) as SensorManager
         rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-        
+
         locationManager = safeContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        
+
         checkPermissionsAndStart()
     }
 
@@ -78,47 +87,15 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
         )
         doRequestPermission(perms, object : IPermissionListener {
             override fun onAllow() {
-                startCamera()
-                startLocationAndSensors()
+                permissionsGranted = true
+                startArIfReady()
+                startLocationAndHeading()
             }
+
             override fun onDenied() {
                 Toast.makeText(safeContext(), "Permissions required for AR", Toast.LENGTH_SHORT).show()
             }
         })
-    }
-
-    private fun startCamera() {
-        val context = safeContext()
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        cameraProviderFuture.addListener({
-            cameraProvider = cameraProviderFuture.get()
-            val rotation = binding.previewView.display?.rotation ?: Surface.ROTATION_0
-            val preview = Preview.Builder().setTargetRotation(rotation).build().also {
-                it.surfaceProvider = binding.previewView.surfaceProvider
-            }
-            try {
-                cameraProvider?.unbindAll()
-                cameraProvider?.bindToLifecycle(
-                    viewLifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Camera bind failed: ${e.message}")
-            }
-        }, ContextCompat.getMainExecutor(context))
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun startLocationAndSensors() {
-        sensorManager?.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
-        
-        try {
-            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener)
-            locationManager?.registerGnssStatusCallback(gnssStatusCallback, null)
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Location permission missing")
-        }
     }
 
     override fun FragmentGnssArBinding.initListener() {
@@ -131,43 +108,171 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
 
     override fun onResume() {
         super.onResume()
-        binding.arOverlayView.onResume()
-        if (ContextCompat.checkSelfPermission(safeContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            startLocationAndSensors()
+        permissionsGranted = hasRequiredPermissions()
+        if (permissionsGranted) {
+            startArIfReady()
+            startLocationAndHeading()
         }
     }
 
     override fun onPause() {
         super.onPause()
-        binding.arOverlayView.onPause()
-        sensorManager?.unregisterListener(this)
-        locationManager?.removeUpdates(locationListener)
-        locationManager?.unregisterGnssStatusCallback(gnssStatusCallback)
+        stopLocationAndHeading()
+
+        if (glSurfaceResumed) {
+            binding.arOverlayView.onPause()
+            glSurfaceResumed = false
+        }
+
+        runCatching { arSession?.pause() }
+        renderer.setSession(null)
+    }
+
+    override fun onDestroyView() {
+        runCatching { arSession?.close() }
+        arSession = null
+        super.onDestroyView()
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
-        if (event?.sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
-            val rDeviceToSensorWorld = FloatArray(16)
-            SensorManager.getRotationMatrixFromVector(rDeviceToSensorWorld, event.values)
-            
-            val rSensorWorldToDevice = FloatArray(16)
-            Matrix.transposeM(rSensorWorldToDevice, 0, rDeviceToSensorWorld, 0)
-            
-            // M_world_to_sensor maps OpenGL world (X=East, Y=Up, Z=South) to Sensor world (X=East, Y=North, Z=Up)
-            // Column-major format for OpenGL
-            val mWorldToSensor = FloatArray(16).apply {
-                this[0] = 1f;  this[4] = 0f;  this[8] = 0f;   this[12] = 0f
-                this[1] = 0f;  this[5] = 0f;  this[9] = -1f;  this[13] = 0f
-                this[2] = 0f;  this[6] = 1f;  this[10] = 0f;  this[14] = 0f
-                this[3] = 0f;  this[7] = 0f;  this[11] = 0f;  this[15] = 1f
+        if (event?.sensor?.type != Sensor.TYPE_ROTATION_VECTOR || headingLocked) return
+
+        val deviceToEnuMatrix = FloatArray(16)
+        SensorManager.getRotationMatrixFromVector(deviceToEnuMatrix, event.values)
+        val headingDegrees = getBackCameraHeadingDegrees(deviceToEnuMatrix)
+        renderer.updateWorldYawDegrees(headingDegrees)
+        headingLocked = true
+        stopHeadingSensor()
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    private fun startArIfReady() {
+        if (!isResumed || !permissionsGranted) return
+
+        val session = ensureArSession() ?: return
+        try {
+            renderer.updateDisplayRotation(binding.arOverlayView.display?.rotation ?: Surface.ROTATION_0)
+            session.resume()
+            renderer.setSession(session)
+
+            if (!glSurfaceResumed) {
+                binding.arOverlayView.onResume()
+                glSurfaceResumed = true
             }
-            
-            val viewMatrix = FloatArray(16)
-            Matrix.multiplyMM(viewMatrix, 0, rSensorWorldToDevice, 0, mWorldToSensor, 0)
-            
-            renderer.updateViewMatrix(viewMatrix)
+            binding.ivBack.bringToFront()
+        } catch (e: CameraNotAvailableException) {
+            Log.e(TAG, "ARCore camera unavailable", e)
+            Toast.makeText(safeContext(), "AR camera is not available", Toast.LENGTH_SHORT).show()
+            renderer.setSession(null)
+            arSession = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start ARCore session", e)
+            Toast.makeText(safeContext(), "Cannot start AR on this device", Toast.LENGTH_SHORT).show()
+            renderer.setSession(null)
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    private fun ensureArSession(): Session? {
+        arSession?.let { return it }
+
+        try {
+            val installStatus = ArCoreApk.getInstance().requestInstall(requireActivity(), !installRequested)
+            if (installStatus == ArCoreApk.InstallStatus.INSTALL_REQUESTED) {
+                installRequested = true
+                return null
+            }
+
+            val session = Session(requireActivity())
+            val config = Config(session).apply {
+                updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+            }
+            session.configure(config)
+
+            arSession = session
+            renderer.resetWorld()
+            headingLocked = false
+            startHeadingSensor()
+            return session
+        } catch (e: Exception) {
+            Log.e(TAG, "ARCore session creation failed", e)
+            Toast.makeText(safeContext(), "ARCore is not available on this device", Toast.LENGTH_SHORT).show()
+            return null
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startLocationAndHeading() {
+        if (!permissionsGranted || locationStarted) return
+
+        startHeadingSensor()
+
+        try {
+            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener)
+            gnssStatusRegistered = locationManager?.registerGnssStatusCallback(gnssStatusCallback, null) == true
+            locationStarted = true
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Location permission missing", e)
+        }
+    }
+
+    private fun stopLocationAndHeading() {
+        stopHeadingSensor()
+
+        if (!locationStarted) return
+        locationManager?.removeUpdates(locationListener)
+        if (gnssStatusRegistered) {
+            runCatching { locationManager?.unregisterGnssStatusCallback(gnssStatusCallback) }
+            gnssStatusRegistered = false
+        }
+        locationStarted = false
+    }
+
+    private fun startHeadingSensor() {
+        if (headingLocked || headingSensorStarted) return
+
+        val sensor = rotationSensor ?: run {
+            headingLocked = true
+            renderer.updateWorldYawDegrees(0f)
+            return
+        }
+
+        headingSensorStarted = sensorManager?.registerListener(
+            this,
+            sensor,
+            SensorManager.SENSOR_DELAY_GAME
+        ) == true
+    }
+
+    private fun stopHeadingSensor() {
+        if (!headingSensorStarted) return
+        sensorManager?.unregisterListener(this, rotationSensor)
+        headingSensorStarted = false
+    }
+
+    private fun hasRequiredPermissions(): Boolean {
+        val context = safeContext()
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun getBackCameraHeadingDegrees(deviceToEnuMatrix: FloatArray): Float {
+        val forwardEast = -deviceToEnuMatrix[8]
+        val forwardNorth = -deviceToEnuMatrix[9]
+        val horizontalLength = hypot(forwardEast.toDouble(), forwardNorth.toDouble())
+        if (horizontalLength < MIN_HEADING_VECTOR_LENGTH) return 0f
+
+        val headingDegrees = Math.toDegrees(atan2(forwardEast.toDouble(), forwardNorth.toDouble())).toFloat()
+        return normalizeDegrees(headingDegrees)
+    }
+
+    private fun normalizeDegrees(degrees: Float): Float {
+        var normalized = degrees % 360f
+        if (normalized < 0f) normalized += 360f
+        return normalized
+    }
+
+    private companion object {
+        const val MIN_HEADING_VECTOR_LENGTH = 0.001
+    }
 }
