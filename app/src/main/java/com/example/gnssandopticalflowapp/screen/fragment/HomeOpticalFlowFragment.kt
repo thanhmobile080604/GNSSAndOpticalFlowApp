@@ -20,7 +20,7 @@ import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.screen.dialog.VideoProcessOptionsDialog
 import com.example.gnssandopticalflowapp.util.VideoEncoder
-import com.example.gnssandopticalflowapp.util.VideoStorageUtil
+import com.example.gnssandopticalflowapp.util.MediaStorageUtil
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -144,7 +144,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
             withContext(Dispatchers.Main) {
                 showProcessingProgress(100)
-                VideoStorageUtil.addVideo(appContext, outputFile.absolutePath)
+                MediaStorageUtil.addVideo(appContext, outputFile.absolutePath)
                 mainViewModel.videoLibraryUpdated.value = System.currentTimeMillis()
                 kotlinx.coroutines.delay(500)
                 mainViewModel.processedVideoPathToOpen.value = outputFile.absolutePath

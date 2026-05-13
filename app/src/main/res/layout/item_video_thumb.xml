@@ -46,6 +46,21 @@
         app:tint="@color/white" />
 
     <TextView
+        android:id="@+id/tvMediaBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="22dp"
+        android:layout_margin="7dp"
+        android:background="@drawable/bg_timer_chip"
+        android:fontFamily="@font/inter_extra_bold"
+        android:gravity="center"
+        android:minWidth="42dp"
+        android:paddingHorizontal="8dp"
+        android:textColor="@color/white"
+        android:textSize="10sp"
+        app:layout_constraintBottom_toBottomOf="@id/thumb_gallery"
+        app:layout_constraintEnd_toEndOf="@id/thumb_gallery" />
+
+    <TextView
         android:id="@+id/tvTitle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"

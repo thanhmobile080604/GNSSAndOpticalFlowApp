@@ -36,7 +36,7 @@ class VideoOpticalFlowFragment :
     BaseFragment<FragmentVideoOpticalFlowBinding>(FragmentVideoOpticalFlowBinding::inflate) {
     private var player: ExoPlayer? = null
     private var isPlaying = true
-    private val progressUpdateIntervalMs = 250L
+    private val progressUpdateIntervalMs = 16L
 
     private var videoWidth = 0
     private var videoHeight = 0

@@ -29,7 +29,7 @@ import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.optical_flow.classes.MotionVectorViz
 import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.util.VideoEncoder
-import com.example.gnssandopticalflowapp.util.VideoStorageUtil
+import com.example.gnssandopticalflowapp.util.MediaStorageUtil
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -395,7 +395,7 @@ class CameraOpticalFlowFragment :
             // Scan file to ensure it's ready for general use
             MediaScannerConnection.scanFile(safeContext(), arrayOf(recordedFilePath), null) { _, _ -> }
             
-            VideoStorageUtil.addVideo(safeContext(), recordedFilePath)
+            MediaStorageUtil.addVideo(safeContext(), recordedFilePath)
             mainViewModel.videoLibraryUpdated.value = System.currentTimeMillis()
             
             // Brief delay to ensure file lock is released

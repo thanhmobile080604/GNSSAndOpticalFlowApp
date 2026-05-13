@@ -24,7 +24,7 @@ object ShareHelper {
 
             val chooserIntent = Intent.createChooser(
                 buildShareIntent(videoUris),
-                "Share videos using"
+                "Share files using"
             ).apply {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 if (context !is Activity) {
@@ -41,17 +41,25 @@ object ShareHelper {
 
     private fun buildShareIntent(videoUris: List<Uri>): Intent {
         return Intent().apply {
-            type = "video/*"
+            type = "*/*"
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
             if (videoUris.size == 1) {
                 action = Intent.ACTION_SEND
+                type = getMimeType(videoUris.first())
                 putExtra(Intent.EXTRA_STREAM, videoUris.first())
             } else {
                 action = Intent.ACTION_SEND_MULTIPLE
-                type = "video/mp4"
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(videoUris))
             }
+        }
+    }
+
+    private fun getMimeType(uri: Uri): String {
+        return when (uri.path?.substringAfterLast('.', "")?.lowercase()) {
+            "jpg", "jpeg", "png", "webp" -> "image/*"
+            "mp4", "mov", "mkv" -> "video/*"
+            else -> "*/*"
         }
     }
 }

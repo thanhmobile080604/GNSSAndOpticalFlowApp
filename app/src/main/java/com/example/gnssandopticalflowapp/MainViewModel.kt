@@ -24,6 +24,7 @@ class MainViewModel :
     val currentTab = MutableLiveData<Int>(0)
     val isGnss3DMode = MutableLiveData(false)
     val selectedVideoPath = MutableLiveData<String>()
+    val selectedImagePath = MutableLiveData<String>()
     val videoLibraryUpdated = MutableLiveData<Long>()
     val videoProcessingMessage = MutableLiveData<String?>()
     val processedVideoPathToOpen = MutableLiveData<String?>()

@@ -37,12 +37,17 @@
         tools:ignore="NewApi" />
     <fragment
         android:id="@+id/videoListFragment"
-        android:name="com.example.gnssandopticalflowapp.screen.fragment.VideoListFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.MediaListFragment"
         android:label="VideoListFragment" />
     <fragment
         android:id="@+id/gnssARFragment"
         android:name="com.example.gnssandopticalflowapp.screen.fragment.GNSSARFragment"
         android:label="fragment_gsss_ar"
         tools:layout="@layout/fragment_gnss_ar" />
+    <fragment
+        android:id="@+id/imageDetailFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.ImageDetailFragment"
+        android:label="fragment_image_detail"
+        tools:layout="@layout/fragment_image_detail" />
 
 </navigation>

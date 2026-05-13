@@ -1,7 +1,6 @@
 package com.example.gnssandopticalflowapp.model
 
-data class VideoInfo(
+data class ImageInfo(
     override val path: String,
-    override val timestamp: Long,
-    val durationMs: Long = 0L
+    override val timestamp: Long
 ) : MediaInfo()

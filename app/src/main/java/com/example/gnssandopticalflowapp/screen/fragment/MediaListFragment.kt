@@ -1,23 +1,26 @@
 package com.example.gnssandopticalflowapp.screen.fragment
 
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.widget.Toast
 import androidx.recyclerview.widget.GridLayoutManager
 import com.example.gnssandopticalflowapp.R
-import com.example.gnssandopticalflowapp.adapter.VideoListAdapter
+import com.example.gnssandopticalflowapp.adapter.MediaListAdapter
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.hide
 import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentVideoListBinding
+import com.example.gnssandopticalflowapp.model.ImageInfo
+import com.example.gnssandopticalflowapp.model.VideoInfo
 import com.example.gnssandopticalflowapp.util.ShareHelper
-import com.example.gnssandopticalflowapp.util.VideoStorageUtil
+import com.example.gnssandopticalflowapp.util.MediaStorageUtil
 import java.io.File
 
-class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoListBinding::inflate) {
+class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoListBinding::inflate) {
     
-    private lateinit var adapter: VideoListAdapter
+    private lateinit var adapter: MediaListAdapter
 
     private enum class Mode {
         NORMAL, EDIT
@@ -26,18 +29,18 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
     private var currentMode = Mode.NORMAL
 
     override fun FragmentVideoListBinding.initView() {
-        adapter = VideoListAdapter {
+        adapter = MediaListAdapter {
             updateToolbarState()
         }
         rcvAllPhoto.layoutManager = GridLayoutManager(safeContext(), 3)
         rcvAllPhoto.adapter = adapter
-        loadVideos()
+        loadMedia()
         updateToolbarState()
     }
 
-    private fun loadVideos() {
-        val videos = VideoStorageUtil.getVideos(safeContext())
-        adapter.setData(videos)
+    private fun loadMedia() {
+        val media = MediaStorageUtil.getMedia(safeContext())
+        adapter.setData(media)
     }
 
     override fun FragmentVideoListBinding.initListener() {
@@ -50,15 +53,18 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         }
 
         ivVideoCheck.setSingleClick {
-            val selectedVideo = adapter.getSelectedVideo()
-            if (selectedVideo != null) {
-                if (!isValidVideo(selectedVideo.path)) {
-                    showToast("Video bị lỗi")
-                    return@setSingleClick
-                }
+            when (val selectedMedia = adapter.getSelectedMedia()) {
+                is ImageInfo -> openImageDetail(selectedMedia)
+                is VideoInfo -> {
+                    if (!isValidVideo(selectedMedia.path)) {
+                        showToast("Video is invalid")
+                        return@setSingleClick
+                    }
 
-                mainViewModel.selectedVideoPath.value = selectedVideo.path
-                navigateTo(R.id.videoOpticalFlowFragment)
+                    mainViewModel.selectedVideoPath.value = selectedMedia.path
+                    navigateTo(R.id.videoOpticalFlowFragment)
+                }
+                null -> Unit
             }
         }
 
@@ -71,11 +77,11 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         }
 
         ivTrash.setSingleClick {
-            deleteSelectedVideos()
+            deleteSelectedMedia()
         }
 
         ivShare.setSingleClick {
-            shareSelectedVideos()
+            shareSelectedMedia()
         }
     }
 
@@ -91,16 +97,16 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         updateToolbarState()
     }
 
-    private fun deleteSelectedVideos() {
-        val selectedVideos = adapter.getSelectedVideos()
-        if (selectedVideos.isEmpty()) {
-            showToast("Select videos to delete")
+    private fun deleteSelectedMedia() {
+        val selectedMedia = adapter.getSelectedMediaItems()
+        if (selectedMedia.isEmpty()) {
+            showToast("Select files to delete")
             return
         }
 
-        val deletedCount = VideoStorageUtil.deleteVideos(safeContext(), selectedVideos)
-        adapter.removeVideos(selectedVideos)
-        showToast("Deleted $deletedCount video(s)")
+        val deletedCount = MediaStorageUtil.deleteMedia(safeContext(), selectedMedia)
+        adapter.removeMedia(selectedMedia)
+        showToast("Deleted $deletedCount item(s)")
 
         if (adapter.itemCount == 0) {
             exitEditMode()
@@ -109,17 +115,27 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         }
     }
 
-    private fun shareSelectedVideos() {
-        val selectedVideos = adapter.getSelectedVideos()
-        if (selectedVideos.isEmpty()) {
-            showToast("Select videos to share")
+    private fun shareSelectedMedia() {
+        val selectedMedia = adapter.getSelectedMediaItems()
+        if (selectedMedia.isEmpty()) {
+            showToast("Select files to share")
             return
         }
 
-        val shared = ShareHelper.shareFiles(safeContext(), selectedVideos.map { File(it.path) })
+        val shared = ShareHelper.shareFiles(safeContext(), selectedMedia.map { File(it.path) })
         if (!shared) {
-            showToast("No available videos to share")
+            showToast("No available files to share")
         }
+    }
+
+    private fun openImageDetail(image: ImageInfo) {
+        if (!isValidImage(image.path)) {
+            showToast("Image is invalid")
+            return
+        }
+
+        mainViewModel.selectedImagePath.value = image.path
+        navigateTo(R.id.imageDetailFragment)
     }
 
     private fun updateToolbarState() {
@@ -130,7 +146,7 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
     }
 
     private fun updateNormalToolbar() = with(binding) {
-        val hasSelectedVideo = adapter.getSelectedVideo() != null
+        val hasSelectedVideo = adapter.getSelectedMedia() != null
 
         ivBack.show()
         tvCancel.hide()
@@ -147,7 +163,7 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
     }
 
     private fun updateEditToolbar() = with(binding) {
-        val hasSelection = adapter.getSelectedVideos().isNotEmpty()
+        val hasSelection = adapter.getSelectedMediaItems().isNotEmpty()
         val actionAlpha = if (hasSelection) 1f else 0.45f
 
         ivBack.hide()
@@ -190,9 +206,20 @@ class VideoListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         }
     }
 
+    private fun isValidImage(path: String): Boolean {
+        val file = File(path)
+        if (!file.exists() || !file.canRead() || file.length() <= 0L) return false
+
+        val options = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeFile(path, options)
+        return options.outWidth > 0 && options.outHeight > 0
+    }
+
     override fun initObserver() {
         mainViewModel.videoLibraryUpdated.observe(viewLifecycleOwner) {
-            loadVideos()
+            loadMedia()
             updateToolbarState()
         }
     }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
@@ -13,19 +13,128 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <View
+        android:id="@+id/captureFlashOutline"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:alpha="0"
+        android:background="@drawable/bg_ar_capture_flash_outline"
+        android:visibility="gone"
+        android:translationZ="90dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
     <ImageView
         android:id="@+id/ivBack"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
-        android:layout_gravity="top|start"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:layout_marginStart="16dp"
-        android:layout_marginTop="42dp"
+        android:layout_marginTop="38dp"
         android:background="@drawable/bg_glass_icon_button"
-        android:elevation="32dp"
+        android:foreground="?attr/selectableItemBackgroundBorderless"
         android:padding="12dp"
-        android:rotation="180"
+        android:scaleX="-1"
         android:src="@drawable/ic_arrow_right"
-        android:translationZ="32dp"
+        android:translationZ="100dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
         app:tint="@color/white" />
 
-</FrameLayout>
+    <View
+        android:id="@+id/bottomControlsScrim"
+        android:layout_width="0dp"
+        android:layout_height="156dp"
+        android:background="@drawable/bg_ar_controls_scrim"
+        android:translationZ="20dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <View
+        android:id="@+id/bgLeft"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginBottom="28dp"
+        android:background="@drawable/bg_ar_control_glass_left"
+        android:elevation="14dp"
+        android:translationZ="70dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintDimensionRatio="1:0.72"
+        app:layout_constraintEnd_toStartOf="@id/bgRight"
+        app:layout_constraintHorizontal_chainStyle="packed"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintWidth_percent="0.19" />
+
+    <TextView
+        android:id="@+id/tvRecordingTimer"
+        android:layout_width="wrap_content"
+        android:layout_height="30dp"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/bg_timer_chip"
+        android:fontFamily="@font/inter_extra_bold"
+        android:gravity="center"
+        android:minWidth="74dp"
+        android:paddingHorizontal="14dp"
+        android:text="00:00"
+        android:textColor="@color/white"
+        android:textSize="13sp"
+        android:translationZ="90dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/bgLeft"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        tools:visibility="visible" />
+
+    <View
+        android:id="@+id/bgRight"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginBottom="28dp"
+        android:background="@drawable/bg_ar_control_glass_right"
+        android:elevation="14dp"
+        android:translationZ="70dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintDimensionRatio="1:0.72"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@id/bgLeft"
+        app:layout_constraintWidth_percent="0.19" />
+
+    <ImageView
+        android:id="@+id/ivCamera"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:alpha="0.95"
+        android:padding="2dp"
+        android:translationZ="90dp"
+        android:src="@drawable/ic_camera_black"
+        app:layout_constraintStart_toStartOf="@id/bgLeft"
+        app:layout_constraintEnd_toEndOf="@id/bgLeft"
+        app:layout_constraintTop_toTopOf="@id/bgLeft"
+        app:layout_constraintBottom_toBottomOf="@id/bgLeft"
+        app:layout_constraintDimensionRatio="1"
+        android:layout_marginStart="6dp"
+        app:layout_constraintWidth_percent="0.074"
+        app:tint="@color/white" />
+
+    <ImageView
+        android:id="@+id/ivVideo"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:alpha="0.95"
+        android:padding="2dp"
+        android:translationZ="90dp"
+        android:src="@drawable/ic_video_black"
+        app:layout_constraintStart_toStartOf="@id/bgRight"
+        app:layout_constraintEnd_toEndOf="@id/bgRight"
+        app:layout_constraintTop_toTopOf="@id/bgRight"
+        app:layout_constraintBottom_toBottomOf="@id/bgRight"
+        app:layout_constraintDimensionRatio="1"
+        android:layout_marginEnd="6dp"
+        app:layout_constraintWidth_percent="0.074"
+        app:tint="@color/white" />
+
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -4,6 +4,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -13,12 +16,18 @@ import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.MediaScannerConnection
 import android.opengl.GLSurfaceView
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
+import android.view.View
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.checkIfFragmentAttached
 import com.example.gnssandopticalflowapp.common.safeContext
@@ -27,14 +36,22 @@ import com.example.gnssandopticalflowapp.databinding.FragmentGnssArBinding
 import com.example.gnssandopticalflowapp.gnss.GnssSatelliteTracker
 import com.example.gnssandopticalflowapp.gnss.renderer.GNSSARRenderer
 import com.example.gnssandopticalflowapp.screen.dialog.ErrorGNSSDialog
+import com.example.gnssandopticalflowapp.util.VideoEncoder
+import com.example.gnssandopticalflowapp.util.MediaStorageUtil
 import com.google.ar.core.ArCoreApk
 import com.google.ar.core.Config
 import com.google.ar.core.Session
 import com.google.ar.core.exceptions.CameraNotAvailableException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.opencv.core.CvType
+import org.opencv.core.Mat
+import java.io.File
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.atan2
 import kotlin.math.hypot
 
@@ -62,6 +79,19 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
     private var gnssErrorDialogJob: Job? = null
     private var lastGnssStatusSatelliteCount = 0
     private var renderSatellitesDisabledByGnssError = false
+
+    @Volatile
+    private var isRecording = false
+    @Volatile
+    private var videoEncoder: VideoEncoder? = null
+    private var videoEncoderThread: HandlerThread? = null
+    private var videoEncoderHandler: Handler? = null
+    private var recordedFilePath = ""
+    private var recordingStartNs = 0L
+    private var recordingTimerJob: Job? = null
+    private var recordingTimerStartMs = 0L
+    private var photoCaptureInProgress = false
+    private val encodingFramePending = AtomicBoolean(false)
 
     private val gnssMeasurementsCallback = object : GnssMeasurementsEvent.Callback() {
         override fun onGnssMeasurementsReceived(eventArgs: GnssMeasurementsEvent) {
@@ -104,6 +134,12 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
         arOverlayView.setRenderer(renderer)
         arOverlayView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
         ivBack.bringToFront()
+        bgLeft.bringToFront()
+        bgRight.bringToFront()
+        ivCamera.bringToFront()
+        ivVideo.bringToFront()
+        tvRecordingTimer.bringToFront()
+        captureFlashOutline.bringToFront()
 
         sensorManager = safeContext().getSystemService(Context.SENSOR_SERVICE) as SensorManager
         rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
@@ -135,6 +171,18 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
         ivBack.setSingleClick {
             onBack()
         }
+
+        ivCamera.setSingleClick {
+            capturePhoto()
+        }
+
+        ivVideo.setSingleClick {
+            if (isRecording) {
+                stopRecording()
+            } else {
+                startRecording()
+            }
+        }
     }
 
     override fun initObserver() = Unit
@@ -150,6 +198,9 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
 
     override fun onPause() {
         super.onPause()
+        if (isRecording) {
+            stopRecording()
+        }
         stopLocationAndHeading()
 
         if (glSurfaceResumed) {
@@ -162,6 +213,9 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
     }
 
     override fun onDestroyView() {
+        if (isRecording) {
+            stopRecording()
+        }
         runCatching { arSession?.close() }
         arSession = null
         super.onDestroyView()
@@ -231,6 +285,261 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
             Log.e(TAG, "ARCore session creation failed", e)
             Toast.makeText(safeContext(), "ARCore is not available on this device", Toast.LENGTH_SHORT).show()
             return null
+        }
+    }
+
+    private fun capturePhoto() {
+        if (photoCaptureInProgress) return
+
+        photoCaptureInProgress = true
+        playCaptureFlash()
+
+        renderer.captureNextFrame { bitmap ->
+            if (bitmap == null) {
+                photoCaptureInProgress = false
+                showToast("Cannot capture AR photo")
+                return@captureNextFrame
+            }
+
+            val appContext = context?.applicationContext
+            if (appContext == null) {
+                bitmap.recycle()
+                photoCaptureInProgress = false
+                return@captureNextFrame
+            }
+
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                var bitmapRecycled = false
+                val result = runCatching {
+                    val outputFile = MediaStorageUtil.createImageFile(appContext, "gnss_ar")
+                    outputFile.outputStream().use { output ->
+                        if (!bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_JPEG_QUALITY, output)) {
+                            error("Bitmap compression failed")
+                        }
+                    }
+                    bitmap.recycle()
+                    bitmapRecycled = true
+                    MediaScannerConnection.scanFile(
+                        appContext,
+                        arrayOf(outputFile.absolutePath),
+                        arrayOf("image/jpeg"),
+                        null
+                    )
+                    outputFile
+                }.onFailure {
+                    if (!bitmapRecycled) {
+                        bitmap.recycle()
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    photoCaptureInProgress = false
+                    val file = result.getOrNull()
+                    if (file != null && file.exists() && file.length() > 0L) {
+                        MediaStorageUtil.addImage(appContext, file.absolutePath)
+                        mainViewModel.videoLibraryUpdated.value = System.currentTimeMillis()
+                        showToast("Photo saved")
+                    } else {
+                        showToast("Cannot save photo")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startRecording() {
+        if (isRecording) return
+
+        val width = binding.arOverlayView.width
+        val height = binding.arOverlayView.height
+        if (width <= 0 || height <= 0) {
+            showToast("AR view is not ready")
+            return
+        }
+
+        val appContext = safeContext().applicationContext
+        val outputFile = MediaStorageUtil.createVideoFile(appContext, "gnss_ar")
+        recordedFilePath = outputFile.absolutePath
+        encodingFramePending.set(false)
+
+        val thread = HandlerThread("GNSSARVideoEncoder").apply { start() }
+        val handler = Handler(thread.looper)
+        videoEncoderThread = thread
+        videoEncoderHandler = handler
+
+        handler.post {
+            try {
+                val encoder = VideoEncoder(recordedFilePath, width, height, AR_RECORDING_FPS)
+                encoder.start()
+                videoEncoder = encoder
+                recordingStartNs = System.nanoTime()
+                isRecording = true
+                renderer.startFrameRecording(::handleRecordedFrame)
+
+                binding.root.post {
+                    updateRecordingUi(true)
+                    startRecordingTimer()
+                    showToast("Recording started")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start AR recording", e)
+                videoEncoder = null
+                videoEncoderHandler = null
+                videoEncoderThread = null
+                runCatching { outputFile.delete() }
+                thread.quitSafely()
+
+                binding.root.post {
+                    isRecording = false
+                    updateRecordingUi(false)
+                    stopRecordingTimer(reset = true)
+                    showToast("Failed to start recording")
+                }
+            }
+        }
+    }
+
+    private fun stopRecording() {
+        if (!isRecording && videoEncoder == null) return
+
+        isRecording = false
+        renderer.stopFrameRecording()
+        updateRecordingUi(false)
+        stopRecordingTimer(reset = true)
+
+        val appContext = context?.applicationContext ?: return
+        val pathToSave = recordedFilePath
+        val handler = videoEncoderHandler
+        val thread = videoEncoderThread
+        videoEncoderHandler = null
+        videoEncoderThread = null
+
+        if (handler == null) {
+            videoEncoder = null
+            return
+        }
+
+        handler.post {
+            val encoder = videoEncoder
+            videoEncoder = null
+            runCatching {
+                encoder?.release()
+            }.onFailure { error ->
+                Log.e(TAG, "Failed to release AR recording encoder", error)
+            }
+
+            val file = File(pathToSave)
+            val isSaved = pathToSave.isNotBlank() && file.exists() && file.length() > MIN_VIDEO_FILE_BYTES
+            if (isSaved) {
+                MediaScannerConnection.scanFile(
+                    appContext,
+                    arrayOf(pathToSave),
+                    arrayOf("video/mp4"),
+                    null
+                )
+                MediaStorageUtil.addVideo(appContext, pathToSave)
+            } else {
+                runCatching { file.delete() }
+            }
+
+            thread?.quitSafely()
+            binding.root.post {
+                mainViewModel.videoLibraryUpdated.value = System.currentTimeMillis()
+                showToast(if (isSaved) "Recording saved" else "Recording failed")
+            }
+        }
+    }
+
+    private fun handleRecordedFrame(width: Int, height: Int, rgbaBytes: ByteArray, timestampNs: Long) {
+        if (!isRecording) return
+        val handler = videoEncoderHandler ?: return
+        if (!encodingFramePending.compareAndSet(false, true)) return
+
+        handler.post {
+            var mat: Mat? = null
+            try {
+                val encoder = videoEncoder ?: return@post
+                mat = Mat(height, width, CvType.CV_8UC4)
+                mat.put(0, 0, rgbaBytes)
+                val presentationTimeUs = ((timestampNs - recordingStartNs).coerceAtLeast(0L)) / 1000L
+                encoder.encodeFrame(mat, presentationTimeUs)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to encode AR frame", e)
+            } finally {
+                mat?.release()
+                encodingFramePending.set(false)
+            }
+        }
+    }
+
+    private fun updateRecordingUi(recording: Boolean) = with(binding.ivVideo) {
+        imageTintList = if (recording) null else ColorStateList.valueOf(Color.WHITE)
+        setImageResource(if (recording) R.drawable.ic_record_dot_red else R.drawable.ic_video_black)
+        animate()
+            .scaleX(if (recording) 0.72f else 1f)
+            .scaleY(if (recording) 0.72f else 1f)
+            .setDuration(120L)
+            .start()
+    }
+
+    private fun startRecordingTimer() {
+        recordingTimerJob?.cancel()
+        recordingTimerStartMs = SystemClock.elapsedRealtime()
+        binding.tvRecordingTimer.text = formatRecordingTime(0L)
+        binding.tvRecordingTimer.visibility = View.VISIBLE
+
+        recordingTimerJob = viewLifecycleOwner.lifecycleScope.launch {
+            while (true) {
+                val elapsedMs = SystemClock.elapsedRealtime() - recordingTimerStartMs
+                binding.tvRecordingTimer.text = formatRecordingTime(elapsedMs)
+                delay(RECORDING_TIMER_UPDATE_MS)
+            }
+        }
+    }
+
+    private fun stopRecordingTimer(reset: Boolean) {
+        recordingTimerJob?.cancel()
+        recordingTimerJob = null
+        if (reset) {
+            binding.tvRecordingTimer.text = formatRecordingTime(0L)
+            binding.tvRecordingTimer.visibility = View.GONE
+        }
+    }
+
+    private fun formatRecordingTime(elapsedMs: Long): String {
+        val totalSeconds = (elapsedMs / 1000L).coerceAtLeast(0L)
+        val hours = totalSeconds / 3600L
+        val minutes = (totalSeconds % 3600L) / 60L
+        val seconds = totalSeconds % 60L
+        return if (hours > 0L) {
+            String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format(Locale.US, "%02d:%02d", minutes, seconds)
+        }
+    }
+
+    private fun playCaptureFlash() = with(binding.captureFlashOutline) {
+        animate().cancel()
+        alpha = 0f
+        visibility = View.VISIBLE
+        animate()
+            .alpha(1f)
+            .setDuration(45L)
+            .withEndAction {
+                animate()
+                    .alpha(0f)
+                    .setDuration(180L)
+                    .withEndAction {
+                        visibility = View.GONE
+                    }
+                    .start()
+            }
+            .start()
+    }
+
+    private fun showToast(message: String) {
+        context?.let {
+            Toast.makeText(it, message, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -417,6 +726,10 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
         const val EXTERNAL_ORBIT_RETRY_DELAY_MS = 30_000L
         const val EXTERNAL_ORBIT_REFRESH_ATTEMPTS = 3
         const val GNSS_ERROR_DIALOG_DELAY_MS = 10_000L
+        const val PHOTO_JPEG_QUALITY = 96
+        const val AR_RECORDING_FPS = 30
+        const val MIN_VIDEO_FILE_BYTES = 100L
+        const val RECORDING_TIMER_UPDATE_MS = 250L
         var hasGnssErrorDialogShownThisSession = false
     }
 }

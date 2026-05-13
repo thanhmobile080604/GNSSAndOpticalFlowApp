@@ -7,6 +7,8 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.location.Location
 import android.location.GnssStatus
+import android.os.Handler
+import android.os.Looper
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
@@ -63,6 +65,14 @@ class GNSSARRenderer : GLSurfaceView.Renderer {
     private var backgroundTexCoordsInitialized = false
     private var viewportWidth = 0
     private var viewportHeight = 0
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @Volatile
+    private var pendingPhotoCapture: ((Bitmap?) -> Unit)? = null
+
+    @Volatile
+    private var frameRecordingCallback: ((Int, Int, ByteArray, Long) -> Unit)? = null
+    private var lastRecordedFrameNs = 0L
 
     private val projectionMatrix = FloatArray(16)
     private val arCoreViewMatrix = FloatArray(16)
@@ -155,19 +165,21 @@ class GNSSARRenderer : GLSurfaceView.Renderer {
             drawCameraBackground(frame)
 
             val camera = frame.camera
-            if (camera.trackingState != TrackingState.TRACKING) return
+            if (camera.trackingState == TrackingState.TRACKING) {
+                camera.getProjectionMatrix(projectionMatrix, 0, NEAR_PLANE, FAR_PLANE)
+                camera.getViewMatrix(arCoreViewMatrix, 0)
 
-            camera.getProjectionMatrix(projectionMatrix, 0, NEAR_PLANE, FAR_PLANE)
-            camera.getViewMatrix(arCoreViewMatrix, 0)
+                if (localToArCoreMatrix == null) {
+                    localToArCoreMatrix = buildLocalToArCoreMatrix(camera.pose)
+                }
 
-            if (localToArCoreMatrix == null) {
-                localToArCoreMatrix = buildLocalToArCoreMatrix(camera.pose)
+                Matrix.multiplyMM(localViewMatrix, 0, arCoreViewMatrix, 0, localToArCoreMatrix, 0)
+                Matrix.multiplyMM(vpMatrix, 0, projectionMatrix, 0, localViewMatrix, 0)
+
+                drawScene()
             }
 
-            Matrix.multiplyMM(localViewMatrix, 0, arCoreViewMatrix, 0, localToArCoreMatrix, 0)
-            Matrix.multiplyMM(vpMatrix, 0, projectionMatrix, 0, localViewMatrix, 0)
-
-            drawScene()
+            captureOutputFrameIfNeeded()
         } catch (e: CameraNotAvailableException) {
             Log.e(TAG, "ARCore camera is not available", e)
             arSession = null
@@ -218,11 +230,101 @@ class GNSSARRenderer : GLSurfaceView.Renderer {
         }
     }
 
+    fun captureNextFrame(callback: (Bitmap?) -> Unit) {
+        pendingPhotoCapture = callback
+    }
+
+    fun startFrameRecording(callback: (Int, Int, ByteArray, Long) -> Unit) {
+        lastRecordedFrameNs = 0L
+        frameRecordingCallback = callback
+    }
+
+    fun stopFrameRecording() {
+        frameRecordingCallback = null
+        lastRecordedFrameNs = 0L
+    }
+
     private fun updateDisplayGeometryIfNeeded(session: Session) {
         if (!displayGeometryDirty || viewportWidth <= 0 || viewportHeight <= 0) return
 
         session.setDisplayGeometry(displayRotation, viewportWidth, viewportHeight)
         displayGeometryDirty = false
+    }
+
+    private fun captureOutputFrameIfNeeded() {
+        val photoCallback = pendingPhotoCapture
+        val recordingCallback = frameRecordingCallback
+        val nowNs = System.nanoTime()
+        val shouldRecord = recordingCallback != null &&
+            (lastRecordedFrameNs == 0L || nowNs - lastRecordedFrameNs >= RECORDING_FRAME_INTERVAL_NS)
+
+        if (photoCallback == null && !shouldRecord) return
+
+        val rgbaBytes = readCurrentFrameRgbaBytes()
+        if (rgbaBytes == null) {
+            pendingPhotoCapture = null
+            photoCallback?.let { callback ->
+                mainHandler.post { callback(null) }
+            }
+            return
+        }
+
+        if (shouldRecord && recordingCallback != null) {
+            lastRecordedFrameNs = nowNs
+            recordingCallback(viewportWidth, viewportHeight, rgbaBytes, nowNs)
+        }
+
+        if (photoCallback != null && pendingPhotoCapture === photoCallback) {
+            pendingPhotoCapture = null
+            val bitmap = createBitmapFromRgba(viewportWidth, viewportHeight, rgbaBytes)
+            mainHandler.post { photoCallback(bitmap) }
+        }
+    }
+
+    private fun readCurrentFrameRgbaBytes(): ByteArray? {
+        if (viewportWidth <= 0 || viewportHeight <= 0) return null
+
+        val byteCount = viewportWidth * viewportHeight * 4
+        val rawBuffer = ByteBuffer.allocateDirect(byteCount).order(ByteOrder.nativeOrder())
+        GLES20.glReadPixels(
+            0,
+            0,
+            viewportWidth,
+            viewportHeight,
+            GLES20.GL_RGBA,
+            GLES20.GL_UNSIGNED_BYTE,
+            rawBuffer
+        )
+
+        val rawBytes = ByteArray(byteCount)
+        rawBuffer.position(0)
+        rawBuffer.get(rawBytes)
+
+        val flippedBytes = ByteArray(byteCount)
+        val rowBytes = viewportWidth * 4
+        for (row in 0 until viewportHeight) {
+            val sourceOffset = (viewportHeight - 1 - row) * rowBytes
+            val targetOffset = row * rowBytes
+            System.arraycopy(rawBytes, sourceOffset, flippedBytes, targetOffset, rowBytes)
+        }
+        return flippedBytes
+    }
+
+    private fun createBitmapFromRgba(width: Int, height: Int, rgbaBytes: ByteArray): Bitmap {
+        val pixels = IntArray(width * height)
+        var byteIndex = 0
+        for (pixelIndex in pixels.indices) {
+            val r = rgbaBytes[byteIndex].toInt() and 0xFF
+            val g = rgbaBytes[byteIndex + 1].toInt() and 0xFF
+            val b = rgbaBytes[byteIndex + 2].toInt() and 0xFF
+            val a = rgbaBytes[byteIndex + 3].toInt() and 0xFF
+            pixels[pixelIndex] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            byteIndex += 4
+        }
+
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+            setPixels(pixels, 0, width, 0, 0, width, height)
+        }
     }
 
     private fun drawCameraBackground(frame: Frame) {
@@ -1055,6 +1157,7 @@ class GNSSARRenderer : GLSurfaceView.Renderer {
         const val MIN_SATELLITE_ALTITUDE_METERS = 100_000.0
         const val SATELLITE_RANGE_NEAR_METERS = 18_000_000.0
         const val SATELLITE_RANGE_FAR_METERS = 42_000_000.0
+        const val RECORDING_FRAME_INTERVAL_NS = 33_333_333L
 
         val CAMERA_QUAD_COORDS = floatArrayOf(
             -1.0f, -1.0f,
