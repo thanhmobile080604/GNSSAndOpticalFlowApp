@@ -26,10 +26,16 @@ abstract class BaseFragment<T : ViewBinding>(private val bindingInflater: (Layou
     Fragment() {
 
     val TAG = javaClass.name
+    private val screenName =
+        this::class.simpleName?.replace("Fragment", "")?.replace(Regex("([a-z])([A-Z])"), "$1_$2")
+            ?.lowercase()?.plus("_screen") ?: "unknown_screen"
 
     protected lateinit var binding: T
         private set
+    private val navController by lazy { findNavController() }
     val mainViewModel: MainViewModel by activityViewModels()
+
+    var screenPlayTime: Long = 0L
 
 
     protected open val backPressedCallback = object : OnBackPressedCallback(true) {
@@ -38,13 +44,55 @@ abstract class BaseFragment<T : ViewBinding>(private val bindingInflater: (Layou
         }
     }
 
+    //    private val launcher =
+//        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+//            val allowList = mutableListOf<String>()
+//            it.forEach { (k, v) ->
+//                if (!v) {
+//                    if (!shouldShowRequestPermissionRationale(k)) {
+//                        permissionListener?.onNeverAskAgain(k)
+//                        return@registerForActivityResult
+//                    }
+//                } else {
+//                    allowList.add(k)
+//                }
+//            }
+//            if (allowList.isNotEmpty() && allowList.size == it.size) {
+//                permissionListener?.onAllow()
+//            } else {
+//                permissionListener?.onDenied()
+//            }
+//        }
+    private var permissionListener: IPermissionListener? = null
+    private var lastRequestedPerms: Set<String> = emptySet()
+
+    private val storagePerms = setOf(
+        Manifest.permission.READ_MEDIA_IMAGES,
+        Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    )
+
+    private val launcher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+            val critical = lastRequestedPerms.filterNot { it in storagePerms }.toSet()
+            val deniedCritical = critical.filter { results[it] != true }
+
+            if (deniedCritical.isEmpty()) {
+                permissionListener?.onAllow()
+                return@registerForActivityResult
+            }
+
+            val neverAsk = deniedCritical.firstOrNull { !shouldShowRequestPermissionRationale(it) }
+            if (neverAsk != null) {
+                permissionListener?.onNeverAskAgain(neverAsk)
+            } else {
+                permissionListener?.onDenied()
+            }
+        }
+
     private val navOptions =
-        NavOptions.Builder()
-            .setEnterAnim(R.anim.fade_in)
-            .setExitAnim(R.anim.fade_out)
-            .setPopEnterAnim(R.anim.fade_in)
-            .setPopExitAnim(R.anim.fade_out)
-            .build()
+        NavOptions.Builder().setEnterAnim(R.anim.enter_from_right).setExitAnim(R.anim.exit_to_left)
+            .setPopEnterAnim(R.anim.enter_from_left).setPopExitAnim(R.anim.exit_to_right).build()
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?,
@@ -120,5 +168,55 @@ abstract class BaseFragment<T : ViewBinding>(private val bindingInflater: (Layou
             Log.e("NavigationError", "Navigation failed: $e")
             navOptions
         }
+    }
+
+    /**
+     * Back về màn trước đó và không show ads
+     */
+    protected fun navigateUpScreen() {
+        checkIfFragmentAttached {
+            navController.navigateUp()
+        }
+    }
+
+    /**
+     * xin cấp quyền
+     * @param permissions danh sách xin quyền
+     * @param listener kết quả xử lý
+     */
+    fun doRequestPermission(
+        permissions: Array<String>, listener: IPermissionListener,
+    ) {
+        permissionListener = listener
+        launcher.launch(permissions)
+    }
+
+    /**
+     * Mở Setting của thiết bị
+     */
+    fun openAppSettings() {
+        try {
+            if (context == null) return
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", context?.packageName, null)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    interface IPermissionListener {
+        fun onAllow()
+        fun onDenied() {}
+        fun onNeverAskAgain(permission: String) {}
+    }
+
+    override fun onResume() {
+        super.onResume()
+    }
+
+    override fun onPause() {
+        super.onPause()
     }
 }
