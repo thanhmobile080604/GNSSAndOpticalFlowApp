@@ -119,9 +119,7 @@ class VideoOpticalFlowFragment :
                     binding.videoGroup.layoutParams = layoutParams
 
                     isRotated = false
-                    binding.videoGroup.rotation = 0f
-                    binding.videoGroup.scaleX = 1f
-                    binding.videoGroup.scaleY = 1f
+                    setVideoFrameTransform(rotation = 0f, scale = 1f)
 
                     if (videoWidth > 0 && videoHeight > 0 && videoWidth > videoHeight) ivFullScreen.show()
                     else ivFullScreen.hide()
@@ -186,22 +184,12 @@ class VideoOpticalFlowFragment :
                         val scaleH = hAvail / currentWidth
                         val scale = minOf(scaleW, scaleH)
 
-                        videoGroup.animate()
-                            .rotation(90f)
-                            .scaleX(scale)
-                            .scaleY(scale)
-                            .setDuration(300)
-                            .start()
+                        animateVideoFrameTransform(rotation = 90f, scale = scale)
                     } else {
-                        videoGroup.rotation = 90f
+                        setVideoFrameTransform(rotation = 90f, scale = 1f)
                     }
                 } else {
-                    videoGroup.animate()
-                        .rotation(0f)
-                        .scaleX(1f)
-                        .scaleY(1f)
-                        .setDuration(300)
-                        .start()
+                    animateVideoFrameTransform(rotation = 0f, scale = 1f)
                 }
             }
         }
@@ -242,6 +230,27 @@ class VideoOpticalFlowFragment :
             .coerceAtMost(binding.videoProgress.max.toLong())
             .toInt()
         binding.tvTimer.text = formatTimer(position, duration)
+    }
+
+    private fun animateVideoFrameTransform(rotation: Float, scale: Float) {
+        listOf(binding.bgGlass, binding.videoGroup).forEach { view ->
+            view.animate().cancel()
+            view.animate()
+                .rotation(rotation)
+                .scaleX(scale)
+                .scaleY(scale)
+                .setDuration(300)
+                .start()
+        }
+    }
+
+    private fun setVideoFrameTransform(rotation: Float, scale: Float) {
+        listOf(binding.bgGlass, binding.videoGroup).forEach { view ->
+            view.animate().cancel()
+            view.rotation = rotation
+            view.scaleX = scale
+            view.scaleY = scale
+        }
     }
 
     private fun startProgressUpdates() {

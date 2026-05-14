@@ -72,7 +72,7 @@
         android:layout_marginTop="18dp"
         android:layout_marginBottom="16dp"
         app:cardBackgroundColor="@android:color/black"
-        app:cardCornerRadius="22dp"
+        app:cardCornerRadius="21dp"
         app:cardElevation="16dp"
         app:layout_constraintBottom_toTopOf="@id/controlPanel"
         app:layout_constraintEnd_toEndOf="parent"

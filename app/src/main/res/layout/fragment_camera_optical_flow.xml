@@ -56,7 +56,7 @@
         android:layout_height="0dp"
         android:layout_margin="2dp"
         app:cardBackgroundColor="@android:color/transparent"
-        app:cardCornerRadius="28dp"
+        app:cardCornerRadius="28.6dp"
         app:cardUseCompatPadding="false"
         app:layout_constraintBottom_toBottomOf="@id/bgGlass"
         app:layout_constraintEnd_toEndOf="@id/bgGlass"
