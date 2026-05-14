@@ -201,6 +201,7 @@ class GNSSViewerFragment :
         searchBubble.bind(mapView)
         currentLocationBubble.bind(mapView)
         resultBubble.bind(mapView)
+        cancelBubble.bind(mapView)
         navigationBubble.bind(mapView)
     }
 

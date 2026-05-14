@@ -75,7 +75,7 @@
             android:singleLine="true"
             android:textColor="@color/black"
             android:textColorHint="@color/black"
-            android:textCursorDrawable="@color/black"
+            android:textCursorDrawable="@drawable/cursor_gnss_search_black"
             android:textSize="15sp" />
 
         <com.qmdeve.liquidglass.widget.LiquidGlassView
