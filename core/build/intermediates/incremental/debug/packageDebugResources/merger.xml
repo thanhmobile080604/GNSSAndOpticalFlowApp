@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merger version="3"><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="C:\CODE\GNSSAndOpticalFlowApp\core\src\main\res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main" generated-set="main$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!&lt;dir>navigation"><source path="C:\CODE\GNSSAndOpticalFlowApp\core\src\main\res"><file name="liquidglass_effect" path="C:\CODE\GNSSAndOpticalFlowApp\core\src\main\res\raw\liquidglass_effect.agsl" qualifiers="" type="raw"/><file path="C:\CODE\GNSSAndOpticalFlowApp\core\src\main\res\values\attrs.xml" qualifiers=""><declare-styleable name="LiquidGlassView">
+        <attr format="float" name="lg_blurRadius"/>
+        <attr format="color" name="lg_overlayColor"/>
+        <attr format="dimension" name="lg_cornerRadius"/>
+        <attr format="boolean" name="lg_roundTopOnly"/>
+        <attr format="color" name="lg_borderColor"/>
+        <attr format="dimension" name="lg_borderWidth"/>
+        <attr format="dimension" name="lg_refractionHeight"/>
+        <attr format="dimension" name="lg_refractionOffset"/>
+        <attr format="float" name="lg_dispersion"/>
+        <attr format="float" name="lg_tintAlpha"/>
+        <attr format="boolean" name="lg_touchEffect"/>
+    </declare-styleable></file></source></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="debug$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="C:\CODE\GNSSAndOpticalFlowApp\core\src\debug\res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="debug" generated-set="debug$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!&lt;dir>navigation"><source path="C:\CODE\GNSSAndOpticalFlowApp\core\src\debug\res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"/><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated" generated-set="generated$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!&lt;dir>navigation"/><mergedItems><configuration qualifiers=""><declare-styleable name="LiquidGlassView">
+        <attr format="float" name="lg_blurRadius"/>
+        <attr format="color" name="lg_overlayColor"/>
+        <attr format="dimension" name="lg_cornerRadius"/>
+        <attr format="boolean" name="lg_roundTopOnly"/>
+        <attr format="color" name="lg_borderColor"/>
+        <attr format="dimension" name="lg_borderWidth"/>
+        <attr format="dimension" name="lg_refractionHeight"/>
+        <attr format="dimension" name="lg_refractionOffset"/>
+        <attr format="float" name="lg_dispersion"/>
+        <attr format="float" name="lg_tintAlpha"/>
+        <attr format="boolean" name="lg_touchEffect"/>
+    </declare-styleable></configuration></mergedItems></merger>

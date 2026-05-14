@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace = "com.example.gnssandopticalflowapp"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.gnssandopticalflowapp"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0"
 
@@ -66,4 +66,6 @@ dependencies {
 
     // Google Play Services Location for one-click GPS activation
     implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    implementation("com.qmdeve.liquidglass:core:1.0.4")
 }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="LiquidGlassView">
+        <attr format="float" name="lg_blurRadius"/>
+        <attr format="color" name="lg_overlayColor"/>
+        <attr format="dimension" name="lg_cornerRadius"/>
+        <attr format="boolean" name="lg_roundTopOnly"/>
+        <attr format="color" name="lg_borderColor"/>
+        <attr format="dimension" name="lg_borderWidth"/>
+        <attr format="dimension" name="lg_refractionHeight"/>
+        <attr format="dimension" name="lg_refractionOffset"/>
+        <attr format="float" name="lg_dispersion"/>
+        <attr format="float" name="lg_tintAlpha"/>
+        <attr format="boolean" name="lg_touchEffect"/>
+    </declare-styleable>
+</resources>

@@ -21,6 +21,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
         viewPager.offscreenPageLimit = pagerAdapter.itemCount
         viewPager.registerOnPageChangeCallback(pageChangeCallback)
         updateTabState()
+        view.bind(viewPager)
     }
 
     @SuppressLint("ClickableViewAccessibility")

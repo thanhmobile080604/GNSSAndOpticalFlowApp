@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -196,6 +197,11 @@ class GNSSViewerFragment :
         initOpenGLES()
         applyVisibilityState() // Restore UI state from is3DMode
         startResolutionSequence()
+
+        searchBubble.bind(mapView)
+        currentLocationBubble.bind(mapView)
+        resultBubble.bind(mapView)
+        navigationBubble.bind(mapView)
     }
 
     private val gpsResolutionLauncher = registerForActivityResult(
@@ -686,7 +692,7 @@ class GNSSViewerFragment :
             maxLines = 2
             setPadding(16.dp, 0, 16.dp, 0)
             text = place.name
-            setTextColor(Color.WHITE)
+            setTextColor(Color.BLACK)
             textSize = 13f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setOnClickListener { selectPlace(place) }
@@ -704,7 +710,7 @@ class GNSSViewerFragment :
             setPadding(16.dp, 0, 16.dp, 0)
             text = message
             textSize = 13f
-            setTextColor(Color.WHITE)
+            setTextColor(Color.BLACK)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         })
         searchResultsPanel.show()
@@ -1218,6 +1224,9 @@ class GNSSViewerFragment :
             searchBar.show()
             arBubble.hide()
             icAr.hide()
+            currentLocationBubbleNormal.hide()
+            currentLocationBubble.show()
+            icPin.imageTintList = ColorStateList.valueOf(Color.BLACK)
             if (selectedPlace != null) {
                 routeBottomBar.show()
             }
@@ -1225,7 +1234,10 @@ class GNSSViewerFragment :
             searchBar.hide()
             arBubble.show()
             icAr.show()
+            currentLocationBubbleNormal.show()
+            currentLocationBubble.hide()
             searchResultsPanel.hide()
+            icPin.imageTintList = ColorStateList.valueOf(Color.WHITE)
             routeBottomBar.hide()
             hideKeyboard()
         }

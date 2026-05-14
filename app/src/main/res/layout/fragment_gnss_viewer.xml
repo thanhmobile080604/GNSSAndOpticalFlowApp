@@ -11,8 +11,10 @@
         android:layout_height="0dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.0"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.0" />
 
     <android.opengl.GLSurfaceView
         android:id="@+id/myGLSurfaceView"
@@ -24,13 +26,22 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+
+    <com.qmdeve.liquidglass.widget.LiquidGlassView
+        android:id="@+id/searchBubble"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="@id/searchBar"
+        app:layout_constraintEnd_toEndOf="@id/searchBar"
+        app:layout_constraintStart_toStartOf="@id/searchBar"
+        app:layout_constraintTop_toTopOf="@id/searchBar" />
+
     <LinearLayout
         android:id="@+id/searchBar"
         android:layout_width="0dp"
         android:layout_height="52dp"
         android:layout_marginHorizontal="16dp"
         android:layout_marginTop="42dp"
-        android:background="@drawable/bg_video_control_panel"
         android:elevation="14dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -44,7 +55,8 @@
             android:id="@+id/ivSearchIcon"
             android:layout_width="24dp"
             android:layout_height="24dp"
-            android:src="@drawable/ic_search_24" />
+            android:src="@drawable/ic_search_24"
+            android:tint="@color/black"/>
 
         <EditText
             android:id="@+id/etSearchLocation"
@@ -61,20 +73,27 @@
             android:maxLines="1"
             android:padding="0dp"
             android:singleLine="true"
-            android:textColor="@color/white"
-            android:textColorHint="@color/white"
-            android:textCursorDrawable="@color/white"
+            android:textColor="@color/black"
+            android:textColorHint="@color/black"
+            android:textCursorDrawable="@color/black"
             android:textSize="15sp" />
+
+        <com.qmdeve.liquidglass.widget.LiquidGlassView
+            android:id="@+id/cancelBubble"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            app:layout_constraintBottom_toBottomOf="@id/ivSearchClear"
+            app:layout_constraintEnd_toEndOf="@id/ivSearchClear"
+            app:layout_constraintStart_toStartOf="@id/ivSearchClear"
+            app:layout_constraintTop_toTopOf="@id/ivSearchClear" />
 
         <ImageView
             android:id="@+id/ivSearchClear"
             android:layout_width="38dp"
             android:layout_height="38dp"
-            android:background="@drawable/bg_glass_icon_button"
             android:padding="11dp"
             android:src="@drawable/ic_close"
-            android:visibility="gone"
-            app:tint="@color/white" />
+            android:visibility="gone"/>
 
     </LinearLayout>
 
@@ -86,12 +105,12 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/searchBar" />
 
-    <View
+    <com.qmdeve.liquidglass.widget.LiquidGlassView
+        android:id="@+id/resultBubble"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_marginTop="-6dp"
         android:layout_marginBottom="-6dp"
-        android:background="@drawable/bg_video_control_panel"
         app:layout_constraintBottom_toBottomOf="@id/searchResultsPanel"
         app:layout_constraintEnd_toEndOf="@id/searchResultsPanel"
         app:layout_constraintStart_toStartOf="@id/searchResultsPanel"
@@ -125,13 +144,21 @@
 
     </ScrollView>
 
+    <com.qmdeve.liquidglass.widget.LiquidGlassView
+        android:id="@+id/navigationBubble"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="@id/routeBottomBar"
+        app:layout_constraintEnd_toEndOf="@id/routeBottomBar"
+        app:layout_constraintStart_toStartOf="@id/routeBottomBar"
+        app:layout_constraintTop_toTopOf="@id/routeBottomBar" />
+
     <LinearLayout
         android:id="@+id/routeBottomBar"
         android:layout_width="0dp"
         android:layout_height="74dp"
         android:layout_marginHorizontal="16dp"
         android:layout_marginBottom="22dp"
-        android:background="@drawable/bg_video_control_panel"
         android:elevation="14dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -158,7 +185,7 @@
                 android:fontFamily="@font/inter_black"
                 android:maxLines="2"
                 android:text="Destination"
-                android:textColor="@color/white"
+                android:textColor="@color/black"
                 android:textSize="15sp" />
 
             <TextView
@@ -170,7 +197,7 @@
                 android:fontFamily="@font/inter_bold"
                 android:maxLines="1"
                 android:text="0 m - 0 min"
-                android:textColor="@color/white"
+                android:textColor="@color/black"
                 android:textSize="13sp" />
 
         </LinearLayout>
@@ -183,21 +210,30 @@
             android:fontFamily="@font/inter_black"
             android:gravity="center"
             android:text="Start"
-            android:textColor="@color/white"
+            android:textColor="@color/black"
             android:textSize="14sp" />
 
     </LinearLayout>
 
-    <androidx.constraintlayout.utils.widget.ImageFilterView
+    <com.qmdeve.liquidglass.widget.LiquidGlassView
         android:id="@+id/currentLocationBubble"
         android:layout_width="44dp"
         android:layout_height="44dp"
-        android:layout_marginEnd="18dp"
-        android:layout_marginBottom="16dp"
-        android:background="@drawable/bg_map_pin_glass"
-        android:src="@color/transparent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="@id/icPin"
+        app:layout_constraintEnd_toEndOf="@id/icPin"
+        app:layout_constraintStart_toStartOf="@id/icPin"
+        app:layout_constraintTop_toTopOf="@id/icPin"
+        app:round="40dp" />
+
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/currentLocationBubbleNormal"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:src="@drawable/bg_map_pin_glass"
+        app:layout_constraintBottom_toBottomOf="@id/icPin"
+        app:layout_constraintEnd_toEndOf="@id/icPin"
+        app:layout_constraintStart_toStartOf="@id/icPin"
+        app:layout_constraintTop_toTopOf="@id/icPin"
         app:layout_goneMarginBottom="30dp"
         app:round="40dp" />
 
@@ -207,11 +243,12 @@
         android:layout_height="50dp"
         android:padding="13dp"
         android:src="@drawable/ic_pin"
-        app:layout_constraintBottom_toBottomOf="@id/currentLocationBubble"
-        app:layout_constraintEnd_toEndOf="@id/currentLocationBubble"
-        app:layout_constraintStart_toStartOf="@id/currentLocationBubble"
-        app:layout_constraintTop_toTopOf="@id/currentLocationBubble"
-        app:tint="@color/white" />
+        android:layout_marginEnd="18dp"
+        android:layout_marginBottom="16dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_goneMarginBottom="30dp"
+        app:tint="@color/black" />
 
     <androidx.constraintlayout.utils.widget.ImageFilterView
         android:id="@+id/arBubble"
@@ -219,8 +256,7 @@
         android:layout_height="44dp"
         android:layout_marginStart="18dp"
         android:layout_marginBottom="16dp"
-        android:background="@drawable/bg_map_pin_glass"
-        android:src="@color/transparent"
+        android:src="@drawable/bg_map_pin_glass"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_goneMarginBottom="30dp"

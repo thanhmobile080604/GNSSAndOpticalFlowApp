@@ -1,0 +1,14 @@
+com.qmdeve.liquidglass
+attr lg_blurRadius
+attr lg_borderColor
+attr lg_borderWidth
+attr lg_cornerRadius
+attr lg_dispersion
+attr lg_overlayColor
+attr lg_refractionHeight
+attr lg_refractionOffset
+attr lg_roundTopOnly
+attr lg_tintAlpha
+attr lg_touchEffect
+raw liquidglass_effect
+styleable LiquidGlassView lg_blurRadius lg_borderColor lg_borderWidth lg_cornerRadius lg_dispersion lg_overlayColor lg_refractionHeight lg_refractionOffset lg_roundTopOnly lg_tintAlpha lg_touchEffect

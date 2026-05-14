@@ -15,7 +15,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <View
+    <com.qmdeve.liquidglass.widget.LiquidGlassView
         android:id="@+id/view"
         android:layout_width="0dp"
         android:layout_height="0dp"

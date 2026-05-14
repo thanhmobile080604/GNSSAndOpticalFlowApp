@@ -1,0 +1,8 @@
+com.qmdeve.liquidglass.core-pngs-0 C:\CODE\GNSSAndOpticalFlowApp\core\build\generated\res\pngs\debug
+com.qmdeve.liquidglass.core-updated_navigation_xml-1 C:\CODE\GNSSAndOpticalFlowApp\core\build\generated\updated_navigation_xml\debug
+com.qmdeve.liquidglass.core-mergeDebugResources-2 C:\CODE\GNSSAndOpticalFlowApp\core\build\intermediates\incremental\debug\mergeDebugResources\merged.dir
+com.qmdeve.liquidglass.core-mergeDebugResources-3 C:\CODE\GNSSAndOpticalFlowApp\core\build\intermediates\incremental\debug\mergeDebugResources\stripped.dir
+com.qmdeve.liquidglass.core-debug-4 C:\CODE\GNSSAndOpticalFlowApp\core\build\intermediates\merged_res\debug\mergeDebugResources
+com.qmdeve.liquidglass.core-debug-5 C:\CODE\GNSSAndOpticalFlowApp\core\build\intermediates\packaged_res\debug\packageDebugResources
+com.qmdeve.liquidglass.core-debug-6 C:\CODE\GNSSAndOpticalFlowApp\core\src\debug\res
+com.qmdeve.liquidglass.core-main-7 C:\CODE\GNSSAndOpticalFlowApp\core\src\main\res
