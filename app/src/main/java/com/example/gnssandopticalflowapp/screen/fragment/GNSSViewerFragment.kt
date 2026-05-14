@@ -392,20 +392,18 @@ class GNSSViewerFragment :
     private fun registerGnssMeasurements() {
         if (!::locationManager.isInitialized || gnssMeasurementsRegistered) return
 
-        val capabilities = runCatching { locationManager.gnssCapabilities }.getOrNull()
-        capabilities?.let {
+        val capabilities = readGnssCapabilitiesCompat()
+        capabilities?.let { caps ->
+            val hasMeasurements = readBooleanCapability(caps, "hasMeasurements")
             Log.d(
                 "GNSS_CAPS",
-                "hasMeasurements=${it.hasMeasurements()} hasSatellitePvt=${
-                    readSatellitePvtCapability(
-                        it
-                    )
-                }"
+                "hasMeasurements=${hasMeasurements ?: "unavailable"} " +
+                    "hasSatellitePvt=${readCapabilityText(caps, "hasSatellitePvt")}"
             )
-        }
-        if (capabilities?.hasMeasurements() == false) {
-            Log.d("GNSS_CAPS", "skip measurements callback: capability reports unsupported")
-            return
+            if (hasMeasurements == false) {
+                Log.d("GNSS_CAPS", "skip measurements callback: capability reports unsupported")
+                return
+            }
         }
 
         val registered = runCatching {
@@ -419,10 +417,28 @@ class GNSSViewerFragment :
         Log.d("GNSS_CAPS", "measurements callback registered=$registered")
     }
 
-    private fun readSatellitePvtCapability(capabilities: android.location.GnssCapabilities): String {
+    private fun readGnssCapabilitiesCompat(): Any? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+
+        return runCatching {
+            LocationManager::class.java
+                .getMethod("getGnssCapabilities")
+                .invoke(locationManager)
+        }.getOrNull()
+    }
+
+    private fun readBooleanCapability(capabilities: Any, methodName: String): Boolean? {
         return runCatching {
             capabilities.javaClass
-                .getMethod("hasSatellitePvt")
+                .getMethod(methodName)
+                .invoke(capabilities) as? Boolean
+        }.getOrNull()
+    }
+
+    private fun readCapabilityText(capabilities: Any, methodName: String): String {
+        return runCatching {
+            capabilities.javaClass
+                .getMethod(methodName)
                 .invoke(capabilities)
                 .toString()
         }.getOrDefault("unavailable")
