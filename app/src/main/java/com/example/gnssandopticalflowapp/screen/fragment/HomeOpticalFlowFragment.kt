@@ -65,6 +65,10 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         btnFunc3.setSingleClick {
             navigateTo(R.id.videoListFragment)
         }
+
+        btnFunc4.setSingleClick {
+            navigateTo(R.id.analyticsListFragment)
+        }
     }
 
     private fun showVideoProcessOptions(uri: Uri) {

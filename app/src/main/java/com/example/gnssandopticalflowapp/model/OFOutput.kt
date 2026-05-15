@@ -8,4 +8,6 @@ class OFOutput {
     var ofFrame: Mat? = null
     @JvmField
     var position: Point? = null
+    @JvmField
+    var metrics: OpticalFlowMetrics? = null
 }

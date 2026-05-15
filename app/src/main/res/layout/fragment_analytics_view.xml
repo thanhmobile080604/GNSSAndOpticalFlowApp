@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_main">
+
+    <ImageView
+        android:id="@+id/ivBack"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="38dp"
+        android:background="@drawable/bg_glass_icon_button"
+        android:foreground="?attr/selectableItemBackgroundBorderless"
+        android:padding="12dp"
+        android:scaleX="-1"
+        android:src="@drawable/ic_arrow_right"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:tint="@color/white" />
+
+    <TextView
+        android:id="@+id/tvPdf"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_glass_chip"
+        android:fontFamily="@font/inter_extra_bold"
+        android:gravity="center"
+        android:minWidth="104dp"
+        android:paddingHorizontal="14dp"
+        android:text="Download PDF"
+        android:textColor="@color/white"
+        android:textSize="12sp"
+        app:layout_constraintBottom_toBottomOf="@id/ivBack"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/ivBack" />
+
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="12dp"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter_black"
+        android:maxLines="1"
+        android:text="Analysis Detail"
+        android:textColor="@color/white"
+        android:textSize="22sp"
+        app:layout_constraintBottom_toBottomOf="@id/ivBack"
+        app:layout_constraintEnd_toStartOf="@id/tvPdf"
+        app:layout_constraintStart_toEndOf="@id/ivBack"
+        app:layout_constraintTop_toTopOf="@id/ivBack" />
+
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/scrollContent"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="16dp"
+        android:clipToPadding="false"
+        android:fillViewport="false"
+        android:overScrollMode="never"
+        android:paddingHorizontal="14dp"
+        android:paddingBottom="22dp"
+        android:scrollbars="none"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/ivBack">
+
+        <LinearLayout
+            android:id="@+id/chartStack"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/summaryCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_glass_card"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/tvSessionTime"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/inter_black"
+                    android:maxLines="1"
+                    android:textColor="@color/white"
+                    android:textSize="18sp"
+                    tools:text="15:20:11 15/05/2026" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tvDurationValue"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_status_chip"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:textColor="@color/white"
+                        android:textSize="17sp"
+                        tools:text="00:18" />
+
+                    <TextView
+                        android:id="@+id/tvSamplesValue"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_status_chip"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:textColor="@color/white"
+                        android:textSize="17sp"
+                        tools:text="72" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tvKltFpsValue"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:fontFamily="@font/inter_extra_bold"
+                        android:gravity="center"
+                        android:textColor="#F0E68C"
+                        android:textSize="14sp"
+                        tools:text="42.1 fps" />
+
+                    <TextView
+                        android:id="@+id/tvFarnebackFpsValue"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:fontFamily="@font/inter_extra_bold"
+                        android:gravity="center"
+                        android:textColor="#00FF66"
+                        android:textSize="14sp"
+                        tools:text="18.2 fps" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tvKltConfidenceValue"
+                        android:layout_width="0dp"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:fontFamily="@font/inter_bold"
+                        android:gravity="center"
+                        android:textColor="#F0E68C"
+                        android:textSize="13sp"
+                        tools:text="81.0%" />
+
+                    <TextView
+                        android:id="@+id/tvFarnebackConfidenceValue"
+                        android:layout_width="0dp"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:fontFamily="@font/inter_bold"
+                        android:gravity="center"
+                        android:textColor="#00FF66"
+                        android:textSize="13sp"
+                        tools:text="45.0%" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <com.example.gnssandopticalflowapp.view.AnalyticsChartView
+                android:id="@+id/chartFps"
+                android:layout_width="match_parent"
+                android:layout_height="230dp"
+                android:layout_marginTop="14dp" />
+
+            <com.example.gnssandopticalflowapp.view.AnalyticsChartView
+                android:id="@+id/chartConfidence"
+                android:layout_width="match_parent"
+                android:layout_height="230dp"
+                android:layout_marginTop="14dp" />
+
+            <com.example.gnssandopticalflowapp.view.AnalyticsChartView
+                android:id="@+id/chartMagnitude"
+                android:layout_width="match_parent"
+                android:layout_height="230dp"
+                android:layout_marginTop="14dp" />
+
+            <com.example.gnssandopticalflowapp.view.AnalyticsChartView
+                android:id="@+id/chartProcess"
+                android:layout_width="match_parent"
+                android:layout_height="230dp"
+                android:layout_marginTop="14dp" />
+
+            <com.example.gnssandopticalflowapp.view.AnalyticsChartView
+                android:id="@+id/chartTracks"
+                android:layout_width="match_parent"
+                android:layout_height="230dp"
+                android:layout_marginTop="14dp" />
+
+            <com.example.gnssandopticalflowapp.view.AnalyticsChartView
+                android:id="@+id/chartThreshold"
+                android:layout_width="match_parent"
+                android:layout_height="230dp"
+                android:layout_marginTop="14dp" />
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -40,6 +40,21 @@
         android:name="com.example.gnssandopticalflowapp.screen.fragment.MediaListFragment"
         android:label="VideoListFragment" />
     <fragment
+        android:id="@+id/analyticsListFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.AnalyticsListFragment"
+        android:label="AnalyticsListFragment"
+        tools:layout="@layout/fragment_analytics_list" />
+    <fragment
+        android:id="@+id/analyticsViewFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.AnalyticsViewFragment"
+        android:label="AnalyticsViewFragment"
+        tools:layout="@layout/fragment_analytics_view" />
+    <fragment
+        android:id="@+id/analyticsSampleDetailFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.AnalyticsSampleDetailFragment"
+        android:label="AnalyticsChartDetailFragment"
+        tools:layout="@layout/fragment_analytics_sample_detail" />
+    <fragment
         android:id="@+id/gnssARFragment"
         android:name="com.example.gnssandopticalflowapp.screen.fragment.GNSSARFragment"
         android:label="fragment_gsss_ar"

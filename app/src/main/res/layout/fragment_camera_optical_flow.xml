@@ -202,18 +202,17 @@
 
                 <TextView
                     android:id="@+id/update_features_button"
-                    android:layout_width="96dp"
+                    android:layout_width="122dp"
                     android:layout_height="46dp"
                     android:background="@drawable/bg_gradient_update_button"
-                    android:drawableStart="@drawable/ic_refresh_24"
-                    android:drawablePadding="6dp"
-                    android:drawableTint="@color/white"
+                    android:ellipsize="end"
                     android:fontFamily="@font/inter_black"
                     android:gravity="center"
+                    android:maxLines="1"
                     android:paddingHorizontal="12dp"
-                    android:text="Update"
+                    android:text="Start Analysis"
                     android:textColor="@color/white"
-                    android:textSize="12sp" />
+                    android:textSize="10sp" />
 
             </LinearLayout>
 

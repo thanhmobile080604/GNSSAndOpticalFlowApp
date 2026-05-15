@@ -22,12 +22,16 @@ import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentCameraOpticalFlowBinding
+import com.example.gnssandopticalflowapp.model.AnalyticsSample
+import com.example.gnssandopticalflowapp.model.AnalyticsSession
 import com.example.gnssandopticalflowapp.model.OFOutput
+import com.example.gnssandopticalflowapp.model.OpticalFlowMetrics
 import com.example.gnssandopticalflowapp.optical_flow.classes.Farneback
 import com.example.gnssandopticalflowapp.optical_flow.classes.IMUEstimator
 import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.optical_flow.classes.MotionVectorViz
 import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
+import com.example.gnssandopticalflowapp.util.AnalyticsStorageUtil
 import com.example.gnssandopticalflowapp.util.VideoEncoder
 import com.example.gnssandopticalflowapp.util.MediaStorageUtil
 import kotlinx.coroutines.Job
@@ -38,13 +42,17 @@ import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
+import org.opencv.core.Point
+import org.opencv.core.Rect
 import org.opencv.core.Scalar
+import org.opencv.core.Size
 import kotlin.math.sqrt
 import androidx.core.graphics.createBitmap
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import org.opencv.imgproc.Imgproc
 
 class CameraOpticalFlowFragment :
     BaseFragment<FragmentCameraOpticalFlowBinding>(FragmentCameraOpticalFlowBinding::inflate) {
@@ -58,6 +66,8 @@ class CameraOpticalFlowFragment :
     @Volatile
     private var currentFrameHeight: Int = 0
     private lateinit var opticalFlow: OpticalFlow
+    private lateinit var kltLabFlow: KLT
+    private lateinit var farnebackLabFlow: Farneback
     private lateinit var imuEstimator: IMUEstimator
     private lateinit var mvViewer: MotionVectorViz
     private var frameCount: Int = 0
@@ -75,6 +85,15 @@ class CameraOpticalFlowFragment :
     private var isMovingMode = false
     private var isMovingModeManualOverride = false
     private var ignoreMovingSwitchChanges = false
+    private var isAnalysisActive = false
+    private var analysisStartedAtWallMs = 0L
+    private var analysisStartedAtElapsedMs = 0L
+    private var analysisFrameIndex = 0L
+    private var lastAnalysisSampleElapsedMs = -ANALYSIS_SAMPLE_INTERVAL_MS
+    private val analysisLock = Any()
+    private val analysisSamples = mutableListOf<AnalyticsSample>()
+    private var restoreKltSensitivity = 50
+    private var restoreFarnebackSensitivity = 50
     // Auto detection source only. testType switch controls manual/auto at runtime.
     // true: phone IMU motion, false: GNSS location speed.
     private val useIndoorPhoneMotionDetection = true
@@ -102,6 +121,8 @@ class CameraOpticalFlowFragment :
     private fun initVars() {
         // first initialize with KLT optical flow
         opticalFlow = KLT()
+        kltLabFlow = KLT()
+        farnebackLabFlow = Farneback()
         output = OFOutput()
 
         // init motion vector viewer
@@ -188,7 +209,15 @@ class CameraOpticalFlowFragment :
 //        }
 
         updateFeaturesButton.setSingleClick {
-            opticalFlow.updateFeatures()
+            if (isAnalysisActive) {
+                stopAnalysis(saveSession = true, showToast = true)
+            } else {
+                if (isRecording) {
+                    Toast.makeText(safeContext(), "Stop recording before analysis", Toast.LENGTH_SHORT).show()
+                    return@setSingleClick
+                }
+                startAnalysis()
+            }
         }
 
         movingStatus.setOnCheckedChangeListener { _, isChecked ->
@@ -215,6 +244,12 @@ class CameraOpticalFlowFragment :
         }
 
         ofType.setSingleClick {
+            if (isAnalysisActive) {
+                binding.ofType.isChecked = !binding.ofType.isChecked
+                Toast.makeText(safeContext(), "Stop analysis before changing mode", Toast.LENGTH_SHORT).show()
+                return@setSingleClick
+            }
+
             val selectedOpticalFlow = if (ofType.isChecked) {
                 ofAlgorithm.text = "Farneback"
                 Farneback()
@@ -237,6 +272,9 @@ class CameraOpticalFlowFragment :
                 if (::opticalFlow.isInitialized && !ofType.isChecked) {
                     opticalFlow.setSensitivity(progress)
                 }
+                if (::kltLabFlow.isInitialized) {
+                    kltLabFlow.setSensitivity(progress)
+                }
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -249,12 +287,20 @@ class CameraOpticalFlowFragment :
                 if (::opticalFlow.isInitialized && ofType.isChecked) {
                     opticalFlow.setSensitivity(progress)
                 }
+                if (::farnebackLabFlow.isInitialized) {
+                    farnebackLabFlow.setSensitivity(progress)
+                }
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
         ivVideRecord.setSingleClick {
+            if (isAnalysisActive) {
+                Toast.makeText(safeContext(), "Recording is locked during analysis", Toast.LENGTH_SHORT).show()
+                return@setSingleClick
+            }
+
             if (isRecording) {
                 stopRecording()
                 stopTimer()
@@ -266,6 +312,7 @@ class CameraOpticalFlowFragment :
 
         ivBack.setSingleClick {
             if (isRecording) stopRecording()
+            if (isAnalysisActive) stopAnalysis(saveSession = true, showToast = false)
             onBack()
         }
     }
@@ -278,18 +325,19 @@ class CameraOpticalFlowFragment :
     }
 
     private fun applyCurrentSensitivity() {
-        val sensitivity = if (binding.ofType.isChecked) {
-            binding.farnebackSensitivityBar.progress
-        } else {
-            binding.kltSensitivityBar.progress
-        }
-        opticalFlow.setSensitivity(sensitivity)
+        val kltSensitivity = binding.kltSensitivityBar.progress
+        val farnebackSensitivity = binding.farnebackSensitivityBar.progress
+        if (::kltLabFlow.isInitialized) kltLabFlow.setSensitivity(kltSensitivity)
+        if (::farnebackLabFlow.isInitialized) farnebackLabFlow.setSensitivity(farnebackSensitivity)
+        opticalFlow.setSensitivity(if (binding.ofType.isChecked) farnebackSensitivity else kltSensitivity)
     }
 
     private fun applyMovingMode(isMoving: Boolean, manualOverride: Boolean) {
         isMovingMode = isMoving
         isMovingModeManualOverride = manualOverride
         opticalFlow.setMovingMode(isMoving)
+        if (::kltLabFlow.isInitialized) kltLabFlow.setMovingMode(isMoving)
+        if (::farnebackLabFlow.isInitialized) farnebackLabFlow.setMovingMode(isMoving)
 
         ignoreMovingSwitchChanges = true
         binding.movingStatus.isChecked = isMoving
@@ -329,6 +377,9 @@ class CameraOpticalFlowFragment :
 
     override fun onPause() {
         super.onPause()
+        if (isAnalysisActive) {
+            stopAnalysis(saveSession = true, showToast = false)
+        }
         if (isRecording) {
             stopRecording()
         }
@@ -339,6 +390,9 @@ class CameraOpticalFlowFragment :
     }
 
     override fun onDestroyView() {
+        if (isAnalysisActive) {
+            stopAnalysis(saveSession = true, showToast = false)
+        }
         if (isRecording) {
             stopRecording()
         }
@@ -442,6 +496,84 @@ class CameraOpticalFlowFragment :
         }
     }
 
+    private fun startAnalysis() {
+        synchronized(analysisLock) {
+            analysisSamples.clear()
+            analysisFrameIndex = 0L
+            lastAnalysisSampleElapsedMs = -ANALYSIS_SAMPLE_INTERVAL_MS
+        }
+        analysisStartedAtWallMs = System.currentTimeMillis()
+        analysisStartedAtElapsedMs = SystemClock.elapsedRealtime()
+        restoreKltSensitivity = binding.kltSensitivityBar.progress
+        restoreFarnebackSensitivity = binding.farnebackSensitivityBar.progress
+        applyAnalysisSensitivityLock(locked = true)
+
+        kltLabFlow = KLT().apply {
+            setSensitivity(binding.kltSensitivityBar.progress)
+            setMovingMode(isMovingMode)
+        }
+        farnebackLabFlow = Farneback().apply {
+            setSensitivity(binding.farnebackSensitivityBar.progress)
+            setMovingMode(isMovingMode)
+        }
+
+        isAnalysisActive = true
+        binding.updateFeaturesButton.text = "Stop Analysis"
+        binding.updateFeaturesButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+        binding.ofAlgorithm.text = "Lab"
+        binding.tvTitle.text = "KLT vs Farneback"
+        binding.ofType.isEnabled = false
+        setRecordLocked(locked = true)
+        if (!isRecording) {
+            resetTimer()
+            startTimer()
+        }
+        Toast.makeText(safeContext(), "Analysis started", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun stopAnalysis(saveSession: Boolean, showToast: Boolean) {
+        if (!isAnalysisActive) return
+
+        val endedAtMs = System.currentTimeMillis()
+        val durationMs = (SystemClock.elapsedRealtime() - analysisStartedAtElapsedMs).coerceAtLeast(0L)
+        val samples = synchronized(analysisLock) { analysisSamples.toList() }
+        isAnalysisActive = false
+
+        binding.updateFeaturesButton.text = "Start Analysis"
+        binding.updateFeaturesButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+        binding.ofAlgorithm.text = if (binding.ofType.isChecked) "Farneback" else "KLT"
+        binding.tvTitle.text = "Optical Flow"
+        binding.ofType.isEnabled = true
+        setRecordLocked(locked = false)
+        applyAnalysisSensitivityLock(locked = false)
+        if (!isRecording) {
+            stopTimer()
+        }
+
+        if (!saveSession || samples.isEmpty() || !isAdded) {
+            if (showToast && isAdded) Toast.makeText(safeContext(), "No analysis samples saved", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val session = AnalyticsSession(
+            id = AnalyticsStorageUtil.createSessionId(analysisStartedAtWallMs),
+            startedAtMs = analysisStartedAtWallMs,
+            endedAtMs = endedAtMs,
+            durationMs = durationMs,
+            kltSensitivity = ANALYSIS_SENSITIVITY,
+            farnebackSensitivity = ANALYSIS_SENSITIVITY,
+            movingMode = isMovingMode,
+            samples = samples
+        )
+        val file = AnalyticsStorageUtil.saveSession(safeContext(), session)
+        MediaScannerConnection.scanFile(safeContext(), arrayOf(file.absolutePath), null) { _, _ -> }
+        mainViewModel.analyticsLibraryUpdated.value = System.currentTimeMillis()
+
+        if (showToast) {
+            Toast.makeText(safeContext(), "Saved ${samples.size} analysis samples", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun imageProxyToRgbaMat(imageProxy: ImageProxy): Mat {
         val plane = imageProxy.planes.first()
         val buffer = plane.buffer
@@ -506,7 +638,11 @@ class CameraOpticalFlowFragment :
         // automatic feature update periodically
         frameCount++
         if (frameCount % updateInterval == 0) {
-            if (::opticalFlow.isInitialized) opticalFlow.updateFeatures()
+            if (isAnalysisActive) {
+                if (::kltLabFlow.isInitialized) kltLabFlow.updateFeatures()
+            } else if (::opticalFlow.isInitialized) {
+                opticalFlow.updateFeatures()
+            }
         }
         // get IMU variables
         val velocity = imuEstimator.getVelocity()
@@ -524,6 +660,11 @@ class CameraOpticalFlowFragment :
 
         activity?.runOnUiThread {
             binding.velPred.text = formatThreeDigitValue(motionMagnitude)
+        }
+
+        if (isAnalysisActive) {
+            processAnalysisFrame(frame)
+            return
         }
 
         // get OF output
@@ -554,6 +695,232 @@ class CameraOpticalFlowFragment :
         currentFrameHeight = frame.rows()
         renderOpticalFlowFrame(frame)
         writeToVideoWriter(frame)
+    }
+
+    private fun processAnalysisFrame(frame: Mat) {
+        val kltFrame = frame.clone()
+        val farnebackFrame = frame.clone()
+        var compositeFrame: Mat? = null
+
+        try {
+            val kltOutput = kltLabFlow.run(kltFrame)
+            val farnebackOutput = farnebackLabFlow.run(farnebackFrame)
+            val kltMetrics = kltOutput.metrics
+            val farnebackMetrics = farnebackOutput.metrics
+
+            (kltOutput.position ?: farnebackOutput.position)?.let { renderMotionVector(it) }
+            recordAnalysisSample(kltMetrics, farnebackMetrics)
+
+            val leftFrame = kltOutput.ofFrame ?: kltFrame
+            val rightFrame = farnebackOutput.ofFrame ?: farnebackFrame
+            compositeFrame = composeAnalysisFrame(leftFrame, rightFrame, kltMetrics, farnebackMetrics)
+
+            currentFrameWidth = compositeFrame.cols()
+            currentFrameHeight = compositeFrame.rows()
+            renderOpticalFlowFrame(compositeFrame)
+            writeToVideoWriter(compositeFrame)
+        } finally {
+            compositeFrame?.release()
+            kltFrame.release()
+            farnebackFrame.release()
+        }
+    }
+
+    private fun composeAnalysisFrame(
+        kltFrame: Mat,
+        farnebackFrame: Mat,
+        kltMetrics: OpticalFlowMetrics?,
+        farnebackMetrics: OpticalFlowMetrics?
+    ): Mat {
+        val rows = kltFrame.rows().coerceAtLeast(1)
+        val cols = kltFrame.cols().coerceAtLeast(2)
+        val halfWidth = (cols / 2).coerceAtLeast(1)
+        val rightWidth = (cols - halfWidth).coerceAtLeast(1)
+        val output = Mat.zeros(rows, cols, kltFrame.type())
+        val leftScaled = Mat()
+        val rightScaled = Mat()
+        var leftRoi: Mat? = null
+        var rightRoi: Mat? = null
+
+        try {
+            Imgproc.resize(kltFrame, leftScaled, Size(halfWidth.toDouble(), rows.toDouble()))
+            Imgproc.resize(farnebackFrame, rightScaled, Size(rightWidth.toDouble(), rows.toDouble()))
+            leftRoi = output.submat(Rect(0, 0, halfWidth, rows))
+            rightRoi = output.submat(Rect(halfWidth, 0, rightWidth, rows))
+            leftScaled.copyTo(leftRoi)
+            rightScaled.copyTo(rightRoi)
+        } finally {
+            leftRoi?.release()
+            rightRoi?.release()
+            leftScaled.release()
+            rightScaled.release()
+        }
+
+        Imgproc.line(
+            output,
+            Point(halfWidth.toDouble(), 0.0),
+            Point(halfWidth.toDouble(), rows.toDouble()),
+            Scalar(255.0, 255.0, 255.0, 255.0),
+            2
+        )
+        drawAnalysisOverlay(
+            frame = output,
+            x = 12,
+            title = "KLT",
+            color = Scalar(240.0, 230.0, 140.0, 255.0),
+            metrics = kltMetrics
+        )
+        drawAnalysisOverlay(
+            frame = output,
+            x = halfWidth + 12,
+            title = "Farneback",
+            color = Scalar(0.0, 255.0, 102.0, 255.0),
+            metrics = farnebackMetrics
+        )
+        return output
+    }
+
+    private fun drawAnalysisOverlay(
+        frame: Mat,
+        x: Int,
+        title: String,
+        color: Scalar,
+        metrics: OpticalFlowMetrics?
+    ) {
+        val font = Imgproc.FONT_HERSHEY_SIMPLEX
+        val titleScale = 0.72
+        val statScale = 0.44
+        val titleY = 30.0
+        val statY = 55.0
+        val statY2 = 76.0
+        val statY3 = 97.0
+        val boxWidth = ((frame.cols() / 2) - 18).coerceAtLeast(120)
+
+        Imgproc.rectangle(
+            frame,
+            Point((x - 8).toDouble(), 8.0),
+            Point((x - 8 + boxWidth).toDouble(), 108.0),
+            Scalar(0.0, 0.0, 0.0, 170.0),
+            -1
+        )
+        Imgproc.putText(frame, title, Point(x.toDouble(), titleY), font, titleScale, color, 2, Imgproc.LINE_AA)
+
+        val fps = metrics?.instantFps ?: 0.0
+        val count = metrics?.featureCount ?: 0
+        val active = metrics?.activeVectorCount ?: 0
+        val confidence = metrics?.confidence ?: 0.0
+        val magnitude = metrics?.avgMagnitude ?: 0.0
+        val threshold = metrics?.threshold ?: 0.0
+        Imgproc.putText(
+            frame,
+            "FPS ${formatMetric(fps, 1)}  Pts $count",
+            Point(x.toDouble(), statY),
+            font,
+            statScale,
+            Scalar(245.0, 245.0, 245.0, 255.0),
+            1,
+            Imgproc.LINE_AA
+        )
+        Imgproc.putText(
+            frame,
+            "Active $active  Conf ${formatMetric(confidence, 0)}%",
+            Point(x.toDouble(), statY2),
+            font,
+            statScale,
+            Scalar(245.0, 245.0, 245.0, 255.0),
+            1,
+            Imgproc.LINE_AA
+        )
+        Imgproc.putText(
+            frame,
+            "Avg ${formatMetric(magnitude, 2)}  Thr ${formatMetric(threshold, 2)}",
+            Point(x.toDouble(), statY3),
+            font,
+            statScale,
+            Scalar(245.0, 245.0, 245.0, 255.0),
+            1,
+            Imgproc.LINE_AA
+        )
+    }
+
+    private fun recordAnalysisSample(
+        kltMetrics: OpticalFlowMetrics?,
+        farnebackMetrics: OpticalFlowMetrics?
+    ) {
+        val elapsedMs = SystemClock.elapsedRealtime() - analysisStartedAtElapsedMs
+        synchronized(analysisLock) {
+            if (elapsedMs - lastAnalysisSampleElapsedMs < ANALYSIS_SAMPLE_INTERVAL_MS && analysisSamples.isNotEmpty()) {
+                return
+            }
+            lastAnalysisSampleElapsedMs = elapsedMs
+            analysisSamples.add(
+                AnalyticsSample(
+                    elapsedMs = elapsedMs,
+                    frameIndex = analysisFrameIndex++,
+                    kltFps = kltMetrics?.instantFps ?: 0.0,
+                    farnebackFps = farnebackMetrics?.instantFps ?: 0.0,
+                    kltProcessMs = kltMetrics?.processTimeMs ?: 0.0,
+                    farnebackProcessMs = farnebackMetrics?.processTimeMs ?: 0.0,
+                    kltFeatureCount = kltMetrics?.featureCount ?: 0,
+                    farnebackSampleCount = farnebackMetrics?.featureCount ?: 0,
+                    kltActiveVectorCount = kltMetrics?.activeVectorCount ?: 0,
+                    farnebackActiveVectorCount = farnebackMetrics?.activeVectorCount ?: 0,
+                    kltAvgDx = kltMetrics?.avgDx ?: 0.0,
+                    kltAvgDy = kltMetrics?.avgDy ?: 0.0,
+                    farnebackAvgDx = farnebackMetrics?.avgDx ?: 0.0,
+                    farnebackAvgDy = farnebackMetrics?.avgDy ?: 0.0,
+                    kltAvgMagnitude = kltMetrics?.avgMagnitude ?: 0.0,
+                    farnebackAvgMagnitude = farnebackMetrics?.avgMagnitude ?: 0.0,
+                    kltConfidence = kltMetrics?.confidence ?: 0.0,
+                    farnebackConfidence = farnebackMetrics?.confidence ?: 0.0,
+                    kltThreshold = kltMetrics?.threshold ?: 0.0,
+                    farnebackThreshold = farnebackMetrics?.threshold ?: 0.0
+                )
+            )
+        }
+    }
+
+    private fun applyAnalysisSensitivityLock(locked: Boolean) {
+        if (locked) {
+            binding.kltSensitivityBar.progress = ANALYSIS_SENSITIVITY
+            binding.farnebackSensitivityBar.progress = ANALYSIS_SENSITIVITY
+            binding.kltSensitivityBar.isEnabled = false
+            binding.farnebackSensitivityBar.isEnabled = false
+            binding.kltSensitivityBar.alpha = 0.45f
+            binding.farnebackSensitivityBar.alpha = 0.45f
+            kltLabFlow.setSensitivity(ANALYSIS_SENSITIVITY)
+            farnebackLabFlow.setSensitivity(ANALYSIS_SENSITIVITY)
+            opticalFlow.setSensitivity(ANALYSIS_SENSITIVITY)
+        } else {
+            binding.kltSensitivityBar.progress = restoreKltSensitivity
+            binding.farnebackSensitivityBar.progress = restoreFarnebackSensitivity
+            applyOpticalFlowModeUi(useFarneback = binding.ofType.isChecked)
+            applyCurrentSensitivity()
+        }
+    }
+
+    private fun resetTimer() {
+        timerJob?.cancel()
+        timerJob = null
+        timerStartTime = 0L
+        elapsedBeforePause = 0L
+        binding.tvTimer.text = formatElapsedTime(0L)
+    }
+
+    private fun setRecordLocked(locked: Boolean) {
+        binding.ivVideRecord.isEnabled = !locked
+        binding.ivVideRecord.alpha = if (locked) 0.35f else 1f
+        binding.recordPanel.alpha = if (locked) 0.55f else 1f
+    }
+
+    private fun renderMotionVector(pos: Point) {
+        val mv = mvViewer.getMotionVector(pos)
+        mvMat = mv
+        val dst = getOrCreateMotionVectorBitmap(mv)
+        Utils.matToBitmap(mv, dst)
+        activity?.runOnUiThread {
+            binding.motionVector.setImageBitmap(dst)
+        }
     }
 
     private fun renderOpticalFlowFrame(frame: Mat) {
@@ -647,5 +1014,19 @@ class CameraOpticalFlowFragment :
             safeValue < 100f -> String.format(Locale.US, "%.1f", safeValue)
             else -> String.format(Locale.US, "%.0f", safeValue)
         }
+    }
+
+    private fun formatMetric(value: Double, decimals: Int): String {
+        val safeValue = if (value.isFinite()) value else 0.0
+        return when (decimals) {
+            0 -> String.format(Locale.US, "%.0f", safeValue)
+            1 -> String.format(Locale.US, "%.1f", safeValue)
+            else -> String.format(Locale.US, "%.2f", safeValue)
+        }
+    }
+
+    companion object {
+        private const val ANALYSIS_SAMPLE_INTERVAL_MS = 250L
+        private const val ANALYSIS_SENSITIVITY = 100
     }
 }

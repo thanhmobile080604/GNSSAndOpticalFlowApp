@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_main">
+
+    <ImageView
+        android:id="@+id/ivBack"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="38dp"
+        android:background="@drawable/bg_glass_icon_button"
+        android:foreground="?attr/selectableItemBackgroundBorderless"
+        android:padding="12dp"
+        android:scaleX="-1"
+        android:src="@drawable/ic_arrow_right"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:tint="@color/white" />
+
+    <ImageView
+        android:id="@+id/ivFullScreen"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_glass_icon_button"
+        android:padding="9dp"
+        android:src="@drawable/ic_full_screen"
+        app:layout_constraintBottom_toBottomOf="@id/ivBack"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/ivBack"
+        app:tint="@color/white" />
+
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="12dp"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter_black"
+        android:maxLines="1"
+        android:text="Chart Detail"
+        android:textColor="@color/white"
+        android:textSize="22sp"
+        app:layout_constraintBottom_toBottomOf="@id/ivBack"
+        app:layout_constraintEnd_toStartOf="@id/ivFullScreen"
+        app:layout_constraintStart_toEndOf="@id/ivBack"
+        app:layout_constraintTop_toTopOf="@id/ivBack" />
+
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/bgGlass"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginStart="-10dp"
+        android:layout_marginTop="-10dp"
+        android:layout_marginEnd="-10dp"
+        android:layout_marginBottom="-10dp"
+        android:src="@drawable/bg_glass_card"
+        app:layout_constraintBottom_toBottomOf="@id/statsPanel"
+        app:layout_constraintEnd_toEndOf="@id/chartDetail"
+        app:layout_constraintStart_toStartOf="@id/chartDetail"
+        app:layout_constraintTop_toTopOf="@id/chartDetail"
+        app:round="22dp" />
+
+
+    <com.example.gnssandopticalflowapp.view.AnalyticsChartView
+        android:id="@+id/chartDetail"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="20dp"
+        app:layout_constraintDimensionRatio="2:1"
+        app:layout_constraintWidth_percent="0.9"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/ivBack"
+        app:layout_constraintEnd_toEndOf="parent"/>
+
+    <LinearLayout
+        android:id="@+id/statsPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        app:layout_constraintStart_toStartOf="@id/chartDetail"
+        app:layout_constraintEnd_toEndOf="@id/chartDetail"
+        app:layout_constraintTop_toBottomOf="@id/chartDetail"
+        android:background="@drawable/bg_glass_card"
+        android:orientation="vertical"
+        android:padding="8dp">
+
+        <LinearLayout
+            android:id="@+id/statsTopRow"
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvFrameValue"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_status_chip"
+                android:ellipsize="end"
+                android:fontFamily="@font/inter_extra_bold"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/white"
+                android:textSize="12sp"
+                tools:text="#12" />
+
+            <TextView
+                android:id="@+id/tvTimeValue"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_status_chip"
+                android:ellipsize="end"
+                android:fontFamily="@font/inter_extra_bold"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/white"
+                android:textSize="12sp"
+                tools:text="1.25s" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/statsMetricRow"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="7dp"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_status_chip"
+                android:gravity="center_vertical"
+                android:orientation="vertical"
+                android:paddingHorizontal="10dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter_bold"
+                    android:text="KLT"
+                    android:textColor="#F0E68C"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/tvKltValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/inter_black"
+                    android:maxLines="1"
+                    android:textColor="@color/white"
+                    android:textSize="15sp"
+                    tools:text="42.1 fps" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_status_chip"
+                android:gravity="center_vertical"
+                android:orientation="vertical"
+                android:paddingHorizontal="10dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter_bold"
+                    android:text="Farneback"
+                    android:textColor="#00FF66"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/tvFarnebackValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/inter_black"
+                    android:maxLines="1"
+                    android:textColor="@color/white"
+                    android:textSize="15sp"
+                    tools:text="18.4 fps" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+
+</androidx.constraintlayout.widget.ConstraintLayout>
