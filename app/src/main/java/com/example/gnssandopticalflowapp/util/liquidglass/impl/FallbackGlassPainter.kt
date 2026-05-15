@@ -11,6 +11,8 @@ import android.graphics.RectF
 import android.graphics.Shader
 import com.example.gnssandopticalflowapp.util.liquidglass.Config
 import kotlin.math.roundToInt
+import androidx.core.graphics.withClip
+import androidx.core.graphics.withTranslation
 
 class FallbackGlassPainter(private val config: Config) {
     private val rect = RectF()
@@ -32,13 +34,12 @@ class FallbackGlassPainter(private val config: Config) {
         path.reset()
         path.addRoundRect(rect, radius, radius, Path.Direction.CW)
 
-        val save = canvas.save()
-        canvas.clipPath(path)
-        drawSoftMilk(canvas, width, height)
-        drawTint(canvas)
-        drawTopSheen(canvas, width, height)
-        drawInnerDepth(canvas, width, height)
-        canvas.restoreToCount(save)
+        canvas.withClip(path) {
+            drawSoftMilk(canvas, width, height)
+            drawTint(canvas)
+            drawTopSheen(canvas, width, height)
+            drawInnerDepth(canvas, width, height)
+        }
 
         drawChromaticRim(canvas, radius)
         drawGlassBorder(canvas, width, height, radius)
@@ -122,16 +123,14 @@ class FallbackGlassPainter(private val config: Config) {
         strokePaint.maskFilter = null
 
         strokePaint.color = argb(dispersionAlpha, 255, 72, 126)
-        canvas.save()
-        canvas.translate(-0.75f, -0.45f)
-        canvas.drawRoundRect(insetRect, radius, radius, strokePaint)
-        canvas.restore()
+        canvas.withTranslation(-0.75f, -0.45f) {
+            drawRoundRect(insetRect, radius, radius, strokePaint)
+        }
 
         strokePaint.color = argb(dispersionAlpha, 54, 192, 255)
-        canvas.save()
-        canvas.translate(0.75f, 0.55f)
-        canvas.drawRoundRect(insetRect, radius, radius, strokePaint)
-        canvas.restore()
+        canvas.withTranslation(0.75f, 0.55f) {
+            drawRoundRect(insetRect, radius, radius, strokePaint)
+        }
     }
 
     private fun drawGlassBorder(canvas: Canvas, width: Int, height: Int, radius: Float) {

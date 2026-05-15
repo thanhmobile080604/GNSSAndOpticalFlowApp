@@ -10,6 +10,8 @@ import android.view.View
 import com.example.gnssandopticalflowapp.util.liquidglass.Config
 import kotlin.math.ceil
 import kotlin.math.roundToInt
+import androidx.core.graphics.withScale
+import androidx.core.graphics.createBitmap
 
 class BitmapFallbackImpl(
     private val host: View,
@@ -71,14 +73,13 @@ class BitmapFallbackImpl(
         target.getLocationInWindow(targetPosition)
         host.getLocationInWindow(hostPosition)
 
-        val save = canvas.save()
-        canvas.scale(DOWNSAMPLE, DOWNSAMPLE)
-        canvas.translate(
-            (targetPosition[0] - hostPosition[0]).toFloat(),
-            (targetPosition[1] - hostPosition[1]).toFloat()
-        )
-        target.draw(canvas)
-        canvas.restoreToCount(save)
+        canvas.withScale(DOWNSAMPLE, DOWNSAMPLE) {
+            canvas.translate(
+                (targetPosition[0] - hostPosition[0]).toFloat(),
+                (targetPosition[1] - hostPosition[1]).toFloat()
+            )
+            target.draw(canvas)
+        }
 
         val blurTarget = blurredBitmap ?: return
         blurTarget.eraseColor(Color.TRANSPARENT)
@@ -93,8 +94,8 @@ class BitmapFallbackImpl(
         if (current != null && current.width == bitmapWidth && current.height == bitmapHeight) return
 
         dispose()
-        capturedBitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
-        blurredBitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
+        capturedBitmap = createBitmap(bitmapWidth, bitmapHeight)
+        blurredBitmap = createBitmap(bitmapWidth, bitmapHeight)
         bitmapCanvas = Canvas(capturedBitmap!!)
     }
 

@@ -17,6 +17,7 @@ import com.example.gnssandopticalflowapp.util.liquidglass.Config
 import com.example.gnssandopticalflowapp.util.liquidglass.LiquidGlass
 import com.example.gnssandopticalflowapp.util.liquidglass.LiquidTracker
 import com.example.gnssandopticalflowapp.util.liquidglass.Utils
+import androidx.core.graphics.withClip
 
 class LiquidGlassView @JvmOverloads constructor(
     context: Context,
@@ -67,26 +68,23 @@ class LiquidGlassView @JvmOverloads constructor(
         clipPath.reset()
         clipPath.addRoundRect(clipRect, cornerRadius, cornerRadius, Path.Direction.CW)
 
-        val save = canvas.save()
-        canvas.clipPath(clipPath)
-        super.dispatchDraw(canvas)
-        canvas.restoreToCount(save)
+        canvas.withClip(clipPath) {
+            super.dispatchDraw(canvas)
+        }
 
         if (touchEffectEnabled && isTouching) {
-            canvas.save()
-            canvas.clipPath(clipPath)
-
-            val radius = width.coerceAtLeast(height) * 0.8f
-            glowPaint.shader = RadialGradient(
-                glowX,
-                glowY,
-                radius,
-                intArrayOf(Color.argb(60, 255, 255, 255), Color.TRANSPARENT),
-                floatArrayOf(0f, 1f),
-                Shader.TileMode.CLAMP
-            )
-            canvas.drawRect(clipRect, glowPaint)
-            canvas.restore()
+            canvas.withClip(clipPath) {
+                val radius = width.coerceAtLeast(height) * 0.8f
+                glowPaint.shader = RadialGradient(
+                    glowX,
+                    glowY,
+                    radius,
+                    intArrayOf(Color.argb(60, 255, 255, 255), Color.TRANSPARENT),
+                    floatArrayOf(0f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                drawRect(clipRect, glowPaint)
+            }
         }
     }
 
@@ -317,9 +315,9 @@ class LiquidGlassView @JvmOverloads constructor(
         addView(
             nextGlass,
             0,
-            ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+            LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.MATCH_PARENT
             )
         )
 
@@ -359,7 +357,7 @@ class LiquidGlassView @JvmOverloads constructor(
     private inline fun forEachVisibleChild(block: (View) -> Unit) {
         for (index in 0 until childCount) {
             val child = getChildAt(index)
-            if (child.visibility != View.GONE) {
+            if (child.visibility != GONE) {
                 block(child)
             }
         }
