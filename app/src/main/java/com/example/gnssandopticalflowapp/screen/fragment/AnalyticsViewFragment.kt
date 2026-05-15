@@ -1,8 +1,5 @@
 package com.example.gnssandopticalflowapp.screen.fragment
 
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.media.MediaScannerConnection
 import android.widget.Toast
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.safeContext
@@ -12,7 +9,6 @@ import com.example.gnssandopticalflowapp.model.AnalyticsSample
 import com.example.gnssandopticalflowapp.model.AnalyticsSession
 import com.example.gnssandopticalflowapp.util.AnalyticsStorageUtil
 import com.example.gnssandopticalflowapp.view.AnalyticsChartView
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,9 +39,6 @@ class AnalyticsViewFragment :
             onBack()
         }
 
-        tvPdf.setSingleClick {
-            exportPdf()
-        }
     }
 
     override fun initObserver() = Unit
@@ -64,27 +57,14 @@ class AnalyticsViewFragment :
         chartMagnitude.setData("Average Vector", "px", AnalyticsChartView.Metric.MAGNITUDE, session.samples)
         chartProcess.setData("Process Time", "ms", AnalyticsChartView.Metric.PROCESS_MS, session.samples)
         chartTracks.setData("Tracks / Active Vectors", "", AnalyticsChartView.Metric.TRACKS, session.samples)
-        chartThreshold.setData("Motion Threshold", "", AnalyticsChartView.Metric.THRESHOLD, session.samples)
+        chartFlowX.setData("Horizontal Flow", "px", AnalyticsChartView.Metric.FLOW_X, session.samples)
 
         chartFps.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.FPS, it) }
         chartConfidence.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.CONFIDENCE, it) }
         chartMagnitude.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.MAGNITUDE, it) }
         chartProcess.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.PROCESS_MS, it) }
         chartTracks.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.TRACKS, it) }
-        chartThreshold.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.THRESHOLD, it) }
-    }
-
-    private fun exportPdf() {
-        val currentSession = session ?: return
-        val chartBitmap = renderChartsBitmap()
-        val file = AnalyticsStorageUtil.exportPdf(safeContext(), currentSession, chartBitmap)
-        chartBitmap?.recycle()
-        downloadExport(file)
-    }
-
-    private fun downloadExport(file: File) {
-        MediaScannerConnection.scanFile(safeContext(), arrayOf(file.absolutePath), null) { _, _ -> }
-        Toast.makeText(safeContext(), "Downloaded PDF: ${file.name}", Toast.LENGTH_LONG).show()
+        chartFlowX.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.FLOW_X, it) }
     }
 
     private fun openChartDetail(metric: AnalyticsChartView.Metric, index: Int) {
@@ -95,16 +75,6 @@ class AnalyticsViewFragment :
         mainViewModel.selectedAnalyticsSampleIndex.value = index
         mainViewModel.selectedAnalyticsMetric.value = metric.name
         navigateTo(com.example.gnssandopticalflowapp.R.id.analyticsSampleDetailFragment)
-    }
-
-    private fun renderChartsBitmap(): Bitmap? {
-        val target = binding.chartStack
-        if (target.width <= 0 || target.height <= 0) return null
-
-        return Bitmap.createBitmap(target.width, target.height, Bitmap.Config.ARGB_8888).also { bitmap ->
-            val canvas = Canvas(bitmap)
-            target.draw(canvas)
-        }
     }
 
     private fun List<AnalyticsSample>.averageOf(selector: (AnalyticsSample) -> Double): Double {

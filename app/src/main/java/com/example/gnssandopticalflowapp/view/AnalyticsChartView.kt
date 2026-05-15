@@ -29,7 +29,7 @@ class AnalyticsChartView @JvmOverloads constructor(
         MAGNITUDE,
         PROCESS_MS,
         TRACKS,
-        THRESHOLD
+        FLOW_X
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -106,7 +106,6 @@ class AnalyticsChartView @JvmOverloads constructor(
         drawPeak(canvas, kltValues, minValue, range, kltColor)
         drawPeak(canvas, farnebackValues, minValue, range, farnebackColor)
         drawSelection(canvas, kltValues, farnebackValues, minValue, range)
-        drawLatestValues(canvas, kltValues.lastOrNull() ?: 0.0, farnebackValues.lastOrNull() ?: 0.0)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -156,10 +155,16 @@ class AnalyticsChartView @JvmOverloads constructor(
         paint.textSize = 16f
         paint.isFakeBoldText = true
         canvas.drawText(title, 20f, 28f, paint)
+        canvas.drawText(
+            "Time",
+            width - 60f,
+            height - 20f,
+            paint
+        )
         paint.isFakeBoldText = false
 
-        drawLegend(canvas, width - 156f, 22f, kltColor, "KLT")
-        drawLegend(canvas, width - 86f, 22f, farnebackColor, "Farneback")
+        drawLegend(canvas, width - 226f, 26f, kltColor, "KLT")
+        drawLegend(canvas, width - 146f, 26f, farnebackColor, "Farneback")
     }
 
     private fun drawLegend(canvas: Canvas, x: Float, y: Float, color: Int, label: String) {
@@ -170,7 +175,7 @@ class AnalyticsChartView @JvmOverloads constructor(
         canvas.drawLine(x, y, x + 20f, y, paint)
         paint.strokeCap = Paint.Cap.BUTT
         paint.style = Paint.Style.FILL
-        paint.textSize = 10f
+        paint.textSize = 22f
         paint.color = mutedTextColor
         canvas.drawText(label, x + 26f, y + 4f, paint)
     }
@@ -298,17 +303,6 @@ class AnalyticsChartView @JvmOverloads constructor(
         canvas.drawText(label, labelLeft + 8f, chartRect.top + 24f, paint)
     }
 
-    private fun drawLatestValues(canvas: Canvas, kltValue: Double, farnebackValue: Double) {
-        paint.style = Paint.Style.FILL
-        paint.textSize = 12f
-        paint.isFakeBoldText = true
-        paint.color = kltColor
-        canvas.drawText("KLT ${formatValue(kltValue)}", 20f, height - 16f, paint)
-        paint.color = farnebackColor
-        canvas.drawText("Farneback ${formatValue(farnebackValue)}", width / 2f, height - 16f, paint)
-        paint.isFakeBoldText = false
-    }
-
     private fun drawEmpty(canvas: Canvas) {
         paint.style = Paint.Style.FILL
         paint.color = mutedTextColor
@@ -323,7 +317,7 @@ class AnalyticsChartView @JvmOverloads constructor(
             Metric.MAGNITUDE -> if (klt) sample.kltAvgMagnitude else sample.farnebackAvgMagnitude
             Metric.PROCESS_MS -> if (klt) sample.kltProcessMs else sample.farnebackProcessMs
             Metric.TRACKS -> if (klt) sample.kltFeatureCount.toDouble() else sample.farnebackActiveVectorCount.toDouble()
-            Metric.THRESHOLD -> if (klt) sample.kltThreshold else sample.farnebackThreshold
+            Metric.FLOW_X -> if (klt) sample.kltAvgDx else sample.farnebackAvgDx
         }
     }
 

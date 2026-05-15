@@ -22,28 +22,11 @@
         app:tint="@color/white" />
 
     <TextView
-        android:id="@+id/tvPdf"
-        android:layout_width="wrap_content"
-        android:layout_height="36dp"
-        android:layout_marginEnd="16dp"
-        android:background="@drawable/bg_glass_chip"
-        android:fontFamily="@font/inter_extra_bold"
-        android:gravity="center"
-        android:minWidth="104dp"
-        android:paddingHorizontal="14dp"
-        android:text="Download PDF"
-        android:textColor="@color/white"
-        android:textSize="12sp"
-        app:layout_constraintBottom_toBottomOf="@id/ivBack"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="@id/ivBack" />
-
-    <TextView
         android:id="@+id/tvTitle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="14dp"
-        android:layout_marginEnd="12dp"
+        android:layout_marginEnd="18dp"
         android:ellipsize="end"
         android:fontFamily="@font/inter_black"
         android:maxLines="1"
@@ -51,7 +34,7 @@
         android:textColor="@color/white"
         android:textSize="22sp"
         app:layout_constraintBottom_toBottomOf="@id/ivBack"
-        app:layout_constraintEnd_toStartOf="@id/tvPdf"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toEndOf="@id/ivBack"
         app:layout_constraintTop_toTopOf="@id/ivBack" />
 
@@ -226,7 +209,7 @@
                 android:layout_marginTop="14dp" />
 
             <com.example.gnssandopticalflowapp.view.AnalyticsChartView
-                android:id="@+id/chartThreshold"
+                android:id="@+id/chartFlowX"
                 android:layout_width="match_parent"
                 android:layout_height="230dp"
                 android:layout_marginTop="14dp" />

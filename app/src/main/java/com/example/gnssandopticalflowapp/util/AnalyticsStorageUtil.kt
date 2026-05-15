@@ -1,26 +1,18 @@
 package com.example.gnssandopticalflowapp.util
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
-import android.graphics.pdf.PdfDocument
-import android.os.Environment
 import com.example.gnssandopticalflowapp.model.AnalyticsSample
 import com.example.gnssandopticalflowapp.model.AnalyticsSession
 import com.example.gnssandopticalflowapp.model.AnalyticsSessionSummary
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 object AnalyticsStorageUtil {
     private const val ANALYTICS_DIR = "analytics"
-    private const val EXPORT_DIR = "analytics_exports"
 
     fun createSessionId(startedAtMs: Long = System.currentTimeMillis()): String {
         return "analysis_${fileDateFormat().format(Date(startedAtMs))}"
@@ -53,87 +45,6 @@ object AnalyticsStorageUtil {
             }
             ?.sortedByDescending { it.startedAtMs }
             .orEmpty()
-    }
-
-    fun exportPdf(context: Context, session: AnalyticsSession, chartBitmap: Bitmap?): File {
-        val file = File(ensureExportDir(context), "${session.id}.pdf")
-        val document = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create()
-        val page = document.startPage(pageInfo)
-        val canvas = page.canvas
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        val summary = session.toSummary()
-
-        canvas.drawColor(Color.rgb(14, 9, 28))
-        paint.color = Color.WHITE
-        paint.textSize = 22f
-        paint.isFakeBoldText = true
-        canvas.drawText("KLT vs Farneback Analysis", 32f, 44f, paint)
-
-        paint.isFakeBoldText = false
-        paint.textSize = 11f
-        paint.color = Color.rgb(215, 206, 245)
-        canvas.drawText("Session: ${session.id}", 32f, 68f, paint)
-        canvas.drawText("Started: ${displayDateFormat().format(Date(session.startedAtMs))}", 32f, 86f, paint)
-        canvas.drawText("Duration: ${formatDuration(session.durationMs)}", 32f, 104f, paint)
-
-        val cardsTop = 128f
-        drawPdfStatCard(canvas, paint, 32f, cardsTop, "KLT FPS", summary.avgKltFps.formatOne())
-        drawPdfStatCard(canvas, paint, 166f, cardsTop, "Farneback FPS", summary.avgFarnebackFps.formatOne())
-        drawPdfStatCard(canvas, paint, 332f, cardsTop, "KLT Confidence", "${summary.avgKltConfidence.formatOne()}%")
-        drawPdfStatCard(canvas, paint, 466f, cardsTop, "Farneback", "${summary.avgFarnebackConfidence.formatOne()}%")
-
-        chartBitmap?.let { bitmap ->
-            val maxWidth = 531f
-            val maxHeight = 470f
-            val scale = minOf(maxWidth / bitmap.width, maxHeight / bitmap.height)
-            val width = bitmap.width * scale
-            val height = bitmap.height * scale
-            val left = 32f + ((maxWidth - width) / 2f)
-            val top = 230f
-            val dst = RectF(left, top, left + width, top + height)
-            canvas.drawBitmap(bitmap, null, dst, null)
-        }
-
-        paint.color = Color.rgb(230, 224, 250)
-        paint.textSize = 10f
-        val footerY = 802f
-        canvas.drawText("Samples: ${session.samples.size}", 32f, footerY, paint)
-        canvas.drawText("KLT threshold: ${session.samples.lastOrNull()?.kltThreshold?.formatTwo() ?: "-"}", 150f, footerY, paint)
-        canvas.drawText("Farneback threshold: ${session.samples.lastOrNull()?.farnebackThreshold?.formatTwo() ?: "-"}", 292f, footerY, paint)
-
-        document.finishPage(page)
-        FileOutputStream(file).use { output -> document.writeTo(output) }
-        document.close()
-        return file
-    }
-
-    private fun drawPdfStatCard(
-        canvas: android.graphics.Canvas,
-        paint: Paint,
-        left: Float,
-        top: Float,
-        label: String,
-        value: String
-    ) {
-        val rect = RectF(left, top, left + 96f, top + 72f)
-        paint.color = Color.rgb(42, 30, 72)
-        paint.style = Paint.Style.FILL
-        canvas.drawRoundRect(rect, 14f, 14f, paint)
-        paint.color = Color.rgb(120, 95, 190)
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1f
-        canvas.drawRoundRect(rect, 14f, 14f, paint)
-        paint.style = Paint.Style.FILL
-        paint.color = Color.rgb(190, 178, 224)
-        paint.textSize = 8.5f
-        paint.isFakeBoldText = false
-        canvas.drawText(label, left + 10f, top + 23f, paint)
-        paint.color = Color.WHITE
-        paint.textSize = 17f
-        paint.isFakeBoldText = true
-        canvas.drawText(value, left + 10f, top + 50f, paint)
-        paint.isFakeBoldText = false
     }
 
     private fun AnalyticsSession.toSummary(): AnalyticsSessionSummary {
@@ -239,29 +150,10 @@ object AnalyticsStorageUtil {
         }
     }
 
-    private fun ensureExportDir(context: Context): File {
-        val root = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
-            ?: File(context.filesDir, Environment.DIRECTORY_DOCUMENTS)
-        return File(root, EXPORT_DIR).apply {
-            if (!exists()) mkdirs()
-        }
-    }
-
     private fun List<AnalyticsSample>.averageOf(selector: (AnalyticsSample) -> Double): Double {
         if (isEmpty()) return 0.0
         return map(selector).filter { it.isFinite() }.average().takeIf { it.isFinite() } ?: 0.0
     }
 
-    private fun Double.formatOne(): String = String.format(Locale.US, "%.1f", this)
-    private fun Double.formatTwo(): String = String.format(Locale.US, "%.2f", this)
-
-    private fun formatDuration(durationMs: Long): String {
-        val totalSeconds = (durationMs / 1000L).coerceAtLeast(0L)
-        val minutes = totalSeconds / 60L
-        val seconds = totalSeconds % 60L
-        return String.format(Locale.US, "%02d:%02d", minutes, seconds)
-    }
-
     private fun fileDateFormat() = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US)
-    private fun displayDateFormat() = SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
 }
