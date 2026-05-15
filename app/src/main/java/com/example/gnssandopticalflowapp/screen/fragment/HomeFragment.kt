@@ -22,6 +22,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
         viewPager.registerOnPageChangeCallback(pageChangeCallback)
         updateTabState()
         view.bind(viewPager)
+        view.setElasticEnabled(true)
     }
 
     @SuppressLint("ClickableViewAccessibility")

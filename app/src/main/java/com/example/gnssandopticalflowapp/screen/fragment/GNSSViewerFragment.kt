@@ -198,11 +198,16 @@ class GNSSViewerFragment :
         applyVisibilityState() // Restore UI state from is3DMode
         startResolutionSequence()
 
-        searchBubble.bind(mapView)
-        currentLocationBubble.bind(mapView)
-        resultBubble.bind(mapView)
-        cancelBubble.bind(mapView)
-        navigationBubble.bind(mapView)
+        listOf(
+            searchBubble,
+            currentLocationBubble,
+            resultBubble,
+            cancelBubble,
+            navigationBubble
+        ).forEach { bubble ->
+            bubble.bind(mapView)
+            bubble.setElasticEnabled(true)
+        }
     }
 
     private val gpsResolutionLauncher = registerForActivityResult(
