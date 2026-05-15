@@ -33,6 +33,7 @@ class LiquidGlass @JvmOverloads constructor(
     }
 
     fun init(source: View?) {
+        if (isInEditMode) return
         if (target === source && impl != null) {
             updateParameters()
             return
@@ -93,12 +94,14 @@ class LiquidGlass @JvmOverloads constructor(
     }
 
     fun updateParameters() {
+        if (isInEditMode) return
         impl?.onPreDraw()
         postInvalidateOnAnimation()
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        if (isInEditMode) return
         target?.let(::attachPreDrawListener)
     }
 

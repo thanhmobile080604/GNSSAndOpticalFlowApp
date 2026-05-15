@@ -108,7 +108,7 @@ class LiquidGlassView @JvmOverloads constructor(
 
     fun bind(source: ViewGroup?) {
         customSource = source
-        if (glass != null && source != null) {
+        if (!isInEditMode && glass != null && source != null) {
             glass?.init(source)
         }
     }
@@ -184,6 +184,7 @@ class LiquidGlassView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        if (isInEditMode) return
         post(::ensureGlass)
     }
 
@@ -194,6 +195,7 @@ class LiquidGlassView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if (isInEditMode) return
         if ((w != oldw || h != oldh) && w > 0 && h > 0) {
             val maxPx = h / 2f
             if (cornerRadius > maxPx) {
@@ -256,6 +258,11 @@ class LiquidGlassView @JvmOverloads constructor(
     }
 
     private fun updateConfig() {
+        if (isInEditMode) {
+            invalidate()
+            return
+        }
+
         val activeConfig = config
         if (activeConfig == null || glass == null) {
             rebuild()
@@ -281,11 +288,13 @@ class LiquidGlassView @JvmOverloads constructor(
     }
 
     private fun rebuild() {
+        if (isInEditMode) return
         removeGlass()
         post(::ensureGlass)
     }
 
     private fun ensureGlass() {
+        if (isInEditMode) return
         if (glass != null) return
 
         val viewWidth = width.takeIf { it > 0 } ?: Utils.getDeviceWidthPx(context)
