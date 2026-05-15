@@ -6,17 +6,22 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
+import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.adapter.IntroImageAdapter
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.dp
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentIntroBinding
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 class IntroFragment : BaseFragment<FragmentIntroBinding>(FragmentIntroBinding::inflate) {
 
-    private var isStartButtonRevealed = false
+    private var autoScrollJob: Job? = null
 
     private val introImages = listOf(
         R.drawable.img_map,
@@ -25,25 +30,18 @@ class IntroFragment : BaseFragment<FragmentIntroBinding>(FragmentIntroBinding::i
     )
 
     private val introPageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
-        override fun onPageScrolled(
-            position: Int,
-            positionOffset: Float,
-            positionOffsetPixels: Int
-        ) {
-            updateStartButtonVisibility(position + positionOffset)
-        }
-
         override fun onPageSelected(position: Int) {
             binding.introDots.setSelectedDot(position)
-            updateStartButtonVisibility(position.toFloat())
         }
     }
 
     override fun FragmentIntroBinding.initView() {
         mainViewModel.isResolvingDeviceSettings.value = true
-        updateStartButtonVisibility(0f)
+        btnStartIntro.alpha = 1f
+        btnStartIntro.isEnabled = true
         setupIntroCarousel()
         introDots.setSelectedDot(0)
+        startIntroAutoScroll()
     }
 
     private fun FragmentIntroBinding.setupIntroCarousel() {
@@ -81,27 +79,6 @@ class IntroFragment : BaseFragment<FragmentIntroBinding>(FragmentIntroBinding::i
         introImagePager.setCurrentItem(0, false)
     }
 
-    private fun updateStartButtonVisibility(pageOffset: Float) {
-        if (isStartButtonRevealed) {
-            binding.btnStartIntro.alpha = 1f
-            binding.btnStartIntro.isEnabled = true
-            return
-        }
-
-        val fadeStartPage = (introImages.lastIndex - 1).coerceAtLeast(0).toFloat()
-        val alpha = if (introImages.size <= 1) {
-            1f
-        } else {
-            (pageOffset - fadeStartPage).coerceIn(0f, 1f)
-        }
-
-        if (alpha >= 1f) {
-            isStartButtonRevealed = true
-        }
-        binding.btnStartIntro.alpha = alpha
-        binding.btnStartIntro.isEnabled = isStartButtonRevealed
-    }
-
     override fun FragmentIntroBinding.initListener() {
         btnStartIntro.setSingleClick {
             navigateTo(R.id.homeFragment, inclusive = true)
@@ -112,8 +89,42 @@ class IntroFragment : BaseFragment<FragmentIntroBinding>(FragmentIntroBinding::i
 
     override fun onBack() = Unit
 
+    override fun onResume() {
+        super.onResume()
+        startIntroAutoScroll()
+    }
+
+    override fun onPause() {
+        stopIntroAutoScroll()
+        super.onPause()
+    }
+
     override fun onDestroyView() {
+        stopIntroAutoScroll()
         binding.introImagePager.unregisterOnPageChangeCallback(introPageChangeCallback)
         super.onDestroyView()
+    }
+
+    private fun startIntroAutoScroll() {
+        if (autoScrollJob?.isActive == true || introImages.size <= 1) return
+
+        autoScrollJob = viewLifecycleOwner.lifecycleScope.launch {
+            delay(INTRO_AUTO_SCROLL_DELAY_MS)
+            while (isActive) {
+                val current = binding.introImagePager.currentItem
+                val next = (current + 1) % introImages.size
+                binding.introImagePager.setCurrentItem(next, true)
+                delay(INTRO_AUTO_SCROLL_DELAY_MS)
+            }
+        }
+    }
+
+    private fun stopIntroAutoScroll() {
+        autoScrollJob?.cancel()
+        autoScrollJob = null
+    }
+
+    private companion object {
+        const val INTRO_AUTO_SCROLL_DELAY_MS = 1864L
     }
 }
