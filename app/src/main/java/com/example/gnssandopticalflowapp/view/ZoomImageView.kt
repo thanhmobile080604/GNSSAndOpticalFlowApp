@@ -1,5 +1,6 @@
 package com.example.gnssandopticalflowapp.view
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Matrix
 import android.graphics.RectF
@@ -25,6 +26,7 @@ class ZoomImageView @JvmOverloads constructor(
     private var lastX = 0f
     private var lastY = 0f
     private var isDragging = false
+    private var matrixAnimator: ValueAnimator? = null
 
     init {
         scaleType = ScaleType.MATRIX
@@ -41,6 +43,10 @@ class ZoomImageView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+            matrixAnimator?.cancel()
+        }
+
         gestureDetector.onTouchEvent(event)
         scaleDetector.onTouchEvent(event)
 
@@ -87,9 +93,21 @@ class ZoomImageView @JvmOverloads constructor(
         return true
     }
 
-    fun resetZoom() {
-        val image = drawable ?: return
-        if (width <= 0 || height <= 0 || image.intrinsicWidth <= 0 || image.intrinsicHeight <= 0) return
+    fun resetZoom(animated: Boolean = false) {
+        val targetMatrix = buildResetMatrix() ?: return
+        if (animated) {
+            animateToMatrix(targetMatrix, MIN_SCALE)
+        } else {
+            matrixAnimator?.cancel()
+            drawMatrix.set(targetMatrix)
+            currentScale = MIN_SCALE
+            imageMatrix = drawMatrix
+        }
+    }
+
+    private fun buildResetMatrix(): Matrix? {
+        val image = drawable ?: return null
+        if (width <= 0 || height <= 0 || image.intrinsicWidth <= 0 || image.intrinsicHeight <= 0) return null
 
         val viewWidth = width.toFloat()
         val viewHeight = height.toFloat()
@@ -99,16 +117,25 @@ class ZoomImageView @JvmOverloads constructor(
         val dx = (viewWidth - imageWidth * baseScale) / 2f
         val dy = (viewHeight - imageHeight * baseScale) / 2f
 
-        drawMatrix.reset()
-        drawMatrix.postScale(baseScale, baseScale)
-        drawMatrix.postTranslate(dx, dy)
-        currentScale = MIN_SCALE
-        imageMatrix = drawMatrix
+        return Matrix().apply {
+            postScale(baseScale, baseScale)
+            postTranslate(dx, dy)
+        }
     }
 
-    private fun zoomTo(targetScale: Float, focusX: Float, focusY: Float) {
+    private fun zoomTo(targetScale: Float, focusX: Float, focusY: Float, animated: Boolean = false) {
         val clampedScale = targetScale.coerceIn(MIN_SCALE, MAX_SCALE)
         val factor = clampedScale / currentScale
+        if (animated) {
+            val targetMatrix = Matrix(drawMatrix).apply {
+                postScale(factor, factor, focusX, focusY)
+            }
+            fixTranslation(targetMatrix)
+            animateToMatrix(targetMatrix, clampedScale)
+            return
+        }
+
+        matrixAnimator?.cancel()
         currentScale = clampedScale
         drawMatrix.postScale(factor, factor, focusX, focusY)
         fixTranslation()
@@ -116,7 +143,11 @@ class ZoomImageView @JvmOverloads constructor(
     }
 
     private fun fixTranslation() {
-        val rect = getDisplayRect() ?: return
+        fixTranslation(drawMatrix)
+    }
+
+    private fun fixTranslation(matrix: Matrix) {
+        val rect = getDisplayRect(matrix) ?: return
         val viewWidth = width.toFloat()
         val viewHeight = height.toFloat()
 
@@ -134,14 +165,44 @@ class ZoomImageView @JvmOverloads constructor(
             else -> 0f
         }
 
-        drawMatrix.postTranslate(dx, dy)
+        matrix.postTranslate(dx, dy)
     }
 
     private fun getDisplayRect(): RectF? {
+        return getDisplayRect(drawMatrix)
+    }
+
+    private fun getDisplayRect(matrix: Matrix): RectF? {
         val image = drawable ?: return null
         val rect = RectF(0f, 0f, image.intrinsicWidth.toFloat(), image.intrinsicHeight.toFloat())
-        drawMatrix.mapRect(rect)
+        matrix.mapRect(rect)
         return rect
+    }
+
+    private fun animateToMatrix(targetMatrix: Matrix, targetScale: Float) {
+        matrixAnimator?.cancel()
+
+        val startValues = FloatArray(MATRIX_VALUE_COUNT)
+        val targetValues = FloatArray(MATRIX_VALUE_COUNT)
+        val currentValues = FloatArray(MATRIX_VALUE_COUNT)
+        val startScale = currentScale
+        drawMatrix.getValues(startValues)
+        targetMatrix.getValues(targetValues)
+
+        matrixAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = MATRIX_ANIMATION_DURATION_MS
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener { animator ->
+                val fraction = animator.animatedFraction
+                for (index in currentValues.indices) {
+                    currentValues[index] = startValues[index] + (targetValues[index] - startValues[index]) * fraction
+                }
+                drawMatrix.setValues(currentValues)
+                currentScale = startScale + (targetScale - startScale) * fraction
+                imageMatrix = drawMatrix
+            }
+            start()
+        }
     }
 
     private inner class ScaleListener : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -152,7 +213,7 @@ class ZoomImageView @JvmOverloads constructor(
 
         override fun onScaleEnd(detector: ScaleGestureDetector) {
             if (currentScale <= MIN_SCALE + SCALE_RESET_EPSILON) {
-                resetZoom()
+                resetZoom(animated = true)
             }
         }
     }
@@ -160,9 +221,9 @@ class ZoomImageView @JvmOverloads constructor(
     private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
         override fun onDoubleTap(e: MotionEvent): Boolean {
             if (currentScale > MIN_SCALE + SCALE_RESET_EPSILON) {
-                resetZoom()
+                resetZoom(animated = true)
             } else {
-                zoomTo(DOUBLE_TAP_SCALE, e.x, e.y)
+                zoomTo(DOUBLE_TAP_SCALE, e.x, e.y, animated = true)
             }
             return true
         }
@@ -173,5 +234,7 @@ class ZoomImageView @JvmOverloads constructor(
         const val MAX_SCALE = 5f
         const val DOUBLE_TAP_SCALE = 2.5f
         const val SCALE_RESET_EPSILON = 0.02f
+        const val MATRIX_VALUE_COUNT = 9
+        const val MATRIX_ANIMATION_DURATION_MS = 220L
     }
 }
