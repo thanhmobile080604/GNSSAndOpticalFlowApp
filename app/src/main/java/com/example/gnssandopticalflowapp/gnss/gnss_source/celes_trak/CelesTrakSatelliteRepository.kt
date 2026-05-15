@@ -39,6 +39,10 @@ object CelesTrakSatelliteRepository {
                 return@withContext cached
             }
 
+            Log.d(
+                TAG,
+                "refresh start force=$forceRefresh groups=${supportedGroups.joinToString { it.groupName }}"
+            )
             runCatching {
                 val records = LinkedHashMap<SatelliteKey, OrbitRecord>()
                 supportedGroups.forEach { group ->
@@ -61,10 +65,12 @@ object CelesTrakSatelliteRepository {
                 Log.w(TAG, "refresh failed: ${it.javaClass.simpleName}: ${it.message}")
                 cached
             }
-        }
+    }
 
     private fun fetchGroup(group: GroupRequest): List<OrbitRecord> {
-        val url = URL("$BASE_URL?GROUP=${group.groupName}&FORMAT=TLE")
+        val urlString = "$BASE_URL?GROUP=${group.groupName}&FORMAT=TLE"
+        val url = URL(urlString)
+        Log.d(TAG, "fetch group=${group.groupName} url=$urlString")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MS
@@ -75,8 +81,20 @@ object CelesTrakSatelliteRepository {
 
         return try {
             val responseCode = connection.responseCode
+            val responseMessage = connection.responseMessage.orEmpty()
+            Log.d(
+                TAG,
+                "response group=${group.groupName} status=$responseCode $responseMessage " +
+                    "contentType=${connection.contentType.orEmpty()}"
+            )
             if (responseCode != HttpURLConnection.HTTP_OK) {
-                throw IllegalStateException("HTTP $responseCode for group ${group.groupName}")
+                val errorPreview = connection.errorStream
+                    ?.bufferedReader()
+                    ?.use { previewText(it.readText()) }
+                    .orEmpty()
+                throw IllegalStateException(
+                    "HTTP $responseCode for group ${group.groupName} url=$urlString error=$errorPreview"
+                )
             }
 
             val body = connection.inputStream.bufferedReader().use { reader ->
@@ -84,10 +102,16 @@ object CelesTrakSatelliteRepository {
             }.trim()
             val records = parseTleRecords(body, group.constellationType)
             if (records.isEmpty()) {
-                throw IllegalStateException("Unexpected response for group ${group.groupName}")
+                throw IllegalStateException(
+                    "parsed 0 records for group ${group.groupName} url=$urlString " +
+                        "bodyChars=${body.length} preview=${previewText(body)}"
+                )
             }
 
-            Log.d(TAG, "group=${group.groupName} records=${records.size}")
+            Log.d(
+                TAG,
+                "group=${group.groupName} records=${records.size} first=${records.first().objectName}"
+            )
             records
         } finally {
             connection.disconnect()
@@ -210,6 +234,15 @@ object CelesTrakSatelliteRepository {
     private fun String.substringOrNull(startIndex: Int, endIndex: Int): String? {
         if (length < endIndex || startIndex < 0 || startIndex >= endIndex) return null
         return substring(startIndex, endIndex)
+    }
+
+    private fun previewText(text: String): String {
+        return text
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .take(3)
+            .joinToString(separator = " | ") { line -> line.take(120) }
     }
 
     private const val TAG = "GNSS_CELESTRAK"

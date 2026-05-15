@@ -116,6 +116,7 @@ class GNSSViewerFragment :
     private var gnssMeasurementsRegistered = false
     private var lastGnssStatusSatelliteCount = 0
     private var lastGnssMeasurementCount = 0
+    private var latestSatelliteSnapshot: List<SatelliteInfo> = emptyList()
     private val routeRefreshIntervalMs = 8000L
     private val routeRefreshDistanceMeters = 25.0
     private val externalOrbitRetryDelayMs = 30_000L
@@ -169,6 +170,7 @@ class GNSSViewerFragment :
             }
             if (rendererSet) {
                 val satellites = satelliteTracker.buildSatelliteInfo(status, currentLocation)
+                latestSatelliteSnapshot = satellites
                 earthRenderer.updateSatellites(satellites)
             }
         }
@@ -361,6 +363,7 @@ class GNSSViewerFragment :
         externalOrbitRefreshJob = null
         lastGnssStatusSatelliteCount = 0
         lastGnssMeasurementCount = 0
+        latestSatelliteSnapshot = emptyList()
         satelliteTracker.clear()
     }
 
@@ -374,13 +377,9 @@ class GNSSViewerFragment :
                 val igsLoaded = satelliteTracker.refreshIgsBroadcastDataIfNeeded(
                     forceRefresh = forceAttemptRefresh
                 )
-                val celesTrakLoaded = if (igsLoaded) {
-                    false
-                } else {
-                    satelliteTracker.refreshCelesTrakDataIfNeeded(
-                        forceRefresh = forceAttemptRefresh
-                    )
-                }
+                val celesTrakLoaded = satelliteTracker.refreshCelesTrakDataIfNeeded(
+                    forceRefresh = forceAttemptRefresh
+                )
                 if (igsLoaded || celesTrakLoaded) return@launch
 
                 if (attempt < externalOrbitRefreshAttempts - 1) {
@@ -1411,10 +1410,56 @@ class GNSSViewerFragment :
 
         icPin.setSingleClick {
             recenterMap()
+          //  dumpLatestSatelliteSources()
         }
 
         icAr.setSingleClick {
             navigateTo(R.id.gnssARFragment)
+        }
+    }
+
+    private fun dumpLatestSatelliteSources() {
+        val satellites = latestSatelliteSnapshot
+        Log.d(
+            "GNSS_SOURCE_DUMP",
+            "satellites=${satellites.size} lastStatus=$lastGnssStatusSatelliteCount " +
+                "lastMeasurements=$lastGnssMeasurementCount"
+        )
+        if (satellites.isEmpty()) return
+
+        satellites
+            .groupingBy { it.positionSource }
+            .eachCount()
+            .forEach { (source, count) ->
+                Log.d("GNSS_SOURCE_DUMP", "source=$source count=$count")
+            }
+
+        satellites
+            .sortedWith(compareBy<SatelliteInfo> { it.constellationType }.thenBy { it.svid })
+            .forEach { sat ->
+                Log.d(
+                    "GNSS_SOURCE_DUMP",
+                    "${constellationLabel(sat.constellationType)} svid=${sat.svid} " +
+                        "source=${sat.positionSource} " +
+                        "eph=${sat.ephemerisSource ?: "-"} " +
+                        "used=${sat.usedInFix} " +
+                        "cn0=${"%.1f".format(Locale.US, sat.cn0DbHz)} " +
+                        "el=${"%.1f".format(Locale.US, sat.elevationDegrees)} " +
+                        "az=${"%.1f".format(Locale.US, sat.azimuthDegrees)}"
+                )
+            }
+    }
+
+    private fun constellationLabel(constellationType: Int): String {
+        return when (constellationType) {
+            GnssStatus.CONSTELLATION_GPS -> "GPS"
+            GnssStatus.CONSTELLATION_SBAS -> "SBAS"
+            GnssStatus.CONSTELLATION_GLONASS -> "GLONASS"
+            GnssStatus.CONSTELLATION_QZSS -> "QZSS"
+            GnssStatus.CONSTELLATION_BEIDOU -> "BeiDou"
+            GnssStatus.CONSTELLATION_GALILEO -> "Galileo"
+            GnssStatus.CONSTELLATION_IRNSS -> "IRNSS"
+            else -> "CONST_$constellationType"
         }
     }
 

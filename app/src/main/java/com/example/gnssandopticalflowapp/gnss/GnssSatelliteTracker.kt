@@ -78,11 +78,25 @@ class GnssSatelliteTracker {
     }
 
     suspend fun refreshCelesTrakDataIfNeeded(forceRefresh: Boolean = false): Boolean {
-        if (celesTrakRefreshInFlight) return latestCelesTrakOrbits.isNotEmpty()
+        if (celesTrakRefreshInFlight) {
+            Log.d(
+                "GNSS_CELESTRAK",
+                "refresh skipped: already in flight cacheRecords=${latestCelesTrakOrbits.size}"
+            )
+            return latestCelesTrakOrbits.isNotEmpty()
+        }
 
         celesTrakRefreshInFlight = true
         try {
-            val snapshot = CelesTrakSatelliteRepository.getSnapshot(forceRefresh) ?: return false
+            Log.d(
+                "GNSS_CELESTRAK",
+                "refresh requested force=$forceRefresh cacheRecords=${latestCelesTrakOrbits.size}"
+            )
+            val snapshot = CelesTrakSatelliteRepository.getSnapshot(forceRefresh)
+            if (snapshot == null) {
+                Log.w("GNSS_CELESTRAK", "refresh returned no snapshot")
+                return false
+            }
 
             latestCelesTrakOrbits.clear()
             snapshot.records.forEach { (key, orbit) ->

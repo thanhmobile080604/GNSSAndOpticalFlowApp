@@ -628,11 +628,7 @@ class GNSSARFragment : BaseFragment<FragmentGnssArBinding>(FragmentGnssArBinding
             repeat(EXTERNAL_ORBIT_REFRESH_ATTEMPTS) { attempt ->
                 val forceAttemptRefresh = forceRefresh || attempt > 0
                 val igsLoaded = satelliteTracker.refreshIgsBroadcastDataIfNeeded(forceAttemptRefresh)
-                val celesTrakLoaded = if (igsLoaded) {
-                    false
-                } else {
-                    satelliteTracker.refreshCelesTrakDataIfNeeded(forceAttemptRefresh)
-                }
+                val celesTrakLoaded = satelliteTracker.refreshCelesTrakDataIfNeeded(forceAttemptRefresh)
                 if (igsLoaded || celesTrakLoaded) return@launch
 
                 if (attempt < EXTERNAL_ORBIT_REFRESH_ATTEMPTS - 1) {
