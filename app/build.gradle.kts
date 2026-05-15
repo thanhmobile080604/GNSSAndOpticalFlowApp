@@ -67,5 +67,5 @@ dependencies {
     // Google Play Services Location for one-click GPS activation
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
-    implementation("com.qmdeve.liquidglass:core:1.0.4")
+
 }
