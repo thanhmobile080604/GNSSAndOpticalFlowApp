@@ -18,6 +18,16 @@ class Config {
     var WIDTH: Float = 0f
     var HEIGHT: Float = 0f
 
+    companion object {
+        const val TEST_MODE_AUTO = 0
+        const val TEST_MODE_AGSL = 1
+        const val TEST_MODE_RENDER_EFFECT = 2
+        const val TEST_MODE_BITMAP = 3
+
+        @JvmField
+        var TEST_RENDER_MODE: Int = TEST_MODE_AUTO
+    }
+
     fun configure(overrides: Overrides): Config = apply {
         overrides.applyTo(this)
     }

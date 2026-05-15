@@ -6,8 +6,10 @@ import android.os.Build
 import android.util.AttributeSet
 import android.view.View
 import android.view.ViewTreeObserver
+import com.example.gnssandopticalflowapp.util.liquidglass.impl.BitmapFallbackImpl
 import com.example.gnssandopticalflowapp.util.liquidglass.impl.Impl
 import com.example.gnssandopticalflowapp.util.liquidglass.impl.LiquidGlassImpl
+import com.example.gnssandopticalflowapp.util.liquidglass.impl.RenderEffectFallbackImpl
 
 class LiquidGlass @JvmOverloads constructor(
     context: Context,
@@ -42,12 +44,52 @@ class LiquidGlass @JvmOverloads constructor(
         target = source
 
         val renderTarget = source ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            impl = LiquidGlassImpl(this, renderTarget, config)
-            impl?.onSizeChanged(width, height)
-            attachPreDrawListener(renderTarget)
-        }
+        impl = createImpl(renderTarget)
+        impl?.onSizeChanged(width, height)
+        attachPreDrawListener(renderTarget)
         invalidate()
+    }
+
+    private fun createImpl(renderTarget: View): Impl {
+        return when (Config.TEST_RENDER_MODE) {
+            Config.TEST_MODE_AGSL -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    LiquidGlassImpl(this, renderTarget, config)
+                } else {
+                    createBestAvailableImpl(renderTarget)
+                }
+            }
+
+            Config.TEST_MODE_RENDER_EFFECT -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    RenderEffectFallbackImpl(this, renderTarget, config)
+                } else {
+                    BitmapFallbackImpl(this, renderTarget, config)
+                }
+            }
+
+            Config.TEST_MODE_BITMAP -> {
+                BitmapFallbackImpl(this, renderTarget, config)
+            }
+
+            else -> createBestAvailableImpl(renderTarget)
+        }
+    }
+
+    private fun createBestAvailableImpl(renderTarget: View): Impl {
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                LiquidGlassImpl(this, renderTarget, config)
+            }
+
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                RenderEffectFallbackImpl(this, renderTarget, config)
+            }
+
+            else -> {
+                BitmapFallbackImpl(this, renderTarget, config)
+            }
+        }
     }
 
     fun updateParameters() {
