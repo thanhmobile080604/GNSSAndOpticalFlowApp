@@ -126,4 +126,22 @@
         app:layout_constraintTop_toBottomOf="@id/tvTitle"
         tools:listitem="@layout/item_video_thumb" />
 
+    <TextView
+        android:id="@+id/tvEmpty"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="32dp"
+        android:background="@drawable/bg_glass_card"
+        android:fontFamily="@font/inter_bold"
+        android:gravity="center"
+        android:padding="22dp"
+        android:text="No medias yet"
+        android:textColor="#E7DEFF"
+        android:textSize="15sp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tvTitle" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

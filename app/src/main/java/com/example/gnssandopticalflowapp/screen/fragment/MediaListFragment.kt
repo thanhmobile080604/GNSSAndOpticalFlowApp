@@ -40,7 +40,8 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
 
     private fun loadMedia() {
         val media = MediaStorageUtil.getMedia(safeContext())
-        adapter.setData(media)
+        if(media.isEmpty()) binding.tvEmpty.show()
+        else adapter.setData(media)
     }
 
     override fun FragmentVideoListBinding.initListener() {
