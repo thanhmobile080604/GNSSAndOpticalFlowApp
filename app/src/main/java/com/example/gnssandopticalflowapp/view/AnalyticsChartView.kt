@@ -25,11 +25,8 @@ class AnalyticsChartView @JvmOverloads constructor(
 
     enum class Metric {
         FPS,
-        CONFIDENCE,
-        MAGNITUDE,
         PROCESS_MS,
-        TRACKS,
-        FLOW_X
+        TRACKS
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -371,11 +368,8 @@ class AnalyticsChartView @JvmOverloads constructor(
     private fun metricValue(sample: AnalyticsSample, klt: Boolean): Double {
         return when (metric) {
             Metric.FPS -> if (klt) sample.kltFps else sample.farnebackFps
-            Metric.CONFIDENCE -> if (klt) sample.kltConfidence else sample.farnebackConfidence
-            Metric.MAGNITUDE -> if (klt) sample.kltAvgMagnitude else sample.farnebackAvgMagnitude
             Metric.PROCESS_MS -> if (klt) sample.kltProcessMs else sample.farnebackProcessMs
             Metric.TRACKS -> if (klt) sample.kltFeatureCount.toDouble() else sample.farnebackActiveVectorCount.toDouble()
-            Metric.FLOW_X -> if (klt) sample.kltAvgDx else sample.farnebackAvgDx
         }
     }
 
@@ -404,7 +398,6 @@ class AnalyticsChartView @JvmOverloads constructor(
 
     private fun formatValue(value: Double): String {
         return when {
-            metric == Metric.CONFIDENCE -> String.format(Locale.US, "%.0f%%", value)
             metric == Metric.TRACKS -> value.roundToInt().toString()
             value >= 100 -> value.roundToInt().toString()
             else -> String.format(Locale.US, "%.2f %s", value, unit).trim()

@@ -201,14 +201,43 @@ Tính vector dịch chuyển cho **từng pixel** trên khung hình. Phù hợp 
 - Cứ sau mỗi `ANALYSIS_SAMPLE_INTERVAL_MS`, thông số được lưu lại vào một `AnalyticsSample`.
 - Kết thúc đo đạc, tổng hợp ra `AnalyticsSession` (.json file) bằng `AnalyticsStorageUtil`.
 
-### 6.2 Ý nghĩa thông số
-- `elapsedMs` / `frameIndex`: Timestamp và số thứ tự khung hình.
-- `kltFps` / `farnebackFps`: Hiệu năng (Frames Per Second). Farneback thường thấp hơn KLT.
-- `processMs`: Thời gian CPU bỏ ra cho 1 khung hình.
-- `featureCount`: Lượng điểm ảnh được track. KLT (50 GFTT), Farneback (Hàng nghìn ô lưới).
-- `avgMagnitude`: Độ lớn vector chuyển động trung bình. Phản ánh vận tốc trực tiếp của khung hình.
-- `confidence`: Độ tin cậy tính bằng tỷ lệ `%`. Trượt khung hình (Lost track) làm giảm độ tin cậy.
-- `threshold`: Ngưỡng độ nhạy lọc nhiễu tĩnh.
+### 6.2 Ý nghĩa thông số & Màn hình Chi tiết (Analytics Detail)
+
+Trong màn hình **Analytics Detail** (Chi tiết Phân tích), hệ thống chỉ tập trung vẽ biểu đồ cho các thông số mang tính chất **Đo lường thuần túy (Pure Measurements)** để đảm bảo tính khách quan và minh bạch về hiệu năng phần cứng/thuật toán. Các thông số này bao gồm:
+
+1. **FPS (Frames Per Second)**: 
+   - Đo lường trực tiếp tốc độ khung hình thực tế mà thiết bị có thể xử lý được (nghịch đảo của thời gian trễ).
+   - *Trên Detail Fragment*: Cho thấy độ mượt mà của thuật toán trên từng frame. Mức chênh lệch (Delta) thể hiện rõ KLT hay Farneback tối ưu hơn.
+2. **Process Time (Thời gian xử lý - ms)**: 
+   - Đo trực tiếp thời gian CPU/GPU phải bỏ ra để chạy xong hàm thuật toán cho 1 frame bằng clock hệ thống.
+3. **Tracks / Active Vectors (Số lượng điểm đang track)**: 
+   - Phép đếm thuần túy số lượng điểm ảnh (features) hoặc ô lưới (grid) đang được thuật toán bám sát thành công. 
+
+#### Sự khác biệt với thông số Tính toán (Calculated/Inferred Metrics)
+Các biểu đồ về các thông số sau đã được gỡ bỏ khỏi màn hình Detail do bản chất chúng là thông số nội suy hoặc thống kê, tuy nhiên **chỉ số trung bình tổng thể vẫn được giữ lại** trên thẻ thông tin (Summary Card) để làm cơ sở đánh giá:
+
+- **Average Magnitude (Độ lớn Vector trung bình) & Flow X**: Thực chất là phép thống kê (trung bình cộng) của các vector dịch chuyển. Nó phản ánh hành vi camera (lia ngang/dọc) thay vì đo hiệu năng hệ thống.
+- **Confidence (Độ tin cậy %)**: Đây là một **điểm số Heuristic (Kinh nghiệm)** không phải là một đại lượng vật lý. Cách tính Confidence thường phụ thuộc vào:
+  - Tỉ lệ số điểm bị mất track (Lost tracks ratio).
+  - Lỗi thuật toán (Trạng thái `status` và `error` trả về từ `calcOpticalFlowPyrLK`).
+  - Kiểm tra đối chiếu (Forward-Backward Error) hoặc độ phân tán của ma trận vector (Variance).
+  - Vì mang tính chất "chấm điểm" suy đoán, Confidence giúp người dùng có cái nhìn tổng quan về chất lượng tracking nhưng không phù hợp làm thước đo hiệu năng trực tiếp trên biểu đồ.
+
+#### Chi tiết 12 Thông số tại Màn hình `Analytics Sample Detail`
+Khi nhấn vào một điểm trên biểu đồ, màn hình chi tiết sẽ hiển thị cụ thể các thông số cho **duy nhất 1 khung hình (Sample) đó**. Ý nghĩa chi tiết như sau:
+
+1. **Frame (`#...`)**: Số thứ tự của khung hình trong phiên chạy. Giúp định vị khung hình nào bị giật lag.
+2. **Time (`...s`)**: Thời điểm tương đối (tính bằng giây) kể từ lúc bắt đầu phiên đo đạc.
+3. **Giá trị KLT (Động)**: Hiển thị giá trị cụ thể của biểu đồ đang xem (FPS, Process Time, hoặc Tracks) áp dụng cho KLT.
+4. **Giá trị FB (Động)**: Tương tự trên nhưng áp dụng cho Farneback (FB).
+5. **KLT Proc**: Thời gian xử lý ròng (tính bằng ms) của thuật toán KLT cho riêng khung hình này.
+6. **FB Proc**: Thời gian xử lý ròng (tính bằng ms) của thuật toán Farneback cho riêng khung hình này.
+7. **KLT Trk (`Active/Total`)**: Viết tắt của "KLT Tracks" (Đường đi). Vì KLT hoạt động theo cơ chế nhắm vào từng điểm đặc trưng (Feature Point) để bám theo vết (Track), nên ô này hiển thị tỷ lệ số vector **thực sự đang chuyển động** / Tổng số điểm mà KLT đang theo dõi.
+8. **FB Vec (`Active/Total`)**: Viết tắt của "Farneback Vectors". Farneback không bám theo điểm mà tính toán ra một "trường vector" (Vector Field) dày đặc phủ kín màn hình. Ô này hiển thị tỷ lệ số ô lưới **có dịch chuyển** / Tổng số lượng ô lưới.
+9. **KLT dxdy (`X, Y`)**: Độ dịch chuyển trung bình (pixel) theo trục ngang X và dọc Y do KLT tính toán.
+10. **FB dxdy (`X, Y`)**: Tương tự KLT nhưng tính từ mảng Dày đặc của Farneback.
+11. **KLT Conf (%)**: Độ tin cậy (Confidence) của thuật toán KLT tại khung hình này.
+12. **FB Conf (%)**: Độ tin cậy của thuật toán Farneback tại khung hình này.
 
 ---
 

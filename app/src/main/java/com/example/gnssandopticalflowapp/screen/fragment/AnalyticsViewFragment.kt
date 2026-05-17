@@ -53,25 +53,16 @@ class AnalyticsViewFragment :
         tvFarnebackConfidenceValue.text = "${session.samples.averageOf { it.farnebackConfidence }.formatOne()}%"
 
         chartFps.setData("FPS", "fps", AnalyticsChartView.Metric.FPS, session.samples)
-        chartConfidence.setData("Confidence", "%", AnalyticsChartView.Metric.CONFIDENCE, session.samples)
-        chartMagnitude.setData("Average Vector", "px", AnalyticsChartView.Metric.MAGNITUDE, session.samples)
         chartProcess.setData("Process Time", "ms", AnalyticsChartView.Metric.PROCESS_MS, session.samples)
         chartTracks.setData("Tracks / Active Vectors", "", AnalyticsChartView.Metric.TRACKS, session.samples)
-        chartFlowX.setData("Horizontal Flow", "px", AnalyticsChartView.Metric.FLOW_X, session.samples)
 
         chartFps.isInteractive = false
-        chartConfidence.isInteractive = false
-        chartMagnitude.isInteractive = false
         chartProcess.isInteractive = false
         chartTracks.isInteractive = false
-        chartFlowX.isInteractive = false
 
         chartFps.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.FPS, it) }
-        chartConfidence.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.CONFIDENCE, it) }
-        chartMagnitude.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.MAGNITUDE, it) }
         chartProcess.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.PROCESS_MS, it) }
         chartTracks.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.TRACKS, it) }
-        chartFlowX.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.FLOW_X, it) }
     }
 
     private fun openChartDetail(metric: AnalyticsChartView.Metric, index: Int) {

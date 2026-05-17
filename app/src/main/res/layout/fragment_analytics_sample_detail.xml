@@ -214,12 +214,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter_bold"
-                    android:text="Delta"
-                    android:textColor="#E7DEFF"
+                    android:text="KLT Proc"
+                    android:textColor="#F0E68C"
                     android:textSize="9sp" />
 
                 <TextView
-                    android:id="@+id/tvDeltaValue"
+                    android:id="@+id/tvKltProcessValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
@@ -227,7 +227,7 @@
                     android:maxLines="1"
                     android:textColor="@color/white"
                     android:textSize="12sp"
-                    tools:text="23.7 fps" />
+                    tools:text="4.20 ms" />
 
             </LinearLayout>
 
@@ -245,12 +245,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter_bold"
-                    android:text="Proc"
-                    android:textColor="#E7DEFF"
+                    android:text="FB Proc"
+                    android:textColor="#00FF66"
                     android:textSize="9sp" />
 
                 <TextView
-                    android:id="@+id/tvProcessValue"
+                    android:id="@+id/tvFarnebackProcessValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
@@ -258,7 +258,7 @@
                     android:maxLines="1"
                     android:textColor="@color/white"
                     android:textSize="12sp"
-                    tools:text="4.20 / 8.30" />
+                    tools:text="8.30 ms" />
 
             </LinearLayout>
 

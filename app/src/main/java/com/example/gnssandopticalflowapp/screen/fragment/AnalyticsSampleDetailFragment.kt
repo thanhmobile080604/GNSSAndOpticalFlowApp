@@ -79,8 +79,8 @@ class AnalyticsSampleDetailFragment :
         tvTimeValue.text = "${formatTwo(sample.elapsedMs / 1000.0)}s"
         tvKltValue.text = formatMetricValue(sample, klt = true)
         tvFarnebackValue.text = formatMetricValue(sample, klt = false)
-        tvDeltaValue.text = formatDelta(sample)
-        tvProcessValue.text = "${formatTwo(sample.kltProcessMs)} / ${formatTwo(sample.farnebackProcessMs)}"
+        tvKltProcessValue.text = "${formatTwo(sample.kltProcessMs)} ms"
+        tvFarnebackProcessValue.text = "${formatTwo(sample.farnebackProcessMs)} ms"
         tvKltActiveValue.text = "${sample.kltActiveVectorCount}/${sample.kltFeatureCount}"
         tvFarnebackActiveValue.text =
             "${sample.farnebackActiveVectorCount}/${sample.farnebackSampleCount}"
@@ -93,21 +93,15 @@ class AnalyticsSampleDetailFragment :
     private fun metricTitle(metric: AnalyticsChartView.Metric): String {
         return when (metric) {
             AnalyticsChartView.Metric.FPS -> "FPS"
-            AnalyticsChartView.Metric.CONFIDENCE -> "Confidence"
-            AnalyticsChartView.Metric.MAGNITUDE -> "Average Vector"
             AnalyticsChartView.Metric.PROCESS_MS -> "Process Time"
             AnalyticsChartView.Metric.TRACKS -> "Tracks / Active Vectors"
-            AnalyticsChartView.Metric.FLOW_X -> "Horizontal Flow"
         }
     }
 
     private fun metricUnit(metric: AnalyticsChartView.Metric): String {
         return when (metric) {
             AnalyticsChartView.Metric.FPS -> "fps"
-            AnalyticsChartView.Metric.CONFIDENCE -> "%"
-            AnalyticsChartView.Metric.MAGNITUDE -> "px"
             AnalyticsChartView.Metric.PROCESS_MS -> "ms"
-            AnalyticsChartView.Metric.FLOW_X -> "px"
             AnalyticsChartView.Metric.TRACKS -> ""
         }
     }
@@ -116,42 +110,11 @@ class AnalyticsSampleDetailFragment :
         return when (metric) {
             AnalyticsChartView.Metric.FPS ->
                 "${formatOne(if (klt) sample.kltFps else sample.farnebackFps)} fps"
-
-            AnalyticsChartView.Metric.CONFIDENCE ->
-                "${formatOne(if (klt) sample.kltConfidence else sample.farnebackConfidence)}%"
-
-            AnalyticsChartView.Metric.MAGNITUDE ->
-                formatTwo(if (klt) sample.kltAvgMagnitude else sample.farnebackAvgMagnitude)
-
             AnalyticsChartView.Metric.PROCESS_MS ->
                 "${formatTwo(if (klt) sample.kltProcessMs else sample.farnebackProcessMs)} ms"
-
             AnalyticsChartView.Metric.TRACKS -> {
                 if (klt) sample.kltFeatureCount.toString() else sample.farnebackActiveVectorCount.toString()
             }
-
-            AnalyticsChartView.Metric.FLOW_X ->
-                "${formatTwo(if (klt) sample.kltAvgDx else sample.farnebackAvgDx)} px"
-        }
-    }
-
-    private fun formatDelta(sample: AnalyticsSample): String {
-        return when (metric) {
-            AnalyticsChartView.Metric.FPS -> "${formatOne(abs(sample.kltFps - sample.farnebackFps))} fps"
-            AnalyticsChartView.Metric.CONFIDENCE ->
-                "${formatOne(abs(sample.kltConfidence - sample.farnebackConfidence))}%"
-
-            AnalyticsChartView.Metric.MAGNITUDE ->
-                formatTwo(abs(sample.kltAvgMagnitude - sample.farnebackAvgMagnitude))
-
-            AnalyticsChartView.Metric.PROCESS_MS ->
-                "${formatTwo(abs(sample.kltProcessMs - sample.farnebackProcessMs))} ms"
-
-            AnalyticsChartView.Metric.TRACKS ->
-                abs(sample.kltFeatureCount - sample.farnebackActiveVectorCount).toString()
-
-            AnalyticsChartView.Metric.FLOW_X ->
-                "${formatTwo(abs(sample.kltAvgDx - sample.farnebackAvgDx))} px"
         }
     }
 

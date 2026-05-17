@@ -185,18 +185,6 @@
                 android:layout_marginTop="14dp" />
 
             <com.example.gnssandopticalflowapp.view.AnalyticsChartView
-                android:id="@+id/chartConfidence"
-                android:layout_width="match_parent"
-                android:layout_height="230dp"
-                android:layout_marginTop="14dp" />
-
-            <com.example.gnssandopticalflowapp.view.AnalyticsChartView
-                android:id="@+id/chartMagnitude"
-                android:layout_width="match_parent"
-                android:layout_height="230dp"
-                android:layout_marginTop="14dp" />
-
-            <com.example.gnssandopticalflowapp.view.AnalyticsChartView
                 android:id="@+id/chartProcess"
                 android:layout_width="match_parent"
                 android:layout_height="230dp"
@@ -204,12 +192,6 @@
 
             <com.example.gnssandopticalflowapp.view.AnalyticsChartView
                 android:id="@+id/chartTracks"
-                android:layout_width="match_parent"
-                android:layout_height="230dp"
-                android:layout_marginTop="14dp" />
-
-            <com.example.gnssandopticalflowapp.view.AnalyticsChartView
-                android:id="@+id/chartFlowX"
                 android:layout_width="match_parent"
                 android:layout_height="230dp"
                 android:layout_marginTop="14dp" />
