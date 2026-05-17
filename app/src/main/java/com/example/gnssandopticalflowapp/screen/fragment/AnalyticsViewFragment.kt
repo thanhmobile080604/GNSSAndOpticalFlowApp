@@ -59,12 +59,19 @@ class AnalyticsViewFragment :
         chartTracks.setData("Tracks / Active Vectors", "", AnalyticsChartView.Metric.TRACKS, session.samples)
         chartFlowX.setData("Horizontal Flow", "px", AnalyticsChartView.Metric.FLOW_X, session.samples)
 
-        chartFps.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.FPS, it) }
-        chartConfidence.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.CONFIDENCE, it) }
-        chartMagnitude.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.MAGNITUDE, it) }
-        chartProcess.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.PROCESS_MS, it) }
-        chartTracks.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.TRACKS, it) }
-        chartFlowX.setOnSampleSelectedListener { openChartDetail(AnalyticsChartView.Metric.FLOW_X, it) }
+        chartFps.isInteractive = false
+        chartConfidence.isInteractive = false
+        chartMagnitude.isInteractive = false
+        chartProcess.isInteractive = false
+        chartTracks.isInteractive = false
+        chartFlowX.isInteractive = false
+
+        chartFps.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.FPS, it) }
+        chartConfidence.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.CONFIDENCE, it) }
+        chartMagnitude.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.MAGNITUDE, it) }
+        chartProcess.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.PROCESS_MS, it) }
+        chartTracks.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.TRACKS, it) }
+        chartFlowX.setOnChartClickedListener { openChartDetail(AnalyticsChartView.Metric.FLOW_X, it) }
     }
 
     private fun openChartDetail(metric: AnalyticsChartView.Metric, index: Int) {

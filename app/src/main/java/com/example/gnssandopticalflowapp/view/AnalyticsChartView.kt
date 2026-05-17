@@ -41,6 +41,11 @@ class AnalyticsChartView @JvmOverloads constructor(
     private var metric: Metric = Metric.FPS
     private var selectedIndex = -1
     private var onSampleSelected: ((Int) -> Unit)? = null
+    private var onChartClicked: ((Int) -> Unit)? = null
+    private var downX = 0f
+    private var downY = 0f
+
+    var isInteractive: Boolean = true
 
     private val kltColor = Color.rgb(240, 230, 140)
     private val farnebackColor = Color.rgb(0, 255, 102)
@@ -64,6 +69,10 @@ class AnalyticsChartView @JvmOverloads constructor(
 
     fun setOnSampleSelectedListener(listener: ((Int) -> Unit)?) {
         onSampleSelected = listener
+    }
+
+    fun setOnChartClickedListener(listener: ((Int) -> Unit)?) {
+        onChartClicked = listener
     }
 
     fun setSelectedIndex(index: Int) {
@@ -111,22 +120,71 @@ class AnalyticsChartView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (samples.isEmpty()) return super.onTouchEvent(event)
 
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> return true
-            MotionEvent.ACTION_UP -> {
-                ensureChartRect()
-                if (!chartRect.contains(event.x, event.y)) return true
+        if (!isInteractive) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x
+                    downY = event.y
+                    return true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val dx = Math.abs(event.x - downX)
+                    val dy = Math.abs(event.y - downY)
+                    if (dx < 20f && dy < 20f) {
+                        val index = getIndexForX(event.x)
+                        onChartClicked?.invoke(index)
+                    }
+                    return true
+                }
+            }
+            return super.onTouchEvent(event)
+        }
 
-                val ratio = ((event.x - chartRect.left) / chartRect.width()).coerceIn(0f, 1f)
-                val index = (ratio * (samples.size - 1)).roundToInt().coerceIn(0, samples.lastIndex)
-                selectedIndex = index
-                invalidate()
-                onSampleSelected?.invoke(index)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
+                parent?.requestDisallowInterceptTouchEvent(true)
+                handleTouchSelection(event.x)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                handleTouchSelection(event.x)
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                handleTouchSelection(event.x)
+                val dx = Math.abs(event.x - downX)
+                val dy = Math.abs(event.y - downY)
+                if (dx < 20f && dy < 20f) {
+                    onChartClicked?.invoke(selectedIndex)
+                }
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
                 return true
             }
         }
 
         return true
+    }
+
+    private fun handleTouchSelection(x: Float) {
+        val index = getIndexForX(x)
+        if (selectedIndex != index) {
+            selectedIndex = index
+            invalidate()
+            onSampleSelected?.invoke(index)
+        }
+    }
+
+    private fun getIndexForX(x: Float): Int {
+        ensureChartRect()
+        if (chartRect.width() <= 0f) return 0
+        val ratio = ((x - chartRect.left) / chartRect.width()).coerceIn(0f, 1f)
+        return (ratio * (samples.size - 1)).roundToInt().coerceIn(0, samples.lastIndex)
     }
 
     private fun drawBackground(canvas: Canvas) {
