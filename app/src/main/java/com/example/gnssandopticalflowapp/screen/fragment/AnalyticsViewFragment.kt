@@ -45,12 +45,12 @@ class AnalyticsViewFragment :
 
     private fun bindSession(session: AnalyticsSession) = with(binding) {
         tvSessionTime.text = displayDateFormat.format(Date(session.startedAtMs))
-        tvDurationValue.text = formatDuration(session.durationMs)
-        tvSamplesValue.text = session.samples.size.toString()
+        tvDurationValue.text = "Duration: ${formatDuration(session.durationMs)}"
+        tvSamplesValue.text = "Samples: ${session.samples.size.toString()}"
         tvKltFpsValue.text = "${session.samples.averageOf { it.kltFps }.formatOne()} fps"
         tvFarnebackFpsValue.text = "${session.samples.averageOf { it.farnebackFps }.formatOne()} fps"
-        tvKltConfidenceValue.text = "${session.samples.averageOf { it.kltConfidence }.formatOne()}%"
-        tvFarnebackConfidenceValue.text = "${session.samples.averageOf { it.farnebackConfidence }.formatOne()}%"
+        tvKltConfidenceValue.text = "Confidence: ${session.samples.averageOf { it.kltConfidence }.formatOne()}%"
+        tvFarnebackConfidenceValue.text = "Confidence: ${session.samples.averageOf { it.farnebackConfidence }.formatOne()}%"
 
         chartFps.setData("FPS", "fps", AnalyticsChartView.Metric.FPS, session.samples)
         chartProcess.setData("Process Time", "ms", AnalyticsChartView.Metric.PROCESS_MS, session.samples)
