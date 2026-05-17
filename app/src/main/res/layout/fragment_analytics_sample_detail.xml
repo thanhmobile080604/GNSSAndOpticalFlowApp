@@ -142,12 +142,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter_bold"
-                    android:text="KLT"
+                    android:text="KLT Fps"
                     android:textColor="#F0E68C"
                     android:textSize="9sp" />
 
                 <TextView
-                    android:id="@+id/tvKltValue"
+                    android:id="@+id/tvKltFpsValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
@@ -173,12 +173,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter_bold"
-                    android:text="FB"
+                    android:text="FB Fps"
                     android:textColor="#00FF66"
                     android:textSize="9sp" />
 
                 <TextView
-                    android:id="@+id/tvFarnebackValue"
+                    android:id="@+id/tvFarnebackFpsValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"

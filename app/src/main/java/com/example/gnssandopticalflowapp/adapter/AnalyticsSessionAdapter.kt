@@ -1,5 +1,6 @@
 package com.example.gnssandopticalflowapp.adapter
 
+import android.annotation.SuppressLint
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
@@ -20,12 +21,14 @@ class AnalyticsSessionAdapter(
     private var isEditMode = false
     private val selectedIds = mutableSetOf<String>()
 
+    @SuppressLint("NotifyDataSetChanged")
     fun setData(items: List<AnalyticsSessionSummary>) {
         sessions = items
         selectedIds.clear()
         notifyDataSetChanged()
     }
 
+    @SuppressLint("NotifyDataSetChanged")
     fun setEditMode(edit: Boolean) {
         if (isEditMode == edit) return
         isEditMode = edit
@@ -37,6 +40,7 @@ class AnalyticsSessionAdapter(
         return sessions.filter { selectedIds.contains(it.id) }
     }
 
+    @SuppressLint("NotifyDataSetChanged")
     fun removeSessions(sessionsToRemove: List<AnalyticsSessionSummary>) {
         val removeIds = sessionsToRemove.map { it.id }.toSet()
         sessions = sessions.filterNot { removeIds.contains(it.id) }
@@ -108,6 +112,7 @@ class AnalyticsSessionAdapter(
         private fun Double.formatOne(): String = String.format(Locale.US, "%.1f", this)
 
         private companion object {
+            @SuppressLint("ConstantLocale")
             val dateFormat = SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault())
         }
     }

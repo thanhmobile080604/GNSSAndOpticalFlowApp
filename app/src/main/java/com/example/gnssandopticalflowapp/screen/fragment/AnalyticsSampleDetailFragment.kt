@@ -77,8 +77,8 @@ class AnalyticsSampleDetailFragment :
     private fun bindSelectedSample(sample: AnalyticsSample) = with(binding) {
         tvFrameValue.text = "#${sample.frameIndex}"
         tvTimeValue.text = "${formatTwo(sample.elapsedMs / 1000.0)}s"
-        tvKltValue.text = formatMetricValue(sample, klt = true)
-        tvFarnebackValue.text = formatMetricValue(sample, klt = false)
+        tvKltFpsValue.text = "${formatOne(sample.kltFps)} fps"
+        tvFarnebackFpsValue.text = "${formatOne(sample.farnebackFps)} fps"
         tvKltProcessValue.text = "${formatTwo(sample.kltProcessMs)} ms"
         tvFarnebackProcessValue.text = "${formatTwo(sample.farnebackProcessMs)} ms"
         tvKltActiveValue.text = "${sample.kltActiveVectorCount}/${sample.kltFeatureCount}"
@@ -103,18 +103,6 @@ class AnalyticsSampleDetailFragment :
             AnalyticsChartView.Metric.FPS -> "fps"
             AnalyticsChartView.Metric.PROCESS_MS -> "ms"
             AnalyticsChartView.Metric.TRACKS -> ""
-        }
-    }
-
-    private fun formatMetricValue(sample: AnalyticsSample, klt: Boolean): String {
-        return when (metric) {
-            AnalyticsChartView.Metric.FPS ->
-                "${formatOne(if (klt) sample.kltFps else sample.farnebackFps)} fps"
-            AnalyticsChartView.Metric.PROCESS_MS ->
-                "${formatTwo(if (klt) sample.kltProcessMs else sample.farnebackProcessMs)} ms"
-            AnalyticsChartView.Metric.TRACKS -> {
-                if (klt) sample.kltFeatureCount.toString() else sample.farnebackActiveVectorCount.toString()
-            }
         }
     }
 
