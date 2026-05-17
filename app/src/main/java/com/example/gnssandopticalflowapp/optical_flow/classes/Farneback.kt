@@ -16,6 +16,7 @@ class Farneback : OpticalFlow {
     private val scaledPrevGray: Mat = Mat()
     private val scaledCurrGray: Mat = Mat()
     private val flowGray: Mat = Mat()
+    private val backwardFlowGray: Mat = Mat()
     private val currGray: Mat = Mat()
     private val pyrScale = 0.5
     private var levels = 2
@@ -85,7 +86,21 @@ class Farneback : OpticalFlow {
             flags
         )
 
-        val stats = drawOptFlowMap(flowGray, newFrame, drawStep, flowColor)
+        // Backward flow for FBE
+        Video.calcOpticalFlowFarneback(
+            scaledCurrGray,
+            scaledPrevGray,
+            backwardFlowGray,
+            pyrScale,
+            levels,
+            winSize,
+            iterations,
+            polyN,
+            polySigma,
+            flags
+        )
+
+        val stats = drawOptFlowMap(flowGray, backwardFlowGray, newFrame, drawStep, flowColor)
 
         scaledCurrGray.copyTo(scaledPrevGray)
 
@@ -136,8 +151,8 @@ class Farneback : OpticalFlow {
         )
     }
 
-    private fun drawOptFlowMap(flow: Mat, flowmap: Mat, step: Int, color: Scalar): FlowStats {
-        if (flow.empty()) {
+    private fun drawOptFlowMap(flow: Mat, backwardFlow: Mat, flowmap: Mat, step: Int, color: Scalar): FlowStats {
+        if (flow.empty() || backwardFlow.empty()) {
             return FlowStats(
                 avgMotion = null,
                 sampleCount = 0,
@@ -163,6 +178,7 @@ class Farneback : OpticalFlow {
         var totalMagnitude = 0.0
         var gridSampleCount = 0
         var sampleCount = 0
+        var fbeInliers = 0
         var screenY = startY
         while (screenY < mapRows) {
             var screenX = startX
@@ -177,6 +193,26 @@ class Farneback : OpticalFlow {
                 val magnitude = sqrt(magnitudeSquared)
 
                 if (magnitudeSquared >= minMotionSquared) {
+                    // Check FBE
+                    var fbeValid = false
+                    val bx = (flowX + fx).roundToInt().coerceIn(0, flowCols - 1)
+                    val by = (flowY + fy).roundToInt().coerceIn(0, flowRows - 1)
+                    val bVec = backwardFlow.get(by, bx)
+                    if (bVec != null) {
+                        val bdx = bVec[0] * xScale
+                        val bdy = bVec[1] * yScale
+                        val errX = fx + bdx
+                        val errY = fy + bdy
+                        val fbeSquared = errX * errX + errY * errY
+                        if (fbeSquared <= 2.25) { // Threshold 1.5 pixels
+                            fbeValid = true
+                        }
+                    }
+
+                    if (fbeValid) {
+                        fbeInliers++
+                    }
+
                     var displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
                     var displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
                     val displayMagnitude = sqrt((displayFx * displayFx) + (displayFy * displayFy))
@@ -207,7 +243,7 @@ class Farneback : OpticalFlow {
         return if (sampleCount > 0) {
             val avgDx = sumX / sampleCount
             val avgDy = sumY / sampleCount
-            val activeRatio = sampleCount.toDouble() / gridSampleCount.coerceAtLeast(1).toDouble()
+            val confidence = if (sampleCount > 0) (fbeInliers.toDouble() / sampleCount.toDouble()) * 100.0 else 0.0
             FlowStats(
                 avgMotion = Point(avgDx, avgDy),
                 sampleCount = gridSampleCount,
@@ -215,7 +251,7 @@ class Farneback : OpticalFlow {
                 avgDx = avgDx,
                 avgDy = avgDy,
                 avgMagnitude = totalMagnitude / sampleCount,
-                confidence = activeRatio.coerceIn(0.0, 1.0) * 100.0
+                confidence = confidence.coerceIn(0.0, 100.0)
             )
         } else {
             FlowStats(

@@ -22,6 +22,19 @@
         app:layout_constraintTop_toTopOf="parent"
         tools:text="15:20 15/05/2026" />
 
+    <ImageView
+        android:id="@+id/ivCheck"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_marginEnd="6dp"
+        android:background="@drawable/bg_glass_icon_button"
+        android:src="@drawable/ic_check"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/tvDuration"
+        app:layout_constraintEnd_toStartOf="@id/tvDuration"
+        app:layout_constraintTop_toTopOf="@id/tvDuration"
+        app:tint="@color/white" />
+
     <TextView
         android:id="@+id/tvDuration"
         android:layout_width="wrap_content"

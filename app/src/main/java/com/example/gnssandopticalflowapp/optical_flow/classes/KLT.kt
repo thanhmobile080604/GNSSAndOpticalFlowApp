@@ -136,24 +136,51 @@ class KLT : OpticalFlow {
             )
         }
 
-        // use pyramidal LK with tuned parameters
+        // use pyramidal LK with tuned parameters (Forward)
         Video.calcOpticalFlowPyrLK(prevGray, currGray, prevPts, currPts, status, err, lkWinSize, lkMaxLevel, lkCriteria, 0, 0.001)
+
+        // Backward flow for FBE
+        val backwardPts = MatOfPoint2f()
+        val statusBack = MatOfByte()
+        val errBack = MatOfFloat()
+        Video.calcOpticalFlowPyrLK(currGray, prevGray, currPts, backwardPts, statusBack, errBack, lkWinSize, lkMaxLevel, lkCriteria, 0, 0.001)
 
         flowPts = 0
         val statusArray = status.toArray()
+        val statusBackArray = statusBack.toArray()
         val prevPtsArray = prevPts.toArray()
         val currPtsArray = currPts.toArray()
+        val backwardPtsArray = backwardPts.toArray()
 
         // Track all reliable points first so feature refresh is not driven by display filtering.
         val trackedMotions = ArrayList<TrackMotion>()
         val allDxList = ArrayList<Double>()
         val allDyList = ArrayList<Double>()
-        val errList = ArrayList<Double>()
-        val errArray = err.toArray()
+        var fbeInliers = 0
+        var fbeTotalTracked = 0
+
         for (i in statusArray.indices) {
             if (statusArray[i].toInt() == 1) {
-                val e = if (i < errArray.size) errArray[i].toDouble() else Double.MAX_VALUE
-                if (e.isFinite() && e < 50.0) { // filter large errors
+                // Check FBE
+                var fbeValid = false
+                if (statusBackArray.size > i && statusBackArray[i].toInt() == 1) {
+                    val ptStart = prevPtsArray[i]
+                    val ptBack = backwardPtsArray[i]
+                    val errX = ptStart.x - ptBack.x
+                    val errY = ptStart.y - ptBack.y
+                    val fbeSquared = errX * errX + errY * errY
+                    if (fbeSquared <= 2.25) { // Threshold 1.5 pixels
+                        fbeValid = true
+                    }
+                }
+
+                fbeTotalTracked++
+                if (fbeValid) {
+                    fbeInliers++
+                }
+
+                // Use FBE to filter reliable points for motion calculation
+                if (fbeValid) {
                     val pt1 = prevPtsArray[i]
                     val pt2 = currPtsArray[i]
                     val dx = pt2.x - pt1.x
@@ -162,7 +189,6 @@ class KLT : OpticalFlow {
                     trackedMotions.add(TrackMotion(pt1, dx, dy))
                     allDxList.add(dx)
                     allDyList.add(dy)
-                    errList.add(e)
                 }
             }
         }
@@ -245,10 +271,8 @@ class KLT : OpticalFlow {
             avgDy = metricDy,
             avgMagnitude = metricMagnitude,
             confidence = computeConfidence(
-                trackedCount = flowPts,
-                totalCount = prevPtsArray.size,
-                avgErr = errList.averageOrZero(),
-                activeVectorCount = motionPts
+                inliers = fbeInliers,
+                totalTracked = fbeTotalTracked
             )
         )
     }
@@ -285,18 +309,11 @@ class KLT : OpticalFlow {
     }
 
     private fun computeConfidence(
-        trackedCount: Int,
-        totalCount: Int,
-        avgErr: Double,
-        activeVectorCount: Int
+        inliers: Int,
+        totalTracked: Int
     ): Double {
-        if (totalCount <= 0 || trackedCount <= 0) return 0.0
-
-        val trackRatio = trackedCount.toDouble() / totalCount.toDouble()
-        val densityRatio = trackedCount.toDouble() / maxCorners.coerceAtLeast(1).toDouble()
-        val errorScore = 1.0 - (avgErr / 50.0).coerceIn(0.0, 1.0)
-        val activityRatio = activeVectorCount.toDouble() / trackedCount.toDouble()
-        return ((trackRatio * 0.40) + (errorScore * 0.35) + (densityRatio * 0.20) + (activityRatio * 0.05)) * 100.0
+        if (totalTracked <= 0) return 0.0
+        return (inliers.toDouble() / totalTracked.toDouble() * 100.0).coerceIn(0.0, 100.0)
     }
 
     private fun List<Double>.averageOrZero(): Double {

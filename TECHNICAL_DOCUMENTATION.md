@@ -216,12 +216,12 @@ Trong màn hình **Analytics Detail** (Chi tiết Phân tích), hệ thống ch�
 #### Sự khác biệt với thông số Tính toán (Calculated/Inferred Metrics)
 Các biểu đồ về các thông số sau đã được gỡ bỏ khỏi màn hình Detail do bản chất chúng là thông số nội suy hoặc thống kê, tuy nhiên **chỉ số trung bình tổng thể vẫn được giữ lại** trên thẻ thông tin (Summary Card) để làm cơ sở đánh giá:
 
-- **Average Magnitude (Độ lớn Vector trung bình) & Flow X**: Thực chất là phép thống kê (trung bình cộng) của các vector dịch chuyển. Nó phản ánh hành vi camera (lia ngang/dọc) thay vì đo hiệu năng hệ thống.
-- **Confidence (Độ tin cậy %)**: Đây là một **điểm số Heuristic (Kinh nghiệm)** không phải là một đại lượng vật lý. Cách tính Confidence thường phụ thuộc vào:
-  - Tỉ lệ số điểm bị mất track (Lost tracks ratio).
-  - Lỗi thuật toán (Trạng thái `status` và `error` trả về từ `calcOpticalFlowPyrLK`).
-  - Kiểm tra đối chiếu (Forward-Backward Error) hoặc độ phân tán của ma trận vector (Variance).
-  - Vì mang tính chất "chấm điểm" suy đoán, Confidence giúp người dùng có cái nhìn tổng quan về chất lượng tracking nhưng không phù hợp làm thước đo hiệu năng trực tiếp trên biểu đồ.
+- **Confidence (Độ tin cậy %)**: Đây là tỷ lệ phần trăm được đo lường bằng phương pháp **Forward-Backward Error (FBE)** (Sai số Tiến-Lùi).
+  - Khác với phương pháp Heuristic thiên vị trước đây, ứng dụng hiện tại bắt buộc cả KLT và Farneback phải chạy thuật toán 2 chiều cho mỗi khung hình: Chiều tiến (Forward Flow) và Chiều lùi (Backward Flow).
+  - Đối với mỗi vector chuyển động tìm được ở chiều tiến, thuật toán sẽ lấy điểm đích và dò ngược lại theo vector chiều lùi. 
+  - Nếu điểm quay về nằm cách điểm xuất phát ban đầu dưới 1.5 pixels, vector đó được coi là **Đáng tin (Inlier)**.
+  - **Công thức chung**: `Confidence = (Số lượng Inliers / Tổng số điểm có phát hiện chuyển động) * 100`. 
+  - Phương pháp này mang lại điểm số công bằng và phản ánh chính xác độ nhiễu của thuật toán trên từng khung hình, giúp biểu đồ Confidence của 2 thuật toán giờ đây có thể so sánh trực tiếp với nhau. Điểm trừ duy nhất là FPS sẽ bị giảm do thời gian xử lý (Process Time) tăng gấp đôi.
 
 #### Chi tiết 12 Thông số tại Màn hình `Analytics Sample Detail`
 Khi nhấn vào một điểm trên biểu đồ, màn hình chi tiết sẽ hiển thị cụ thể các thông số cho **duy nhất 1 khung hình (Sample) đó**. Ý nghĩa chi tiết như sau:

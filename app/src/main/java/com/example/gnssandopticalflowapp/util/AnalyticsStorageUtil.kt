@@ -47,6 +47,18 @@ object AnalyticsStorageUtil {
             .orEmpty()
     }
 
+    fun deleteSessions(context: Context, sessions: List<AnalyticsSessionSummary>): Int {
+        val dir = ensureAnalyticsDir(context)
+        var deletedCount = 0
+        for (session in sessions) {
+            val file = File(dir, "${session.id}.json")
+            if (file.exists() && file.delete()) {
+                deletedCount++
+            }
+        }
+        return deletedCount
+    }
+
     private fun AnalyticsSession.toSummary(): AnalyticsSessionSummary {
         return AnalyticsSessionSummary(
             id = id,

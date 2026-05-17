@@ -34,6 +34,7 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         }
         rcvAllPhoto.layoutManager = GridLayoutManager(safeContext(), 3)
         rcvAllPhoto.adapter = adapter
+        (rcvAllPhoto.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.supportsChangeAnimations = false
         loadMedia()
         updateToolbarState()
     }

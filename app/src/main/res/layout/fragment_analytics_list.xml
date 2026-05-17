@@ -23,20 +23,69 @@
 
     <TextView
         android:id="@+id/tvTitle"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="14dp"
-        android:layout_marginEnd="16dp"
+        android:layout_marginEnd="14dp"
         android:ellipsize="end"
         android:fontFamily="@font/inter_black"
         android:maxLines="1"
         android:text="Analysis Sessions"
         android:textColor="@color/white"
+        app:layout_constraintHorizontal_bias="0.44"
         android:textSize="24sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="44dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/tvCancel"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
+        android:layout_marginStart="16dp"
+        android:background="@drawable/bg_glass_chip"
+        android:fontFamily="@font/inter_extra_bold"
+        android:gravity="center"
+        android:minWidth="82dp"
+        android:text="Cancel"
+        android:textColor="@color/white"
+        android:textSize="14sp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/tvTitle"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="@id/tvTitle" />
+
+    <TextView
+        android:id="@+id/tvEdit"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_glass_chip"
+        android:fontFamily="@font/inter_extra_bold"
+        android:gravity="center"
+        android:minWidth="62dp"
+        android:paddingHorizontal="14dp"
+        android:text="Edit"
+        android:textColor="@color/white"
+        android:textSize="14sp"
         app:layout_constraintBottom_toBottomOf="@id/ivBack"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@id/ivBack"
         app:layout_constraintTop_toTopOf="@id/ivBack" />
+
+    <ImageView
+        android:id="@+id/ivTrash"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_glass_icon_button"
+        android:padding="10dp"
+        android:src="@drawable/ic_trash"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/tvTitle"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/tvTitle"
+        app:tint="@color/white" />
 
     <TextView
         android:id="@+id/tvEmpty"
