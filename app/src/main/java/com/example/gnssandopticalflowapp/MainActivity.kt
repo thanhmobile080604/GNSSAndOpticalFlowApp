@@ -1,6 +1,7 @@
 package com.example.gnssandopticalflowapp
 
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import android.os.StrictMode
 import android.util.Log
@@ -49,18 +50,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-        )
         enableEdgeToEdge()
+        allowLayoutInDisplayCutout()
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, 0, systemBars.right, systemBars.bottom)
-            insets
-        }
+        setupRootWindowInsets()
 
         StrictMode.setThreadPolicy(
             StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build()
@@ -135,6 +129,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        if (::binding.isInitialized) {
+            ViewCompat.requestApplyInsets(binding.main)
+        }
         if (::videoProcessingOverlay.isInitialized) {
             videoProcessingOverlay.onConfigurationChanged()
         }
@@ -166,6 +163,26 @@ class MainActivity : AppCompatActivity() {
             Log.d("Orekit", "Orekit data loaded successfully")
         } catch (e: Exception) {
             Log.e("Orekit", "Failed to load Orekit data", e)
+        }
+    }
+
+    private fun allowLayoutInDisplayCutout() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+
+        window.attributes = window.attributes.apply {
+            layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            } else {
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+    }
+
+    private fun setupRootWindowInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.main) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, 0, 0, systemBars.bottom)
+            insets
         }
     }
 
