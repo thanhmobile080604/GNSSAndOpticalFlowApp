@@ -104,6 +104,7 @@ class GNSSViewerFragment :
     private var cachedRoute: RouteInfo? = null
     private var navigationActive = false
     private var ignoreSearchTextChanges = false
+    private var restoreSearchResultsWhenBackTo2D = false
     private var searchJob: Job? = null
     private var routeJob: Job? = null
     private var externalOrbitRefreshJob: Job? = null
@@ -699,7 +700,7 @@ class GNSSViewerFragment :
                 })
             }
         }
-        binding.searchResultsPanel.show()
+        showSearchResultsPanelIfAllowed()
     }
 
     private fun createSearchResultRow(place: SearchPlace): TextView {
@@ -734,12 +735,52 @@ class GNSSViewerFragment :
             setTextColor(Color.BLACK)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         })
-        searchResultsPanel.show()
+        showSearchResultsPanelIfAllowed()
     }
 
     private fun clearSearchResults() {
+        restoreSearchResultsWhenBackTo2D = false
         binding.searchResultsList.removeAllViews()
         binding.searchResultsPanel.hide()
+    }
+
+    private fun showSearchResultsPanelIfAllowed() {
+        if (is3DMode) {
+            restoreSearchResultsWhenBackTo2D = shouldRestoreSearchResultsAfter3D()
+            binding.searchResultsPanel.hide()
+        } else {
+            binding.searchResultsPanel.show()
+        }
+    }
+
+    private fun shouldRestoreSearchResultsAfter3D(): Boolean {
+        val query = binding.etSearchLocation.text?.toString()?.trim().orEmpty()
+        return query.isNotEmpty() &&
+            selectedPlace == null &&
+            !navigationActive &&
+            binding.searchResultsList.childCount > 0
+    }
+
+    private fun restoreSearchResultsAfter3DIfNeeded() {
+        if (!restoreSearchResultsWhenBackTo2D) return
+        restoreSearchResultsWhenBackTo2D = false
+
+        val query = binding.etSearchLocation.text?.toString()?.trim().orEmpty()
+        if (query.isEmpty() || selectedPlace != null || navigationActive) return
+
+        binding.ivSearchClear.show()
+        if (binding.searchResultsList.childCount > 0) {
+            binding.searchResultsPanel.show()
+            return
+        }
+
+        if (query.length >= 3) {
+            showSearchMessage("Searching...")
+            searchJob?.cancel()
+            searchJob = viewLifecycleOwner.lifecycleScope.launch {
+                performPlaceSearch(query)
+            }
+        }
     }
 
     private fun getRecentSearches(): List<SearchPlace> {
@@ -1248,10 +1289,13 @@ class GNSSViewerFragment :
             currentLocationBubbleNormal.hide()
             currentLocationBubble.show()
             icPin.imageTintList = ColorStateList.valueOf(Color.BLACK)
+            restoreSearchResultsAfter3DIfNeeded()
             if (selectedPlace != null) {
                 routeBottomBar.show()
             }
         } else {
+            restoreSearchResultsWhenBackTo2D =
+                binding.searchResultsPanel.isVisible && shouldRestoreSearchResultsAfter3D()
             searchBar.hide()
             arBubble.show()
             icAr.show()
@@ -1272,7 +1316,6 @@ class GNSSViewerFragment :
             if (event.action == MotionEvent.ACTION_DOWN) {
                 if (binding.etSearchLocation.hasFocus() || binding.searchResultsPanel.isVisible) {
                     hideKeyboard()
-                    binding.searchResultsPanel.hide()
                 }
             }
             false
