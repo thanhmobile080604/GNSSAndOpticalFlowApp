@@ -4,6 +4,7 @@ import com.example.gnssandopticalflowapp.model.OFOutput
 import com.example.gnssandopticalflowapp.model.OpticalFlowMetrics
 import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
 import org.opencv.core.Core
+import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.Point
 import org.opencv.core.Scalar
@@ -190,87 +191,70 @@ class Farneback : OpticalFlow {
         var gridSampleCount = 0
         var sampleCount = 0
         var fbeInliers = 0
-        val heatmapOverlay = if (visualizationMode == VisualizationMode.HEATMAP) {
-            Mat.zeros(flowmap.rows(), flowmap.cols(), flowmap.type())
-        } else {
-            null
-        }
         var screenY = startY
-        try {
-            while (screenY < mapRows) {
-                var screenX = startX
-                while (screenX < mapCols) {
-                    gridSampleCount++
-                    val flowX = (screenX / xScale).roundToInt().coerceIn(0, flowCols - 1)
-                    val flowY = (screenY / yScale).roundToInt().coerceIn(0, flowRows - 1)
-                    val vector = flow.get(flowY, flowX) ?: doubleArrayOf(0.0, 0.0)
-                    val fx = vector[0] * xScale
-                    val fy = vector[1] * yScale
-                    val magnitudeSquared = (fx * fx) + (fy * fy)
-                    val magnitude = sqrt(magnitudeSquared)
+        while (screenY < mapRows) {
+            var screenX = startX
+            while (screenX < mapCols) {
+                gridSampleCount++
+                val flowX = (screenX / xScale).roundToInt().coerceIn(0, flowCols - 1)
+                val flowY = (screenY / yScale).roundToInt().coerceIn(0, flowRows - 1)
+                val vector = flow.get(flowY, flowX) ?: doubleArrayOf(0.0, 0.0)
+                val fx = vector[0] * xScale
+                val fy = vector[1] * yScale
+                val magnitudeSquared = (fx * fx) + (fy * fy)
+                val magnitude = sqrt(magnitudeSquared)
 
-                    if (magnitudeSquared >= minMotionSquared) {
-                        // Check FBE
-                        var fbeValid = false
-                        val bx = (flowX + fx).roundToInt().coerceIn(0, flowCols - 1)
-                        val by = (flowY + fy).roundToInt().coerceIn(0, flowRows - 1)
-                        val bVec = backwardFlow.get(by, bx)
-                        if (bVec != null) {
-                            val bdx = bVec[0] * xScale
-                            val bdy = bVec[1] * yScale
-                            val errX = fx + bdx
-                            val errY = fy + bdy
-                            val fbeSquared = errX * errX + errY * errY
-                            if (fbeSquared <= 2.25) { // Threshold 1.5 pixels
-                                fbeValid = true
-                            }
+                if (magnitudeSquared >= minMotionSquared) {
+                    // Check FBE
+                    var fbeValid = false
+                    val bx = (flowX + fx).roundToInt().coerceIn(0, flowCols - 1)
+                    val by = (flowY + fy).roundToInt().coerceIn(0, flowRows - 1)
+                    val bVec = backwardFlow.get(by, bx)
+                    if (bVec != null) {
+                        val bdx = bVec[0] * xScale
+                        val bdy = bVec[1] * yScale
+                        val errX = fx + bdx
+                        val errY = fy + bdy
+                        val fbeSquared = errX * errX + errY * errY
+                        if (fbeSquared <= 2.25) { // Threshold 1.5 pixels
+                            fbeValid = true
                         }
-
-                        if (fbeValid) {
-                            fbeInliers++
-                        }
-
-                        val start = Point(screenX.toDouble(), screenY.toDouble())
-                        if (visualizationMode == VisualizationMode.HEATMAP && heatmapOverlay != null) {
-                            Imgproc.circle(
-                                heatmapOverlay,
-                                start,
-                                (step * 0.58f).roundToInt().coerceAtLeast(8),
-                                heatColor(magnitude),
-                                -1
-                            )
-                        } else {
-                            var displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
-                            var displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
-                            val displayMagnitude = sqrt((displayFx * displayFx) + (displayFy * displayFy))
-                            if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
-                                val scaleUp = minDisplayVectorLength / displayMagnitude
-                                displayFx *= scaleUp
-                                displayFy *= scaleUp
-                            }
-                            val end = Point(
-                                start.x + displayFx,
-                                start.y + displayFy
-                            )
-
-                            Imgproc.line(flowmap, start, end, color, vectorThickness)
-                            Imgproc.circle(flowmap, start, dotRadius, color, -1)
-                        }
-                        sumX += fx * vectorDirectionSign
-                        sumY += fy * vectorDirectionSign
-                        totalMagnitude += magnitude
-                        sampleCount++
                     }
 
-                    screenX += step
+                    if (fbeValid) {
+                        fbeInliers++
+                    }
+
+                    if (visualizationMode == VisualizationMode.VECTORS) {
+                        val start = Point(screenX.toDouble(), screenY.toDouble())
+                        var displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
+                        var displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
+                        val displayMagnitude = sqrt((displayFx * displayFx) + (displayFy * displayFy))
+                        if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
+                            val scaleUp = minDisplayVectorLength / displayMagnitude
+                            displayFx *= scaleUp
+                            displayFy *= scaleUp
+                        }
+                        val end = Point(
+                            start.x + displayFx,
+                            start.y + displayFy
+                        )
+
+                        Imgproc.line(flowmap, start, end, color, vectorThickness)
+                        Imgproc.circle(flowmap, start, dotRadius, color, -1)
+                    }
+                    sumX += fx * vectorDirectionSign
+                    sumY += fy * vectorDirectionSign
+                    totalMagnitude += magnitude
+                    sampleCount++
                 }
-                screenY += step
+
+                screenX += step
             }
-            if (heatmapOverlay != null) {
-                Core.addWeighted(flowmap, 1.0, heatmapOverlay, 0.72, 0.0, flowmap)
-            }
-        } finally {
-            heatmapOverlay?.release()
+            screenY += step
+        }
+        if (visualizationMode == VisualizationMode.HEATMAP) {
+            drawDenseHeatmap(flow, flowmap, xScale, yScale)
         }
 
         return if (sampleCount > 0) {
@@ -299,12 +283,86 @@ class Farneback : OpticalFlow {
         }
     }
 
-    private fun heatColor(magnitude: Double): Scalar {
-        val normalized = (magnitude / (minMotionMagnitude * 8.0)).coerceIn(0.0, 1.0)
-        val red = (255.0 * normalized).coerceIn(0.0, 255.0)
-        val green = (255.0 * (1.0 - kotlin.math.abs(normalized - 0.5) * 2.0)).coerceIn(0.0, 255.0)
-        val blue = (255.0 * (1.0 - normalized)).coerceIn(0.0, 255.0)
-        return Scalar(red, green, blue, 255.0)
+    private fun drawDenseHeatmap(flow: Mat, flowmap: Mat, xScale: Double, yScale: Double) {
+        val channels = mutableListOf<Mat>()
+        val dx = Mat()
+        val dy = Mat()
+        val magnitude = Mat()
+        val normalized = Mat()
+        val heatmap8u = Mat()
+        val heatmapBgr = Mat()
+        val heatmapScaledBgr = Mat()
+        val heatmap = Mat()
+        val maskSmall = Mat()
+        val mask = Mat()
+        val blended = Mat()
+
+        try {
+            Core.split(flow, channels)
+            if (channels.size < 2) return
+
+            Core.multiply(channels[0], Scalar(xScale), dx)
+            Core.multiply(channels[1], Scalar(yScale), dy)
+            Core.magnitude(dx, dy, magnitude)
+            Imgproc.GaussianBlur(magnitude, magnitude, Size(9.0, 9.0), 0.0)
+
+            val maxMagnitude = Core.minMaxLoc(magnitude).maxVal
+            if (maxMagnitude <= minMotionMagnitude * HEATMAP_INPUT_THRESHOLD_MULTIPLIER) return
+
+            val normalizeMax = maxMagnitude.coerceAtLeast(minMotionMagnitude * HEATMAP_NORMALIZE_MULTIPLIER)
+            magnitude.convertTo(normalized, CvType.CV_32F, 1.0 / normalizeMax)
+            normalized.convertTo(heatmap8u, CvType.CV_8U, 255.0)
+            Imgproc.GaussianBlur(heatmap8u, heatmap8u, Size(15.0, 15.0), 0.0)
+            Imgproc.applyColorMap(heatmap8u, heatmapBgr, Imgproc.COLORMAP_TURBO)
+            Imgproc.resize(
+                heatmapBgr,
+                heatmapScaledBgr,
+                Size(flowmap.cols().toDouble(), flowmap.rows().toDouble()),
+                0.0,
+                0.0,
+                Imgproc.INTER_CUBIC
+            )
+            if (flowmap.channels() == 4) {
+                Imgproc.cvtColor(heatmapScaledBgr, heatmap, Imgproc.COLOR_BGR2RGBA)
+            } else {
+                heatmapScaledBgr.copyTo(heatmap)
+            }
+
+            Imgproc.threshold(
+                magnitude,
+                maskSmall,
+                minMotionMagnitude * HEATMAP_MASK_THRESHOLD_MULTIPLIER,
+                255.0,
+                Imgproc.THRESH_BINARY
+            )
+            maskSmall.convertTo(maskSmall, CvType.CV_8U)
+            Imgproc.resize(
+                maskSmall,
+                mask,
+                Size(flowmap.cols().toDouble(), flowmap.rows().toDouble()),
+                0.0,
+                0.0,
+                Imgproc.INTER_CUBIC
+            )
+            Imgproc.GaussianBlur(mask, mask, Size(31.0, 31.0), 0.0)
+            Imgproc.threshold(mask, mask, 1.0, 255.0, Imgproc.THRESH_BINARY)
+
+            Core.addWeighted(flowmap, HEATMAP_FRAME_WEIGHT, heatmap, HEATMAP_COLOR_WEIGHT, 0.0, blended)
+            blended.copyTo(flowmap, mask)
+        } finally {
+            channels.forEach { it.release() }
+            dx.release()
+            dy.release()
+            magnitude.release()
+            normalized.release()
+            heatmap8u.release()
+            heatmapBgr.release()
+            heatmapScaledBgr.release()
+            heatmap.release()
+            maskSmall.release()
+            mask.release()
+            blended.release()
+        }
     }
 
     private fun computeCenteredGridStart(size: Int, step: Int): Int {
@@ -314,6 +372,14 @@ class Farneback : OpticalFlow {
         val sampleCount = (((size - 1) - halfStep) / step) + 1
         val occupiedSpan = (sampleCount - 1) * step
         return ((size - 1 - occupiedSpan) / 2.0).roundToInt()
+    }
+
+    private companion object {
+        const val HEATMAP_FRAME_WEIGHT = 0.58
+        const val HEATMAP_COLOR_WEIGHT = 0.70
+        const val HEATMAP_NORMALIZE_MULTIPLIER = 9.0
+        const val HEATMAP_INPUT_THRESHOLD_MULTIPLIER = 0.40
+        const val HEATMAP_MASK_THRESHOLD_MULTIPLIER = 0.32
     }
 
     private fun buildOutput(

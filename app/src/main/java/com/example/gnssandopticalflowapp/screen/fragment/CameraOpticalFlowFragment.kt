@@ -6,6 +6,7 @@ import android.media.MediaScannerConnection
 import android.content.pm.PackageManager
 import android.util.Log
 import android.view.Surface
+import android.view.View
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -663,7 +664,7 @@ class CameraOpticalFlowFragment :
         binding.tvTitle.text = "KLT vs Farneback"
         setAlgorithmControlsEnabled(false)
         binding.roiOverlay.setSelectionEnabled(false)
-        binding.roiOverlay.visibility = android.view.View.GONE
+        binding.roiOverlay.visibility = View.GONE
         setRecordLocked(locked = true)
         if (!isRecording) {
             resetTimer()
