@@ -36,6 +36,7 @@ import androidx.appcompat.content.res.AppCompatResources.getDrawable
 import androidx.core.app.ActivityCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toDrawable
+import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
@@ -48,7 +49,6 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
 import com.example.gnssandopticalflowapp.gnss.renderer.EarthRenderer
-import com.example.gnssandopticalflowapp.gnss.GnssSatelliteTracker
 import com.example.gnssandopticalflowapp.model.RouteInfo
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.model.SearchPlace
@@ -60,14 +60,11 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.LocationSettingsRequest
 import com.google.android.gms.location.Priority
-import kotlinx.coroutines.Dispatchers
+import com.example.gnssandopticalflowapp.screen.viewmodel.GNSSViewerViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
@@ -79,11 +76,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Overlay
 import org.osmdroid.views.overlay.Polyline
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 import java.util.Locale
-import androidx.core.content.edit
 import androidx.core.view.isVisible
 
 @RequiresApi(Build.VERSION_CODES.R)
@@ -94,34 +87,56 @@ class GNSSViewerFragment :
     private lateinit var scaleGestureDetector: ScaleGestureDetector
     private lateinit var gestureDetector: GestureDetector
 
-    private var is3DMode = false
+    private val viewerViewModel: GNSSViewerViewModel by viewModels()
+
     private lateinit var locationManager: LocationManager
-    private var currentLocation: Location? = null
     private var userMarker: Marker? = null
     private var targetMarker: Marker? = null
     private var routeLine: Polyline? = null
-    private var selectedPlace: SearchPlace? = null
-    private var cachedRoute: RouteInfo? = null
-    private var navigationActive = false
     private var ignoreSearchTextChanges = false
-    private var restoreSearchResultsWhenBackTo2D = false
     private var searchJob: Job? = null
     private var routeJob: Job? = null
     private var externalOrbitRefreshJob: Job? = null
     private var gnssErrorDialogJob: Job? = null
-    private var lastRouteRequestAt = 0L
-    private var lastRouteOrigin: GeoPoint? = null
-    private val satelliteTracker = GnssSatelliteTracker()
     private val useTestLocation: Boolean = Constants.USE_FAKE_LOCATION
-    private var gnssStatusRegistered = false
-    private var gnssMeasurementsRegistered = false
-    private var lastGnssStatusSatelliteCount = 0
-    private var lastGnssMeasurementCount = 0
-    private var latestSatelliteSnapshot: List<SatelliteInfo> = emptyList()
-    private val routeRefreshIntervalMs = 8000L
-    private val routeRefreshDistanceMeters = 25.0
     private val externalOrbitRetryDelayMs = 30_000L
     private val externalOrbitRefreshAttempts = 3
+    private var is3DMode: Boolean
+        get() = viewerViewModel.is3DMode
+        set(value) {
+            viewerViewModel.is3DMode = value
+        }
+    private var currentLocation: Location?
+        get() = viewerViewModel.currentLocation
+        set(value) {
+            viewerViewModel.currentLocation = value
+        }
+    private var selectedPlace: SearchPlace?
+        get() = viewerViewModel.selectedPlace
+        set(value) {
+            viewerViewModel.selectedPlace = value
+        }
+    private var cachedRoute: RouteInfo?
+        get() = viewerViewModel.cachedRoute
+        set(value) {
+            viewerViewModel.cachedRoute = value
+        }
+    private var navigationActive: Boolean
+        get() = viewerViewModel.navigationActive
+        set(value) {
+            viewerViewModel.navigationActive = value
+        }
+    private var gnssStatusRegistered: Boolean
+        get() = viewerViewModel.gnssStatusRegistered
+        set(value) {
+            viewerViewModel.gnssStatusRegistered = value
+        }
+    private var gnssMeasurementsRegistered: Boolean
+        get() = viewerViewModel.gnssMeasurementsRegistered
+        set(value) {
+            viewerViewModel.gnssMeasurementsRegistered = value
+        }
+
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             currentLocation = mainViewModel.getEffectiveLocation(location)
@@ -157,21 +172,20 @@ class GNSSViewerFragment :
 
     private val gnssMeasurementsCallback = object : GnssMeasurementsEvent.Callback() {
         override fun onGnssMeasurementsReceived(eventArgs: GnssMeasurementsEvent) {
-            lastGnssMeasurementCount = eventArgs.measurements.size
-            satelliteTracker.updateMeasurements(eventArgs)
+            viewerViewModel.lastGnssMeasurementCount = eventArgs.measurements.size
+            viewerViewModel.satelliteTracker.updateMeasurements(eventArgs)
         }
     }
 
     @SuppressLint("NewApi")
     private val gnssStatusCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
-            lastGnssStatusSatelliteCount = status.satelliteCount
+            viewerViewModel.lastGnssStatusSatelliteCount = status.satelliteCount
             if (status.satelliteCount > 0) {
                 cancelGnssErrorDialogCheck()
             }
             if (rendererSet) {
-                val satellites = satelliteTracker.buildSatelliteInfo(status, currentLocation)
-                latestSatelliteSnapshot = satellites
+                val satellites = viewerViewModel.updateSatelliteSnapshot(status)
                 earthRenderer.updateSatellites(satellites)
             }
         }
@@ -295,8 +309,8 @@ class GNSSViewerFragment :
     private fun startLocationUpdates() {
         if (!hasLocationPermission()) return
         setupLocationManager()
-        lastGnssStatusSatelliteCount = 0
-        lastGnssMeasurementCount = 0
+        viewerViewModel.lastGnssStatusSatelliteCount = 0
+        viewerViewModel.lastGnssMeasurementCount = 0
         refreshExternalOrbitDataIfNeeded()
 
         if (useTestLocation) {
@@ -362,10 +376,7 @@ class GNSSViewerFragment :
         }
         externalOrbitRefreshJob?.cancel()
         externalOrbitRefreshJob = null
-        lastGnssStatusSatelliteCount = 0
-        lastGnssMeasurementCount = 0
-        latestSatelliteSnapshot = emptyList()
-        satelliteTracker.clear()
+        viewerViewModel.resetGnssRuntimeState()
     }
 
     private fun refreshExternalOrbitDataIfNeeded(forceRefresh: Boolean = false) {
@@ -375,10 +386,10 @@ class GNSSViewerFragment :
         externalOrbitRefreshJob = viewLifecycleOwner.lifecycleScope.launch {
             repeat(externalOrbitRefreshAttempts) { attempt ->
                 val forceAttemptRefresh = forceRefresh || attempt > 0
-                val igsLoaded = satelliteTracker.refreshIgsBroadcastDataIfNeeded(
+                val igsLoaded = viewerViewModel.satelliteTracker.refreshIgsBroadcastDataIfNeeded(
                     forceRefresh = forceAttemptRefresh
                 )
-                val celesTrakLoaded = satelliteTracker.refreshCelesTrakDataIfNeeded(
+                val celesTrakLoaded = viewerViewModel.satelliteTracker.refreshCelesTrakDataIfNeeded(
                     forceRefresh = forceAttemptRefresh
                 )
                 if (igsLoaded || celesTrakLoaded) return@launch
@@ -469,7 +480,7 @@ class GNSSViewerFragment :
     }
 
     private fun hasUsableGnssFor3D(): Boolean {
-        return gnssStatusRegistered && lastGnssStatusSatelliteCount > 0
+        return viewerViewModel.hasUsableGnssFor3D()
     }
 
     private fun showGnssErrorDialogOnce() {
@@ -642,40 +653,13 @@ class GNSSViewerFragment :
 
     private suspend fun performPlaceSearch(query: String) {
         val places = runCatching {
-            withContext(Dispatchers.IO) { searchPlaces(query) }
+            viewerViewModel.searchPlaces(query)
         }.getOrElse {
             emptyList()
         }
 
         if (!isAdded || binding.etSearchLocation.text?.toString()?.trim() != query) return
         renderSearchResults(places)
-    }
-
-    private fun searchPlaces(query: String): List<SearchPlace> {
-        val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        val url = URL(
-            "https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=12&q=$encodedQuery"
-        )
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            connectTimeout = 8000
-            readTimeout = 8000
-            requestMethod = "GET"
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "GNSSAndOpticalFlowApp/1.0")
-        }
-
-        return connection.useTextResponse { body ->
-            val results = JSONArray(body)
-            buildList {
-                for (index in 0 until results.length()) {
-                    val item = results.getJSONObject(index)
-                    val name = item.optString("display_name").takeIf { it.isNotBlank() } ?: continue
-                    val latitude = item.optString("lat").toDoubleOrNull() ?: continue
-                    val longitude = item.optString("lon").toDoubleOrNull() ?: continue
-                    add(SearchPlace(name = name, latitude = latitude, longitude = longitude))
-                }
-            }
-        }
     }
 
     private fun renderSearchResults(places: List<SearchPlace>) = with(binding.searchResultsList) {
@@ -739,14 +723,14 @@ class GNSSViewerFragment :
     }
 
     private fun clearSearchResults() {
-        restoreSearchResultsWhenBackTo2D = false
+        viewerViewModel.restoreSearchResultsWhenBackTo2D = false
         binding.searchResultsList.removeAllViews()
         binding.searchResultsPanel.hide()
     }
 
     private fun showSearchResultsPanelIfAllowed() {
         if (is3DMode) {
-            restoreSearchResultsWhenBackTo2D = shouldRestoreSearchResultsAfter3D()
+            viewerViewModel.restoreSearchResultsWhenBackTo2D = shouldRestoreSearchResultsAfter3D()
             binding.searchResultsPanel.hide()
         } else {
             binding.searchResultsPanel.show()
@@ -755,15 +739,14 @@ class GNSSViewerFragment :
 
     private fun shouldRestoreSearchResultsAfter3D(): Boolean {
         val query = binding.etSearchLocation.text?.toString()?.trim().orEmpty()
-        return query.isNotEmpty() &&
-            selectedPlace == null &&
-            !navigationActive &&
-            binding.searchResultsList.childCount > 0
+        return viewerViewModel.shouldRestoreSearchResultsAfter3D(
+            query = query,
+            searchResultCount = binding.searchResultsList.childCount
+        )
     }
 
     private fun restoreSearchResultsAfter3DIfNeeded() {
-        if (!restoreSearchResultsWhenBackTo2D) return
-        restoreSearchResultsWhenBackTo2D = false
+        if (!viewerViewModel.consumeRestoreSearchResultsAfter3D()) return
 
         val query = binding.etSearchLocation.text?.toString()?.trim().orEmpty()
         if (query.isEmpty() || selectedPlace != null || navigationActive) return
@@ -783,49 +766,8 @@ class GNSSViewerFragment :
         }
     }
 
-    private fun getRecentSearches(): List<SearchPlace> {
-        val prefs = safeContext().getSharedPreferences("recent_searches", Context.MODE_PRIVATE)
-        val historyJson = prefs.getString("history", "[]") ?: "[]"
-        return try {
-            val array = org.json.JSONArray(historyJson)
-            val list = mutableListOf<SearchPlace>()
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                list.add(
-                    SearchPlace(
-                        obj.getString("name"),
-                        obj.getDouble("lat"),
-                        obj.getDouble("lon")
-                    )
-                )
-            }
-            list
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    private fun saveRecentSearch(place: SearchPlace) {
-        val current = getRecentSearches().toMutableList()
-        current.removeAll { it.name == place.name }
-        current.add(0, place)
-        if (current.size > 3) {
-            current.subList(3, current.size).clear()
-        }
-        val newArray = org.json.JSONArray()
-        for (p in current) {
-            val obj = org.json.JSONObject()
-            obj.put("name", p.name)
-            obj.put("lat", p.latitude)
-            obj.put("lon", p.longitude)
-            newArray.put(obj)
-        }
-        val prefs = safeContext().getSharedPreferences("recent_searches", Context.MODE_PRIVATE)
-        prefs.edit { putString("history", newArray.toString()) }
-    }
-
     private fun showRecentSearches() {
-        val recent = getRecentSearches()
+        val recent = viewerViewModel.getRecentSearches()
         if (recent.isNotEmpty()) {
             renderSearchResults(recent)
         } else {
@@ -834,13 +776,9 @@ class GNSSViewerFragment :
     }
 
     private fun selectPlace(place: SearchPlace) {
-        saveRecentSearch(place)
-        selectedPlace = place
-        cachedRoute = null
-        navigationActive = false
+        viewerViewModel.saveRecentSearch(place)
+        viewerViewModel.selectPlace(place)
         routeJob?.cancel()
-        lastRouteRequestAt = 0L
-        lastRouteOrigin = null
         clearRouteLine()
 
         ignoreSearchTextChanges = true
@@ -900,11 +838,7 @@ class GNSSViewerFragment :
     private fun resetRouteMode() = with(binding) {
         searchJob?.cancel()
         routeJob?.cancel()
-        selectedPlace = null
-        cachedRoute = null
-        navigationActive = false
-        lastRouteRequestAt = 0L
-        lastRouteOrigin = null
+        viewerViewModel.resetRouteState()
 
         clearRouteLine()
         targetMarker?.let { mapView.overlays.remove(it) }
@@ -955,7 +889,12 @@ class GNSSViewerFragment :
         val place = selectedPlace ?: return
         val loc = currentLocation
         val distance = if (loc != null) {
-            distanceMeters(loc.latitude, loc.longitude, place.latitude, place.longitude)
+            viewerViewModel.directDistanceMeters(
+                loc.latitude,
+                loc.longitude,
+                place.latitude,
+                place.longitude
+            )
         } else {
             0.0
         }
@@ -976,23 +915,7 @@ class GNSSViewerFragment :
     private fun updateRoutePreviewFromCachedRoute(route: RouteInfo, currentLoc: Location) {
         val place = selectedPlace ?: return
         val currentPoint = GeoPoint(currentLoc.latitude, currentLoc.longitude)
-
-        var minDistance = Double.MAX_VALUE
-        var closestIndex = 0
-        val routePoints = route.points
-
-        for (i in routePoints.indices) {
-            val dist = currentPoint.distanceToAsDouble(routePoints[i])
-            if (dist < minDistance) {
-                minDistance = dist
-                closestIndex = i
-            }
-        }
-
-        var remainingDistance = minDistance
-        for (i in closestIndex until routePoints.size - 1) {
-            remainingDistance += routePoints[i].distanceToAsDouble(routePoints[i + 1])
-        }
+        val remainingDistance = viewerViewModel.remainingDistanceOnRoute(route, currentPoint)
 
         binding.tvRouteTitle.text = shortPlaceName(place.name)
         binding.tvRouteMeta.text = formatDistance(remainingDistance)
@@ -1008,19 +931,14 @@ class GNSSViewerFragment :
         val place = selectedPlace ?: return
         val origin = GeoPoint(loc.latitude, loc.longitude)
         val destination = GeoPoint(place.latitude, place.longitude)
-        val now = System.currentTimeMillis()
-        val movedMeters = lastRouteOrigin?.distanceToAsDouble(origin) ?: Double.MAX_VALUE
-        val isTooSoon = now - lastRouteRequestAt < routeRefreshIntervalMs
+        if (!viewerViewModel.shouldRequestRouteUpdate(origin, force, routeJob?.isActive == true)) {
+            return
+        }
 
-        if (!force && routeJob?.isActive == true) return
-        if (!force && isTooSoon && movedMeters < routeRefreshDistanceMeters) return
-
-        lastRouteRequestAt = now
-        lastRouteOrigin = origin
         routeJob?.cancel()
         routeJob = viewLifecycleOwner.lifecycleScope.launch {
             val route = runCatching {
-                withContext(Dispatchers.IO) { fetchRoute(origin, destination) }
+                viewerViewModel.fetchRoute(origin, destination)
             }.getOrNull()
             val activePlace = selectedPlace
             if (!isAdded ||
@@ -1043,52 +961,6 @@ class GNSSViewerFragment :
                     drawRouteLine(listOf(origin, destination))
                 }
             }
-        }
-    }
-
-    private fun fetchRoute(origin: GeoPoint, destination: GeoPoint): RouteInfo? {
-        val url = URL(
-            "https://router.project-osrm.org/route/v1/driving/" +
-                    "${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}" +
-                    "?overview=full&geometries=geojson"
-        )
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10000
-            readTimeout = 10000
-            requestMethod = "GET"
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "GNSSAndOpticalFlowApp/1.0")
-        }
-
-        return connection.useTextResponse { body ->
-            val root = JSONObject(body)
-            val routes = root.optJSONArray("routes") ?: return@useTextResponse null
-            if (routes.length() == 0) return@useTextResponse null
-
-            val firstRoute = routes.getJSONObject(0)
-            val geometry = firstRoute.getJSONObject("geometry")
-            val coordinates = geometry.getJSONArray("coordinates")
-            val points = buildList {
-                for (index in 0 until coordinates.length()) {
-                    val coordinate = coordinates.getJSONArray(index)
-                    add(GeoPoint(coordinate.getDouble(1), coordinate.getDouble(0)))
-                }
-            }
-            RouteInfo(
-                points = points,
-                distanceMeters = firstRoute.optDouble("distance", 0.0),
-                durationSeconds = firstRoute.optDouble("duration", 0.0)
-            )
-        }
-    }
-
-    private inline fun <T> HttpURLConnection.useTextResponse(block: (String) -> T): T {
-        return try {
-            val stream = if (responseCode in 200..299) inputStream else errorStream
-            val body = stream.bufferedReader().use { it.readText() }
-            block(body)
-        } finally {
-            disconnect()
         }
     }
 
@@ -1120,13 +992,7 @@ class GNSSViewerFragment :
     }
 
     private fun selectedRoutePoints(): List<GeoPoint> {
-        routeLine?.actualPoints?.takeIf { it.isNotEmpty() }?.let { return it.toList() }
-        cachedRoute?.points?.takeIf { it.isNotEmpty() }?.let { return it }
-
-        val place = selectedPlace ?: return emptyList()
-        val destination = GeoPoint(place.latitude, place.longitude)
-        val loc = currentLocation ?: return listOf(destination)
-        return listOf(GeoPoint(loc.latitude, loc.longitude), destination)
+        return viewerViewModel.selectedRoutePoints(routeLine?.actualPoints?.toList())
     }
 
     private fun zoomToRoutePoints(points: List<GeoPoint>) {
@@ -1171,23 +1037,6 @@ class GNSSViewerFragment :
         routeLine?.let { binding.mapView.overlays.remove(it) }
         routeLine = null
         binding.mapView.invalidate()
-    }
-
-    private fun distanceMeters(
-        startLatitude: Double,
-        startLongitude: Double,
-        endLatitude: Double,
-        endLongitude: Double
-    ): Double {
-        val results = FloatArray(1)
-        Location.distanceBetween(
-            startLatitude,
-            startLongitude,
-            endLatitude,
-            endLongitude,
-            results
-        )
-        return results[0].toDouble()
     }
 
     private fun formatDistance(distanceMeters: Double): String {
@@ -1294,7 +1143,7 @@ class GNSSViewerFragment :
                 routeBottomBar.show()
             }
         } else {
-            restoreSearchResultsWhenBackTo2D =
+            viewerViewModel.restoreSearchResultsWhenBackTo2D =
                 binding.searchResultsPanel.isVisible && shouldRestoreSearchResultsAfter3D()
             searchBar.hide()
             arBubble.show()
@@ -1462,11 +1311,11 @@ class GNSSViewerFragment :
     }
 
     private fun dumpLatestSatelliteSources() {
-        val satellites = latestSatelliteSnapshot
+        val satellites = viewerViewModel.latestSatelliteSnapshot
         Log.d(
             "GNSS_SOURCE_DUMP",
-            "satellites=${satellites.size} lastStatus=$lastGnssStatusSatelliteCount " +
-                "lastMeasurements=$lastGnssMeasurementCount"
+            "satellites=${satellites.size} lastStatus=${viewerViewModel.lastGnssStatusSatelliteCount} " +
+                "lastMeasurements=${viewerViewModel.lastGnssMeasurementCount}"
         )
         if (satellites.isEmpty()) return
 

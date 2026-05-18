@@ -4,7 +4,6 @@ import android.Manifest
 import android.graphics.Bitmap
 import android.media.MediaScannerConnection
 import android.content.pm.PackageManager
-import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import android.widget.SeekBar
@@ -16,13 +15,13 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentCameraOpticalFlowBinding
-import com.example.gnssandopticalflowapp.model.AnalyticsSample
 import com.example.gnssandopticalflowapp.model.AnalyticsSession
 import com.example.gnssandopticalflowapp.model.OFOutput
 import com.example.gnssandopticalflowapp.model.OpticalFlowMetrics
@@ -31,6 +30,7 @@ import com.example.gnssandopticalflowapp.optical_flow.classes.IMUEstimator
 import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.optical_flow.classes.MotionVectorViz
 import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
+import com.example.gnssandopticalflowapp.screen.viewmodel.CameraOpticalFlowViewModel
 import com.example.gnssandopticalflowapp.util.AnalyticsStorageUtil
 import com.example.gnssandopticalflowapp.util.VideoEncoder
 import com.example.gnssandopticalflowapp.util.MediaStorageUtil
@@ -61,45 +61,70 @@ class CameraOpticalFlowFragment :
     private var output: OFOutput? = null
     private lateinit var cameraExecutor: ExecutorService
     private var cameraProvider: ProcessCameraProvider? = null
-    @Volatile
-    private var currentFrameWidth: Int = 0
-    @Volatile
-    private var currentFrameHeight: Int = 0
+    private val cameraViewModel: CameraOpticalFlowViewModel by viewModels()
+    private var currentFrameWidth: Int
+        get() = cameraViewModel.currentFrameWidth
+        set(value) {
+            cameraViewModel.currentFrameWidth = value
+        }
+    private var currentFrameHeight: Int
+        get() = cameraViewModel.currentFrameHeight
+        set(value) {
+            cameraViewModel.currentFrameHeight = value
+        }
     private lateinit var opticalFlow: OpticalFlow
     private lateinit var kltLabFlow: KLT
     private lateinit var farnebackLabFlow: Farneback
     private lateinit var imuEstimator: IMUEstimator
     private lateinit var mvViewer: MotionVectorViz
-    private var frameCount: Int = 0
+    private var frameCount: Int
+        get() = cameraViewModel.frameCount
+        set(value) {
+            cameraViewModel.frameCount = value
+        }
     private val updateInterval: Int = 30 // frames between automatic feature updates
 
     private var videoEncoder: VideoEncoder? = null
-    private var isRecording = false
-    private var recordedFilePath = ""
+    private var isRecording: Boolean
+        get() = cameraViewModel.isRecording
+        set(value) {
+            cameraViewModel.isRecording = value
+        }
+    private var recordedFilePath: String
+        get() = cameraViewModel.recordedFilePath
+        set(value) {
+            cameraViewModel.recordedFilePath = value
+        }
 
     private var timerJob: Job? = null
-    private var timerStartTime: Long = 0L
-    private var elapsedBeforePause: Long = 0L
     private var cameraFrameBitmap: Bitmap? = null
     private var motionVectorBitmap: Bitmap? = null
-    private var isMovingMode = false
-    private var isMovingModeManualOverride = false
+    private var isMovingMode: Boolean
+        get() = cameraViewModel.isMovingMode
+        set(value) {
+            cameraViewModel.isMovingMode = value
+        }
+    private var isMovingModeManualOverride: Boolean
+        get() = cameraViewModel.isMovingModeManualOverride
+        set(value) {
+            cameraViewModel.isMovingModeManualOverride = value
+        }
     private var ignoreMovingSwitchChanges = false
-    private var isAnalysisActive = false
-    private var analysisStartedAtWallMs = 0L
-    private var analysisStartedAtElapsedMs = 0L
-    private var analysisFrameIndex = 0L
-    private var lastAnalysisSampleElapsedMs = -ANALYSIS_SAMPLE_INTERVAL_MS
-    private val analysisLock = Any()
-    private val analysisSamples = mutableListOf<AnalyticsSample>()
-    private var restoreKltSensitivity = 50
-    private var restoreFarnebackSensitivity = 50
+    private val isAnalysisActive: Boolean
+        get() = cameraViewModel.isAnalysisActive
+    private var restoreKltSensitivity: Int
+        get() = cameraViewModel.restoreKltSensitivity
+        set(value) {
+            cameraViewModel.restoreKltSensitivity = value
+        }
+    private var restoreFarnebackSensitivity: Int
+        get() = cameraViewModel.restoreFarnebackSensitivity
+        set(value) {
+            cameraViewModel.restoreFarnebackSensitivity = value
+        }
     // Auto detection source only. testType switch controls manual/auto at runtime.
     // true: phone IMU motion, false: GNSS location speed.
     private val useIndoorPhoneMotionDetection = true
-    private var phoneMovingHoldFrames = 0
-    private val phoneMovingAccelerationThreshold = 0.25
-    private val phoneMovingHoldFrameCount = 12
 
     override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
@@ -233,7 +258,7 @@ class CameraOpticalFlowFragment :
         }
 
         testType.setOnCheckedChangeListener { _, isManualMode ->
-            phoneMovingHoldFrames = 0
+            cameraViewModel.resetPhoneMotionHold()
 
             if (isManualMode) {
                 applyMovingMode(isMoving = binding.movingStatus.isChecked, manualOverride = true)
@@ -333,8 +358,7 @@ class CameraOpticalFlowFragment :
     }
 
     private fun applyMovingMode(isMoving: Boolean, manualOverride: Boolean) {
-        isMovingMode = isMoving
-        isMovingModeManualOverride = manualOverride
+        cameraViewModel.setMovingMode(isMoving, manualOverride)
         opticalFlow.setMovingMode(isMoving)
         if (::kltLabFlow.isInitialized) kltLabFlow.setMovingMode(isMoving)
         if (::farnebackLabFlow.isInitialized) farnebackLabFlow.setMovingMode(isMoving)
@@ -465,11 +489,11 @@ class CameraOpticalFlowFragment :
     private fun startTimer() {
         if (timerJob != null) return
 
-        timerStartTime = SystemClock.elapsedRealtime()
+        cameraViewModel.startTimer()
 
         timerJob = lifecycleScope.launch {
             while (isActive) {
-                val elapsedMillis = elapsedBeforePause + (SystemClock.elapsedRealtime() - timerStartTime)
+                val elapsedMillis = cameraViewModel.currentTimerElapsed()
                 binding.tvTimer.text = formatElapsedTime(elapsedMillis)
                 delay(1000L)
             }
@@ -480,8 +504,7 @@ class CameraOpticalFlowFragment :
         timerJob?.cancel()
         timerJob = null
 
-        elapsedBeforePause += SystemClock.elapsedRealtime() - timerStartTime
-        binding.tvTimer.text = formatElapsedTime(elapsedBeforePause)
+        binding.tvTimer.text = formatElapsedTime(cameraViewModel.stopTimer())
     }
     private fun formatElapsedTime(elapsedMillis: Long): String {
         val totalSeconds = elapsedMillis / 1000
@@ -497,15 +520,10 @@ class CameraOpticalFlowFragment :
     }
 
     private fun startAnalysis() {
-        synchronized(analysisLock) {
-            analysisSamples.clear()
-            analysisFrameIndex = 0L
-            lastAnalysisSampleElapsedMs = -ANALYSIS_SAMPLE_INTERVAL_MS
-        }
-        analysisStartedAtWallMs = System.currentTimeMillis()
-        analysisStartedAtElapsedMs = SystemClock.elapsedRealtime()
-        restoreKltSensitivity = binding.kltSensitivityBar.progress
-        restoreFarnebackSensitivity = binding.farnebackSensitivityBar.progress
+        cameraViewModel.startAnalysis(
+            kltSensitivity = binding.kltSensitivityBar.progress,
+            farnebackSensitivity = binding.farnebackSensitivityBar.progress
+        )
         applyAnalysisSensitivityLock(locked = true)
 
         kltLabFlow = KLT().apply {
@@ -517,7 +535,6 @@ class CameraOpticalFlowFragment :
             setMovingMode(isMovingMode)
         }
 
-        isAnalysisActive = true
         binding.updateFeaturesButton.text = "Stop Analysis"
         binding.updateFeaturesButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
         binding.ofAlgorithm.text = "Lab"
@@ -534,10 +551,7 @@ class CameraOpticalFlowFragment :
     private fun stopAnalysis(saveSession: Boolean, showToast: Boolean) {
         if (!isAnalysisActive) return
 
-        val endedAtMs = System.currentTimeMillis()
-        val durationMs = (SystemClock.elapsedRealtime() - analysisStartedAtElapsedMs).coerceAtLeast(0L)
-        val samples = synchronized(analysisLock) { analysisSamples.toList() }
-        isAnalysisActive = false
+        val completedSession = cameraViewModel.finishAnalysis(saveSession)
 
         binding.updateFeaturesButton.text = "Start Analysis"
         binding.updateFeaturesButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
@@ -550,27 +564,27 @@ class CameraOpticalFlowFragment :
             stopTimer()
         }
 
-        if (!saveSession || samples.isEmpty() || !isAdded) {
+        if (completedSession == null || !isAdded) {
             if (showToast && isAdded) Toast.makeText(safeContext(), "No analysis samples saved", Toast.LENGTH_SHORT).show()
             return
         }
 
         val session = AnalyticsSession(
-            id = AnalyticsStorageUtil.createSessionId(analysisStartedAtWallMs),
-            startedAtMs = analysisStartedAtWallMs,
-            endedAtMs = endedAtMs,
-            durationMs = durationMs,
+            id = AnalyticsStorageUtil.createSessionId(completedSession.startedAtMs),
+            startedAtMs = completedSession.startedAtMs,
+            endedAtMs = completedSession.endedAtMs,
+            durationMs = completedSession.durationMs,
             kltSensitivity = ANALYSIS_SENSITIVITY,
             farnebackSensitivity = ANALYSIS_SENSITIVITY,
-            movingMode = isMovingMode,
-            samples = samples
+            movingMode = completedSession.movingMode,
+            samples = completedSession.samples
         )
         val file = AnalyticsStorageUtil.saveSession(safeContext(), session)
         MediaScannerConnection.scanFile(safeContext(), arrayOf(file.absolutePath), null) { _, _ -> }
         mainViewModel.analyticsLibraryUpdated.value = System.currentTimeMillis()
 
         if (showToast) {
-            Toast.makeText(safeContext(), "Saved ${samples.size} analysis samples", Toast.LENGTH_SHORT).show()
+            Toast.makeText(safeContext(), "Saved ${completedSession.samples.size} analysis samples", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -847,37 +861,7 @@ class CameraOpticalFlowFragment :
         kltMetrics: OpticalFlowMetrics?,
         farnebackMetrics: OpticalFlowMetrics?
     ) {
-        val elapsedMs = SystemClock.elapsedRealtime() - analysisStartedAtElapsedMs
-        synchronized(analysisLock) {
-            if (elapsedMs - lastAnalysisSampleElapsedMs < ANALYSIS_SAMPLE_INTERVAL_MS && analysisSamples.isNotEmpty()) {
-                return
-            }
-            lastAnalysisSampleElapsedMs = elapsedMs
-            analysisSamples.add(
-                AnalyticsSample(
-                    elapsedMs = elapsedMs,
-                    frameIndex = analysisFrameIndex++,
-                    kltFps = kltMetrics?.instantFps ?: 0.0,
-                    farnebackFps = farnebackMetrics?.instantFps ?: 0.0,
-                    kltProcessMs = kltMetrics?.processTimeMs ?: 0.0,
-                    farnebackProcessMs = farnebackMetrics?.processTimeMs ?: 0.0,
-                    kltFeatureCount = kltMetrics?.featureCount ?: 0,
-                    farnebackSampleCount = farnebackMetrics?.featureCount ?: 0,
-                    kltActiveVectorCount = kltMetrics?.activeVectorCount ?: 0,
-                    farnebackActiveVectorCount = farnebackMetrics?.activeVectorCount ?: 0,
-                    kltAvgDx = kltMetrics?.avgDx ?: 0.0,
-                    kltAvgDy = kltMetrics?.avgDy ?: 0.0,
-                    farnebackAvgDx = farnebackMetrics?.avgDx ?: 0.0,
-                    farnebackAvgDy = farnebackMetrics?.avgDy ?: 0.0,
-                    kltAvgMagnitude = kltMetrics?.avgMagnitude ?: 0.0,
-                    farnebackAvgMagnitude = farnebackMetrics?.avgMagnitude ?: 0.0,
-                    kltConfidence = kltMetrics?.confidence ?: 0.0,
-                    farnebackConfidence = farnebackMetrics?.confidence ?: 0.0,
-                    kltThreshold = kltMetrics?.threshold ?: 0.0,
-                    farnebackThreshold = farnebackMetrics?.threshold ?: 0.0
-                )
-            )
-        }
+        cameraViewModel.recordAnalysisSample(kltMetrics, farnebackMetrics)
     }
 
     private fun applyAnalysisSensitivityLock(locked: Boolean) {
@@ -902,8 +886,7 @@ class CameraOpticalFlowFragment :
     private fun resetTimer() {
         timerJob?.cancel()
         timerJob = null
-        timerStartTime = 0L
-        elapsedBeforePause = 0L
+        cameraViewModel.resetTimer()
         binding.tvTimer.text = formatElapsedTime(0L)
     }
 
@@ -990,19 +973,11 @@ class CameraOpticalFlowFragment :
         val ay = acceleration.getOrElse(1) { 0f }.toDouble()
         val az = acceleration.getOrElse(2) { 0f }.toDouble()
         val accelerationMagnitude = sqrt((ax * ax) + (ay * ay) + (az * az))
+        val detectedMoving = cameraViewModel.detectPhoneMoving(accelerationMagnitude) ?: return
 
-        if (accelerationMagnitude > phoneMovingAccelerationThreshold) {
-            phoneMovingHoldFrames = phoneMovingHoldFrameCount
-        } else if (phoneMovingHoldFrames > 0) {
-            phoneMovingHoldFrames--
-        }
-
-        val detectedMoving = phoneMovingHoldFrames > 0
-        if (detectedMoving != isMovingMode) {
-            activity?.runOnUiThread {
-                if (!isMovingModeManualOverride) {
-                    applyMovingMode(isMoving = detectedMoving, manualOverride = false)
-                }
+        activity?.runOnUiThread {
+            if (!isMovingModeManualOverride) {
+                applyMovingMode(isMoving = detectedMoving, manualOverride = false)
             }
         }
     }
@@ -1026,7 +1001,6 @@ class CameraOpticalFlowFragment :
     }
 
     companion object {
-        private const val ANALYSIS_SAMPLE_INTERVAL_MS = 250L
         private const val ANALYSIS_SENSITIVITY = 100
     }
 }
