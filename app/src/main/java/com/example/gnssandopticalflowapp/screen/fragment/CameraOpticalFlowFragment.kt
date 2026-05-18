@@ -163,7 +163,7 @@ class CameraOpticalFlowFragment :
                     }
                 )
             }
-            cameraViewModel.roiEnabled = cameraViewModel.normalizedRoi != null
+            cameraViewModel.roiEnabled = roiOverlay.selectionEnabled || cameraViewModel.normalizedRoi != null
             resetActiveOpticalFlow()
             updateRoiUi()
         }
@@ -304,8 +304,8 @@ class CameraOpticalFlowFragment :
         }
         btnRoiFull.setSingleClick {
             cameraViewModel.roiEnabled = false
-            roiOverlay.clearSelection()
             roiOverlay.setSelectionEnabled(false)
+            roiOverlay.clearSelection()
             resetActiveOpticalFlow()
             updateRoiUi()
         }
