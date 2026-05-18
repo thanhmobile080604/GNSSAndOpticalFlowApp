@@ -6,6 +6,20 @@ import com.example.gnssandopticalflowapp.model.AnalyticsSample
 import com.example.gnssandopticalflowapp.model.OpticalFlowMetrics
 
 class CameraOpticalFlowViewModel : ViewModel() {
+    enum class MotionControlMode {
+        AUTO,
+        STILL,
+        MOVING
+    }
+
+    data class NormalizedRoi(
+        val left: Float,
+        val top: Float,
+        val right: Float,
+        val bottom: Float,
+        val viewAspectRatio: Float
+    )
+
     @Volatile
     var currentFrameWidth = 0
     @Volatile
@@ -17,6 +31,12 @@ class CameraOpticalFlowViewModel : ViewModel() {
     var isRecording = false
     @Volatile
     var recordedFilePath = ""
+    var useFarneback = false
+    var useFarnebackHeatmap = false
+    var roiEnabled = false
+    @Volatile
+    var normalizedRoi: NormalizedRoi? = null
+    var motionControlMode = MotionControlMode.AUTO
 
     var timerStartTime = 0L
     var elapsedBeforePause = 0L

@@ -76,6 +76,12 @@
             android:layout_height="match_parent"
             android:scaleType="centerCrop" />
 
+        <com.example.gnssandopticalflowapp.view.RoiOverlayView
+            android:id="@+id/roiOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/tvTimer"
             android:layout_width="wrap_content"
@@ -217,28 +223,25 @@
             </LinearLayout>
 
             <LinearLayout
-                android:id="@+id/switchPanel"
+                android:id="@+id/modePanel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:orientation="horizontal">
+                android:orientation="vertical">
 
                 <LinearLayout
                     android:id="@+id/algorithmCard"
-                    android:layout_width="0dp"
-                    android:layout_height="86dp"
-                    android:layout_marginEnd="7dp"
-                    android:layout_weight="1"
+                    android:layout_width="match_parent"
+                    android:layout_height="72dp"
                     android:background="@drawable/bg_glass_card"
-                    android:gravity="center"
-                    android:orientation="vertical"
-                    android:paddingHorizontal="8dp">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="12dp">
 
                     <TextView
                         android:id="@+id/ofAlgorithm"
-                        android:layout_width="wrap_content"
+                        android:layout_width="88dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
                         android:ellipsize="end"
                         android:fontFamily="@font/inter_black"
                         android:maxLines="1"
@@ -246,81 +249,200 @@
                         android:textColor="@color/white"
                         android:textSize="15sp" />
 
-                    <androidx.appcompat.widget.SwitchCompat
-                        android:id="@+id/ofType"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:splitTrack="false"
-                        app:switchMinWidth="48dp"
-                        app:thumbTint="@color/switch_thumb_selector"
-                        app:trackTint="@color/switch_track_selector" />
+                    <TextView
+                        android:id="@+id/btnAlgorithmKlt"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="8dp"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_gradient_update_button"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="KLT"
+                        android:textColor="@color/white"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/btnAlgorithmFarneback"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_glass_chip"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="Farneback"
+                        android:textColor="@color/white"
+                        android:textSize="12sp" />
 
                 </LinearLayout>
 
                 <LinearLayout
-                    android:id="@+id/testCard"
-                    android:layout_width="0dp"
-                    android:layout_height="86dp"
-                    android:layout_marginHorizontal="4dp"
-                    android:layout_weight="1"
+                    android:id="@+id/farnebackViewCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="72dp"
+                    android:layout_marginTop="10dp"
                     android:background="@drawable/bg_glass_card"
-                    android:gravity="center"
-                    android:orientation="vertical"
-                    android:paddingHorizontal="8dp">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="12dp">
 
                     <TextView
-                        android:id="@+id/tvManualLabel"
-                        android:layout_width="wrap_content"
+                        android:id="@+id/tvFarnebackViewLabel"
+                        android:layout_width="88dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
+                        android:ellipsize="end"
                         android:fontFamily="@font/inter_black"
-                        android:text="Manual"
+                        android:maxLines="1"
+                        android:text="Display"
                         android:textColor="@color/white"
                         android:textSize="15sp" />
 
-                    <androidx.appcompat.widget.SwitchCompat
-                        android:id="@+id/testType"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:splitTrack="false"
-                        app:switchMinWidth="48dp"
-                        app:thumbTint="@color/switch_thumb_selector"
-                        app:trackTint="@color/switch_track_selector" />
+                    <TextView
+                        android:id="@+id/btnFarnebackVectors"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="8dp"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_gradient_update_button"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="Vector"
+                        android:textColor="@color/white"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/btnFarnebackHeatmap"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_glass_chip"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="Heatmap"
+                        android:textColor="@color/white"
+                        android:textSize="13sp" />
 
                 </LinearLayout>
 
                 <LinearLayout
-                    android:id="@+id/movingCard"
-                    android:layout_width="0dp"
-                    android:layout_height="86dp"
-                    android:layout_marginStart="7dp"
-                    android:layout_weight="1"
+                    android:id="@+id/motionCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="72dp"
+                    android:layout_marginTop="10dp"
                     android:background="@drawable/bg_glass_card"
-                    android:gravity="center"
-                    android:orientation="vertical"
-                    android:paddingHorizontal="8dp">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="12dp">
 
                     <TextView
                         android:id="@+id/tvMotionStateLabel"
-                        android:layout_width="wrap_content"
+                        android:layout_width="88dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
                         android:fontFamily="@font/inter_black"
-                        android:text="Moving"
+                        android:text="Motion"
                         android:textColor="@color/white"
                         android:textSize="15sp" />
 
-                    <androidx.appcompat.widget.SwitchCompat
-                        android:id="@+id/movingStatus"
-                        android:layout_width="wrap_content"
+                    <TextView
+                        android:id="@+id/btnMotionAuto"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="8dp"
+                        android:layout_marginEnd="5dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_gradient_update_button"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="Auto"
+                        android:textColor="@color/white"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:id="@+id/btnMotionStill"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_marginHorizontal="5dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_glass_chip"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="Still"
+                        android:textColor="@color/white"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:id="@+id/btnMotionMoving"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="5dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_glass_chip"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="Move"
+                        android:textColor="@color/white"
+                        android:textSize="12sp" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/roiCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="72dp"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/bg_glass_card"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="12dp">
+
+                    <TextView
+                        android:id="@+id/tvRoiLabel"
+                        android:layout_width="88dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:splitTrack="false"
-                        app:switchMinWidth="48dp"
-                        app:thumbTint="@color/switch_thumb_selector"
-                        app:trackTint="@color/switch_track_selector" />
+                        android:fontFamily="@font/inter_black"
+                        android:text="ROI"
+                        android:textColor="@color/white"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:id="@+id/btnRoiSelect"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="8dp"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_glass_chip"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="Select"
+                        android:textColor="@color/white"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/btnRoiFull"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_gradient_update_button"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="Full"
+                        android:textColor="@color/white"
+                        android:textSize="13sp" />
 
                 </LinearLayout>
 

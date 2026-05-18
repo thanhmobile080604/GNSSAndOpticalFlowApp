@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.util.Log
 import android.view.Surface
 import android.widget.SeekBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -30,6 +31,7 @@ import com.example.gnssandopticalflowapp.optical_flow.classes.IMUEstimator
 import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.optical_flow.classes.MotionVectorViz
 import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
+import com.example.gnssandopticalflowapp.screen.viewmodel.CameraOpticalFlowViewModel.MotionControlMode
 import com.example.gnssandopticalflowapp.screen.viewmodel.CameraOpticalFlowViewModel
 import com.example.gnssandopticalflowapp.util.AnalyticsStorageUtil
 import com.example.gnssandopticalflowapp.util.VideoEncoder
@@ -46,6 +48,8 @@ import org.opencv.core.Point
 import org.opencv.core.Rect
 import org.opencv.core.Scalar
 import org.opencv.core.Size
+import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import androidx.core.graphics.createBitmap
 import java.io.File
@@ -109,7 +113,6 @@ class CameraOpticalFlowFragment :
         set(value) {
             cameraViewModel.isMovingModeManualOverride = value
         }
-    private var ignoreMovingSwitchChanges = false
     private val isAnalysisActive: Boolean
         get() = cameraViewModel.isAnalysisActive
     private var restoreKltSensitivity: Int
@@ -122,7 +125,7 @@ class CameraOpticalFlowFragment :
         set(value) {
             cameraViewModel.restoreFarnebackSensitivity = value
         }
-    // Auto detection source only. testType switch controls manual/auto at runtime.
+    // Auto detection source only. Motion buttons control manual/auto at runtime.
     // true: phone IMU motion, false: GNSS location speed.
     private val useIndoorPhoneMotionDetection = true
 
@@ -130,13 +133,39 @@ class CameraOpticalFlowFragment :
         initVars()
         kltSensitivityBar.progress = 50
         farnebackSensitivityBar.progress = 50
-        testType.isChecked = false
+        cameraViewModel.useFarneback = false
+        cameraViewModel.useFarnebackHeatmap = false
+        cameraViewModel.motionControlMode = MotionControlMode.AUTO
+        cameraViewModel.roiEnabled = false
+        cameraViewModel.normalizedRoi = null
         applyOpticalFlowModeUi(useFarneback = false)
         applyCurrentSensitivity()
         applyMovingMode(isMoving = false, manualOverride = false)
+        updateAlgorithmModeUi()
+        updateFarnebackDisplayUi()
+        updateMotionControlUi()
+        updateRoiUi()
 
         cameraExecutor = Executors.newSingleThreadExecutor()
         cameraView.scaleType = PreviewView.ScaleType.FILL_CENTER
+        roiOverlay.onRoiChanged = {
+            cameraViewModel.normalizedRoi = roiOverlay.normalizedRoi?.let { roi ->
+                CameraOpticalFlowViewModel.NormalizedRoi(
+                    left = roi.left,
+                    top = roi.top,
+                    right = roi.right,
+                    bottom = roi.bottom,
+                    viewAspectRatio = if (roiOverlay.height > 0) {
+                        roiOverlay.width.toFloat() / roiOverlay.height.toFloat()
+                    } else {
+                        1f
+                    }
+                )
+            }
+            cameraViewModel.roiEnabled = cameraViewModel.normalizedRoi != null
+            resetActiveOpticalFlow()
+            updateRoiUi()
+        }
 
         imuEstimator = IMUEstimator(safeContext().applicationContext)
 
@@ -245,56 +274,45 @@ class CameraOpticalFlowFragment :
             }
         }
 
-        movingStatus.setOnCheckedChangeListener { _, isChecked ->
-            if (ignoreMovingSwitchChanges) return@setOnCheckedChangeListener
+        btnAlgorithmKlt.setSingleClick { setAlgorithmMode(useFarneback = false) }
+        btnAlgorithmFarneback.setSingleClick { setAlgorithmMode(useFarneback = true) }
 
-            if (binding.testType.isChecked) {
-                applyMovingMode(isMoving = isChecked, manualOverride = true)
-            } else {
-                ignoreMovingSwitchChanges = true
-                binding.movingStatus.isChecked = isMovingMode
-                ignoreMovingSwitchChanges = false
-            }
-        }
+        btnFarnebackVectors.setSingleClick { setFarnebackDisplayMode(heatmap = false) }
+        btnFarnebackHeatmap.setSingleClick { setFarnebackDisplayMode(heatmap = true) }
 
-        testType.setOnCheckedChangeListener { _, isManualMode ->
+        btnMotionAuto.setSingleClick {
+            cameraViewModel.motionControlMode = MotionControlMode.AUTO
             cameraViewModel.resetPhoneMotionHold()
-
-            if (isManualMode) {
-                applyMovingMode(isMoving = binding.movingStatus.isChecked, manualOverride = true)
-            } else {
-                isMovingModeManualOverride = false
-                updateAutoMovingModeFromCurrentSource()
-            }
+            isMovingModeManualOverride = false
+            updateAutoMovingModeFromCurrentSource()
+            updateMotionControlUi()
+        }
+        btnMotionStill.setSingleClick {
+            cameraViewModel.motionControlMode = MotionControlMode.STILL
+            applyMovingMode(isMoving = false, manualOverride = true)
+        }
+        btnMotionMoving.setSingleClick {
+            cameraViewModel.motionControlMode = MotionControlMode.MOVING
+            applyMovingMode(isMoving = true, manualOverride = true)
         }
 
-        ofType.setSingleClick {
-            if (isAnalysisActive) {
-                binding.ofType.isChecked = !binding.ofType.isChecked
-                Toast.makeText(safeContext(), "Stop analysis before changing mode", Toast.LENGTH_SHORT).show()
-                return@setSingleClick
-            }
-
-            val selectedOpticalFlow = if (ofType.isChecked) {
-                ofAlgorithm.text = "Farneback"
-                Farneback()
-            } else {
-                ofAlgorithm.text = "KLT"
-                KLT()
-            }
-            opticalFlow = selectedOpticalFlow
-            applyOpticalFlowModeUi(useFarneback = ofType.isChecked)
-            applyCurrentSensitivity()
-            opticalFlow.setMovingMode(isMovingMode)
-            mvViewer.resetMotionVector()
-            motionVectorBitmap = null
-            binding.motionVector.setImageBitmap(null)
+        btnRoiSelect.setSingleClick {
+            cameraViewModel.roiEnabled = true
+            roiOverlay.setSelectionEnabled(true)
+            updateRoiUi()
+        }
+        btnRoiFull.setSingleClick {
+            cameraViewModel.roiEnabled = false
+            roiOverlay.clearSelection()
+            roiOverlay.setSelectionEnabled(false)
+            resetActiveOpticalFlow()
+            updateRoiUi()
         }
 
         kltSensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 Log.d("SEEK", progress.toString())
-                if (::opticalFlow.isInitialized && !ofType.isChecked) {
+                if (::opticalFlow.isInitialized && !cameraViewModel.useFarneback) {
                     opticalFlow.setSensitivity(progress)
                 }
                 if (::kltLabFlow.isInitialized) {
@@ -309,7 +327,7 @@ class CameraOpticalFlowFragment :
         farnebackSensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 Log.d("SEEK", progress.toString())
-                if (::opticalFlow.isInitialized && ofType.isChecked) {
+                if (::opticalFlow.isInitialized && cameraViewModel.useFarneback) {
                     opticalFlow.setSensitivity(progress)
                 }
                 if (::farnebackLabFlow.isInitialized) {
@@ -342,11 +360,116 @@ class CameraOpticalFlowFragment :
         }
     }
 
+    private fun setAlgorithmMode(useFarneback: Boolean) {
+        if (isAnalysisActive) {
+            Toast.makeText(safeContext(), "Stop analysis before changing mode", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (cameraViewModel.useFarneback == useFarneback && ::opticalFlow.isInitialized) return
+        cameraViewModel.useFarneback = useFarneback
+        resetActiveOpticalFlow()
+        applyOpticalFlowModeUi(useFarneback)
+    }
+
+    private fun setFarnebackDisplayMode(heatmap: Boolean) {
+        if (isAnalysisActive) {
+            Toast.makeText(safeContext(), "Stop analysis before changing display", Toast.LENGTH_SHORT).show()
+            return
+        }
+        cameraViewModel.useFarnebackHeatmap = heatmap
+        (opticalFlow as? Farneback)?.setVisualizationMode(currentFarnebackVisualizationMode())
+        updateFarnebackDisplayUi()
+    }
+
+    private fun resetActiveOpticalFlow() {
+        opticalFlow = createSelectedOpticalFlow()
+        mvViewer.resetMotionVector()
+        motionVectorBitmap = null
+        binding.motionVector.setImageBitmap(null)
+    }
+
+    private fun createSelectedOpticalFlow(): OpticalFlow {
+        val flow: OpticalFlow = if (cameraViewModel.useFarneback) Farneback() else KLT()
+        flow.setMovingMode(isMovingMode)
+        flow.setSensitivity(
+            if (cameraViewModel.useFarneback) {
+                binding.farnebackSensitivityBar.progress
+            } else {
+                binding.kltSensitivityBar.progress
+            }
+        )
+        (flow as? Farneback)?.setVisualizationMode(currentFarnebackVisualizationMode())
+        return flow
+    }
+
+    private fun currentFarnebackVisualizationMode(): Farneback.VisualizationMode {
+        return if (cameraViewModel.useFarnebackHeatmap) {
+            Farneback.VisualizationMode.HEATMAP
+        } else {
+            Farneback.VisualizationMode.VECTORS
+        }
+    }
+
+    private fun updateAlgorithmModeUi() = with(binding) {
+        setSegmentSelected(btnAlgorithmKlt, !cameraViewModel.useFarneback)
+        setSegmentSelected(btnAlgorithmFarneback, cameraViewModel.useFarneback)
+        ofAlgorithm.text = if (cameraViewModel.useFarneback) "Farneback" else "KLT"
+    }
+
+    private fun updateFarnebackDisplayUi() = with(binding) {
+        setSegmentSelected(btnFarnebackVectors, !cameraViewModel.useFarnebackHeatmap)
+        setSegmentSelected(btnFarnebackHeatmap, cameraViewModel.useFarnebackHeatmap)
+        btnFarnebackVectors.isEnabled = cameraViewModel.useFarneback && !isAnalysisActive
+        btnFarnebackHeatmap.isEnabled = cameraViewModel.useFarneback && !isAnalysisActive
+        val enabledAlpha = if (cameraViewModel.useFarneback && !isAnalysisActive) 1f else 0.45f
+        btnFarnebackVectors.alpha = enabledAlpha
+        btnFarnebackHeatmap.alpha = enabledAlpha
+    }
+
+    private fun updateMotionControlUi() = with(binding) {
+        setSegmentSelected(btnMotionAuto, cameraViewModel.motionControlMode == MotionControlMode.AUTO)
+        setSegmentSelected(btnMotionStill, cameraViewModel.motionControlMode == MotionControlMode.STILL)
+        setSegmentSelected(btnMotionMoving, cameraViewModel.motionControlMode == MotionControlMode.MOVING)
+    }
+
+    private fun updateRoiUi() = with(binding) {
+        val hasRoi = cameraViewModel.normalizedRoi != null
+        setSegmentSelected(btnRoiSelect, cameraViewModel.roiEnabled || hasRoi)
+        setSegmentSelected(btnRoiFull, !cameraViewModel.roiEnabled && !hasRoi)
+        tvRoiLabel.text = if (hasRoi) "ROI On" else "ROI"
+    }
+
+    private fun setAlgorithmControlsEnabled(enabled: Boolean) = with(binding) {
+        listOf(
+            btnAlgorithmKlt,
+            btnAlgorithmFarneback,
+            btnFarnebackVectors,
+            btnFarnebackHeatmap,
+            btnRoiSelect,
+            btnRoiFull
+        ).forEach { control ->
+            control.isEnabled = enabled
+            control.alpha = if (enabled) 1f else 0.45f
+        }
+        updateFarnebackDisplayUi()
+    }
+
+    private fun setSegmentSelected(view: TextView, selected: Boolean) {
+        view.setBackgroundResource(
+            if (selected) R.drawable.bg_gradient_update_button else R.drawable.bg_glass_chip
+        )
+    }
+
     private fun applyOpticalFlowModeUi(useFarneback: Boolean) {
         binding.kltSensitivityBar.isEnabled = !useFarneback
         binding.kltSensitivityBar.alpha = if (useFarneback) 0.5f else 1.0f
         binding.farnebackSensitivityBar.isEnabled = useFarneback
         binding.farnebackSensitivityBar.alpha = if (useFarneback) 1.0f else 0.5f
+        binding.farnebackViewCard.alpha = if (useFarneback) 1.0f else 0.45f
+        binding.ofAlgorithm.text = if (useFarneback) "Farneback" else "KLT"
+        updateAlgorithmModeUi()
+        updateFarnebackDisplayUi()
     }
 
     private fun applyCurrentSensitivity() {
@@ -354,7 +477,8 @@ class CameraOpticalFlowFragment :
         val farnebackSensitivity = binding.farnebackSensitivityBar.progress
         if (::kltLabFlow.isInitialized) kltLabFlow.setSensitivity(kltSensitivity)
         if (::farnebackLabFlow.isInitialized) farnebackLabFlow.setSensitivity(farnebackSensitivity)
-        opticalFlow.setSensitivity(if (binding.ofType.isChecked) farnebackSensitivity else kltSensitivity)
+        opticalFlow.setSensitivity(if (cameraViewModel.useFarneback) farnebackSensitivity else kltSensitivity)
+        (opticalFlow as? Farneback)?.setVisualizationMode(currentFarnebackVisualizationMode())
     }
 
     private fun applyMovingMode(isMoving: Boolean, manualOverride: Boolean) {
@@ -363,10 +487,8 @@ class CameraOpticalFlowFragment :
         if (::kltLabFlow.isInitialized) kltLabFlow.setMovingMode(isMoving)
         if (::farnebackLabFlow.isInitialized) farnebackLabFlow.setMovingMode(isMoving)
 
-        ignoreMovingSwitchChanges = true
-        binding.movingStatus.isChecked = isMoving
-        ignoreMovingSwitchChanges = false
         binding.movingType.text = if (isMoving) "Moving" else "Stand Still"
+        updateMotionControlUi()
     }
 
     private fun updateAutoMovingModeFromCurrentSource() {
@@ -539,7 +661,9 @@ class CameraOpticalFlowFragment :
         binding.updateFeaturesButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
         binding.ofAlgorithm.text = "Lab"
         binding.tvTitle.text = "KLT vs Farneback"
-        binding.ofType.isEnabled = false
+        setAlgorithmControlsEnabled(false)
+        binding.roiOverlay.setSelectionEnabled(false)
+        binding.roiOverlay.visibility = android.view.View.GONE
         setRecordLocked(locked = true)
         if (!isRecording) {
             resetTimer()
@@ -555,11 +679,13 @@ class CameraOpticalFlowFragment :
 
         binding.updateFeaturesButton.text = "Start Analysis"
         binding.updateFeaturesButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
-        binding.ofAlgorithm.text = if (binding.ofType.isChecked) "Farneback" else "KLT"
+        binding.ofAlgorithm.text = if (cameraViewModel.useFarneback) "Farneback" else "KLT"
         binding.tvTitle.text = "Optical Flow"
-        binding.ofType.isEnabled = true
+        setAlgorithmControlsEnabled(true)
         setRecordLocked(locked = false)
         applyAnalysisSensitivityLock(locked = false)
+        binding.roiOverlay.setSelectionEnabled(cameraViewModel.roiEnabled)
+        updateRoiUi()
         if (!isRecording) {
             stopTimer()
         }
@@ -681,34 +807,84 @@ class CameraOpticalFlowFragment :
             return
         }
 
-        // get OF output
-        val currentOutput = opticalFlow.run(frame)
-        output = currentOutput
+        val roiRect = activeRoiRect(frame)
+        val processingFrame = roiRect?.let { frame.submat(it) } ?: frame
+        try {
+            val currentOutput = opticalFlow.run(processingFrame)
+            output = currentOutput
 
-        if (currentOutput != null && currentOutput.ofFrame != null) {
-            val pos = currentOutput.position
-            if (pos != null) {
-                val mv = mvViewer.getMotionVector(pos)
-                mvMat = mv
+            if (currentOutput != null && currentOutput.ofFrame != null) {
+                currentOutput.position?.let { pos ->
+                    val mv = mvViewer.getMotionVector(pos)
+                    mvMat = mv
 
-                // draw Motion Vector
-                val dst = getOrCreateMotionVectorBitmap(mv)
-                Utils.matToBitmap(mv, dst)
-                activity?.runOnUiThread {
-                    binding.motionVector.setImageBitmap(dst)
+                    val dst = getOrCreateMotionVectorBitmap(mv)
+                    Utils.matToBitmap(mv, dst)
+                    activity?.runOnUiThread {
+                        binding.motionVector.setImageBitmap(dst)
+                    }
                 }
+                if (roiRect != null) {
+                    drawRoiFrame(frame, roiRect)
+                }
+                val outFrame = if (roiRect != null) frame else currentOutput.ofFrame ?: frame
+                currentFrameWidth = outFrame.cols()
+                currentFrameHeight = outFrame.rows()
+                renderOpticalFlowFrame(outFrame)
+                writeToVideoWriter(outFrame)
+                return
             }
-            val outFrame = currentOutput.ofFrame ?: frame
-            currentFrameWidth = outFrame.cols()
-            currentFrameHeight = outFrame.rows()
-            renderOpticalFlowFrame(outFrame)
-            writeToVideoWriter(outFrame)
-            return
+        } finally {
+            if (processingFrame !== frame) {
+                processingFrame.release()
+            }
         }
+        roiRect?.let { drawRoiFrame(frame, it) }
         currentFrameWidth = frame.cols()
         currentFrameHeight = frame.rows()
         renderOpticalFlowFrame(frame)
         writeToVideoWriter(frame)
+    }
+
+    private fun activeRoiRect(frame: Mat): Rect? {
+        val normalized = cameraViewModel.normalizedRoi ?: return null
+        if (!cameraViewModel.roiEnabled) return null
+
+        val frameCols = frame.cols().coerceAtLeast(1)
+        val frameRows = frame.rows().coerceAtLeast(1)
+        val viewHeight = 1.0
+        val viewWidth = normalized.viewAspectRatio.toDouble().coerceAtLeast(0.01)
+        val scale = max(viewWidth / frameCols.toDouble(), viewHeight / frameRows.toDouble())
+        val offsetX = ((frameCols * scale) - viewWidth) / 2.0
+        val offsetY = ((frameRows * scale) - viewHeight) / 2.0
+
+        fun mapX(normalizedX: Float): Int {
+            return (((normalizedX * viewWidth) + offsetX) / scale).roundToInt()
+        }
+
+        fun mapY(normalizedY: Float): Int {
+            return (((normalizedY * viewHeight) + offsetY) / scale).roundToInt()
+        }
+
+        val left = mapX(normalized.left).coerceIn(0, frameCols - 1)
+        val top = mapY(normalized.top).coerceIn(0, frameRows - 1)
+        val right = mapX(normalized.right).coerceIn(left + 1, frameCols)
+        val bottom = mapY(normalized.bottom).coerceIn(top + 1, frameRows)
+        val width = right - left
+        val height = bottom - top
+        if (width < MIN_ROI_FRAME_SIZE || height < MIN_ROI_FRAME_SIZE) return null
+
+        return Rect(left, top, width, height)
+    }
+
+    private fun drawRoiFrame(frame: Mat, roi: Rect) {
+        Imgproc.rectangle(
+            frame,
+            Point(roi.x.toDouble(), roi.y.toDouble()),
+            Point((roi.x + roi.width).toDouble(), (roi.y + roi.height).toDouble()),
+            Scalar(220.0, 203.0, 255.0, 255.0),
+            4
+        )
     }
 
     private fun processAnalysisFrame(frame: Mat) {
@@ -878,7 +1054,7 @@ class CameraOpticalFlowFragment :
         } else {
             binding.kltSensitivityBar.progress = restoreKltSensitivity
             binding.farnebackSensitivityBar.progress = restoreFarnebackSensitivity
-            applyOpticalFlowModeUi(useFarneback = binding.ofType.isChecked)
+            applyOpticalFlowModeUi(useFarneback = cameraViewModel.useFarneback)
             applyCurrentSensitivity()
         }
     }
@@ -1002,5 +1178,6 @@ class CameraOpticalFlowFragment :
 
     companion object {
         private const val ANALYSIS_SENSITIVITY = 100
+        private const val MIN_ROI_FRAME_SIZE = 32
     }
 }
