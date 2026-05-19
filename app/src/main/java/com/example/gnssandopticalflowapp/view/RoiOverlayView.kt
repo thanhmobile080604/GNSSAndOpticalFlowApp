@@ -4,11 +4,15 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PointF
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
-import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
@@ -21,8 +25,18 @@ class RoiOverlayView @JvmOverloads constructor(
         color = Color.argb(95, 0, 0, 0)
         style = Paint.Style.FILL
     }
+    private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+        style = Paint.Style.FILL
+    }
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(42, 220, 203, 255)
+        style = Paint.Style.FILL
+    }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(220, 203, 255)
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
         strokeWidth = 4f
         style = Paint.Style.STROKE
     }
@@ -36,17 +50,21 @@ class RoiOverlayView @JvmOverloads constructor(
         typeface = android.graphics.Typeface.DEFAULT_BOLD
     }
 
-    private var dragStartX = 0f
-    private var dragStartY = 0f
-    private val roiRect = RectF()
+    private val drawingPoints = mutableListOf<PointF>()
+    private val normalizedPathPoints = mutableListOf<PointF>()
+    private val drawPath = Path()
 
     var normalizedRoi: RectF? = null
         private set
+
+    val normalizedPath: List<PointF>
+        get() = normalizedPathPoints.map { point -> PointF(point.x, point.y) }
 
     var selectionEnabled = false
         private set
 
     var onRoiChanged: (() -> Unit)? = null
+    var onInvalidSelection: (() -> Unit)? = null
 
     fun setSelectionEnabled(enabled: Boolean) {
         selectionEnabled = enabled
@@ -55,105 +73,186 @@ class RoiOverlayView @JvmOverloads constructor(
     }
 
     fun clearSelection() {
-        normalizedRoi = null
-        roiRect.setEmpty()
-        visibility = if (selectionEnabled) VISIBLE else GONE
-        onRoiChanged?.invoke()
-        invalidate()
+        clearSelection(notify = true)
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!selectionEnabled && normalizedRoi == null) return
 
-        val rect = currentRect()
-        if (rect == null) {
-            canvas.drawColor(Color.argb(40, 0, 0, 0))
-            canvas.drawText("Drag to select ROI", 28f, 48f, labelPaint)
+        val closedPath = closedSelectionPath()
+        if (closedPath != null) {
+            drawClosedArea(canvas, closedPath)
             return
         }
 
-        canvas.drawRect(0f, 0f, width.toFloat(), rect.top, dimPaint)
-        canvas.drawRect(0f, rect.bottom, width.toFloat(), height.toFloat(), dimPaint)
-        canvas.drawRect(0f, rect.top, rect.left, rect.bottom, dimPaint)
-        canvas.drawRect(rect.right, rect.top, width.toFloat(), rect.bottom, dimPaint)
-        canvas.drawRoundRect(rect, 18f, 18f, borderPaint)
+        val activePath = activeDrawingPath()
+        canvas.drawColor(Color.argb(40, 0, 0, 0))
+        if (activePath == null) {
+            canvas.drawText("Draw a closed area", 28f, 48f, labelPaint)
+            return
+        }
 
-        val radius = 8f
-        canvas.drawCircle(rect.left, rect.top, radius, handlePaint)
-        canvas.drawCircle(rect.right, rect.top, radius, handlePaint)
-        canvas.drawCircle(rect.left, rect.bottom, radius, handlePaint)
-        canvas.drawCircle(rect.right, rect.bottom, radius, handlePaint)
+        canvas.drawPath(activePath, borderPaint)
+        drawingPoints.firstOrNull()?.let { start ->
+            canvas.drawCircle(start.x, start.y, 9f, handlePaint)
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!selectionEnabled) return false
 
+        val x = event.x.coerceIn(0f, width.toFloat())
+        val y = event.y.coerceIn(0f, height.toFloat())
+
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
-                dragStartX = event.x.coerceIn(0f, width.toFloat())
-                dragStartY = event.y.coerceIn(0f, height.toFloat())
-                normalizedRoi = null
-                roiRect.set(dragStartX, dragStartY, dragStartX, dragStartY)
+                clearSelection(notify = false)
+                drawingPoints.add(PointF(x, y))
                 onRoiChanged?.invoke()
                 invalidate()
                 return true
             }
 
             MotionEvent.ACTION_MOVE -> {
-                updateRect(event.x, event.y)
+                addDrawingPoint(x, y)
                 invalidate()
                 return true
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                updateRect(event.x, event.y)
+            MotionEvent.ACTION_UP -> {
+                addDrawingPoint(x, y, force = true)
                 parent?.requestDisallowInterceptTouchEvent(false)
-                if (roiRect.width() < MIN_ROI_SIZE_PX || roiRect.height() < MIN_ROI_SIZE_PX) {
-                    clearSelection()
-                } else {
-                    normalizedRoi = RectF(
-                        roiRect.left / width.toFloat(),
-                        roiRect.top / height.toFloat(),
-                        roiRect.right / width.toFloat(),
-                        roiRect.bottom / height.toFloat()
-                    )
+                if (commitClosedArea()) {
                     onRoiChanged?.invoke()
-                    invalidate()
+                } else {
+                    clearSelection(notify = true)
+                    onInvalidSelection?.invoke()
                 }
+                invalidate()
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                clearSelection(notify = true)
+                invalidate()
                 return true
             }
         }
         return true
     }
 
-    private fun updateRect(x: Float, y: Float) {
-        val endX = x.coerceIn(0f, width.toFloat())
-        val endY = y.coerceIn(0f, height.toFloat())
-        roiRect.set(
-            min(dragStartX, endX),
-            min(dragStartY, endY),
-            max(dragStartX, endX),
-            max(dragStartY, endY)
-        )
+    private fun addDrawingPoint(x: Float, y: Float, force: Boolean = false) {
+        val last = drawingPoints.lastOrNull()
+        if (!force && last != null && distance(last, x, y) < minPointDistancePx()) return
+        drawingPoints.add(PointF(x, y))
     }
 
-    private fun currentRect(): RectF? {
-        normalizedRoi?.let { normalized ->
-            return RectF(
-                normalized.left * width,
-                normalized.top * height,
-                normalized.right * width,
-                normalized.bottom * height
-            )
+    private fun commitClosedArea(): Boolean {
+        if (drawingPoints.size < MIN_PATH_POINTS) return false
+        val first = drawingPoints.first()
+        val last = drawingPoints.last()
+        if (distance(first, last.x, last.y) > closeThresholdPx()) return false
+
+        val bounds = boundsFor(drawingPoints)
+        if (bounds.width() < minRoiSizePx() || bounds.height() < minRoiSizePx()) return false
+
+        normalizedRoi = RectF(
+            bounds.left / width.toFloat(),
+            bounds.top / height.toFloat(),
+            bounds.right / width.toFloat(),
+            bounds.bottom / height.toFloat()
+        )
+        normalizedPathPoints.clear()
+        normalizedPathPoints.addAll(
+            drawingPoints.map { point ->
+                PointF(point.x / width.toFloat(), point.y / height.toFloat())
+            }
+        )
+        drawingPoints.clear()
+        return true
+    }
+
+    private fun drawClosedArea(canvas: Canvas, path: Path) {
+        val saveCount = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
+        canvas.drawPath(path, clearPaint)
+        canvas.restoreToCount(saveCount)
+
+        canvas.drawPath(path, fillPaint)
+        canvas.drawPath(path, borderPaint)
+        normalizedPathPoints.firstOrNull()?.let { normalized ->
+            canvas.drawCircle(normalized.x * width, normalized.y * height, 8f, handlePaint)
         }
-        return roiRect.takeIf {
-            abs(it.width()) >= MIN_ROI_SIZE_PX && abs(it.height()) >= MIN_ROI_SIZE_PX
+    }
+
+    private fun activeDrawingPath(): Path? {
+        if (drawingPoints.isEmpty()) return null
+        drawPath.reset()
+        drawPath.moveTo(drawingPoints.first().x, drawingPoints.first().y)
+        drawingPoints.drop(1).forEach { point ->
+            drawPath.lineTo(point.x, point.y)
         }
+        return drawPath
+    }
+
+    private fun closedSelectionPath(): Path? {
+        if (normalizedPathPoints.isEmpty()) return null
+        drawPath.reset()
+        val first = normalizedPathPoints.first()
+        drawPath.moveTo(first.x * width, first.y * height)
+        normalizedPathPoints.drop(1).forEach { point ->
+            drawPath.lineTo(point.x * width, point.y * height)
+        }
+        drawPath.close()
+        return drawPath
+    }
+
+    private fun clearSelection(notify: Boolean) {
+        normalizedRoi = null
+        drawingPoints.clear()
+        normalizedPathPoints.clear()
+        visibility = if (selectionEnabled) VISIBLE else GONE
+        if (notify) onRoiChanged?.invoke()
+        invalidate()
+    }
+
+    private fun boundsFor(points: List<PointF>): RectF {
+        var left = Float.MAX_VALUE
+        var top = Float.MAX_VALUE
+        var right = -Float.MAX_VALUE
+        var bottom = -Float.MAX_VALUE
+        points.forEach { point ->
+            left = min(left, point.x)
+            top = min(top, point.y)
+            right = max(right, point.x)
+            bottom = max(bottom, point.y)
+        }
+        return RectF(left, top, right, bottom)
+    }
+
+    private fun distance(from: PointF, toX: Float, toY: Float): Float {
+        return hypot(from.x - toX, from.y - toY)
+    }
+
+    private fun closeThresholdPx(): Float {
+        return CLOSE_THRESHOLD_DP * resources.displayMetrics.density
+    }
+
+    private fun minPointDistancePx(): Float {
+        return MIN_POINT_DISTANCE_DP * resources.displayMetrics.density
+    }
+
+    private fun minRoiSizePx(): Float {
+        return MIN_ROI_SIZE_DP * resources.displayMetrics.density
     }
 
     private companion object {
-        const val MIN_ROI_SIZE_PX = 48f
+        const val MIN_PATH_POINTS = 8
+        const val MIN_POINT_DISTANCE_DP = 3f
+        const val MIN_ROI_SIZE_DP = 48f
+        const val CLOSE_THRESHOLD_DP = 44f
     }
 }

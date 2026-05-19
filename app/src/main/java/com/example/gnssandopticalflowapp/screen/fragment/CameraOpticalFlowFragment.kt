@@ -45,6 +45,7 @@ import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
+import org.opencv.core.MatOfPoint
 import org.opencv.core.Point
 import org.opencv.core.Rect
 import org.opencv.core.Scalar
@@ -160,12 +161,18 @@ class CameraOpticalFlowFragment :
                         roiOverlay.width.toFloat() / roiOverlay.height.toFloat()
                     } else {
                         1f
+                    },
+                    pathPoints = roiOverlay.normalizedPath.map { point ->
+                        CameraOpticalFlowViewModel.NormalizedPoint(point.x, point.y)
                     }
                 )
             }
             cameraViewModel.roiEnabled = roiOverlay.selectionEnabled || cameraViewModel.normalizedRoi != null
             resetActiveOpticalFlow()
             updateRoiUi()
+        }
+        roiOverlay.onInvalidSelection = {
+            Toast.makeText(safeContext(), "You must draw a closed area", Toast.LENGTH_SHORT).show()
         }
 
         imuEstimator = IMUEstimator(safeContext().applicationContext)
@@ -808,11 +815,13 @@ class CameraOpticalFlowFragment :
             return
         }
 
-        val roiRect = activeRoiRect(frame)
-        val processingFrame = roiRect?.let { frame.submat(it) } ?: frame
+        val activeRoi = activeRoi(frame)
+        val processingFrame = activeRoi?.rect?.let { frame.submat(it) } ?: frame
+        val originalRoiFrame = activeRoi?.mask?.let { processingFrame.clone() }
         try {
             val currentOutput = opticalFlow.run(processingFrame)
             output = currentOutput
+            restoreOutsideRoiMask(processingFrame, originalRoiFrame, activeRoi?.mask)
 
             if (currentOutput != null && currentOutput.ofFrame != null) {
                 currentOutput.position?.let { pos ->
@@ -825,10 +834,7 @@ class CameraOpticalFlowFragment :
                         binding.motionVector.setImageBitmap(dst)
                     }
                 }
-                if (roiRect != null) {
-                    drawRoiFrame(frame, roiRect)
-                }
-                val outFrame = if (roiRect != null) frame else currentOutput.ofFrame ?: frame
+                val outFrame = if (activeRoi != null) frame else currentOutput.ofFrame ?: frame
                 currentFrameWidth = outFrame.cols()
                 currentFrameHeight = outFrame.rows()
                 renderOpticalFlowFrame(outFrame)
@@ -839,15 +845,16 @@ class CameraOpticalFlowFragment :
             if (processingFrame !== frame) {
                 processingFrame.release()
             }
+            originalRoiFrame?.release()
+            activeRoi?.mask?.release()
         }
-        roiRect?.let { drawRoiFrame(frame, it) }
         currentFrameWidth = frame.cols()
         currentFrameHeight = frame.rows()
         renderOpticalFlowFrame(frame)
         writeToVideoWriter(frame)
     }
 
-    private fun activeRoiRect(frame: Mat): Rect? {
+    private fun activeRoi(frame: Mat): ActiveRoi? {
         val normalized = cameraViewModel.normalizedRoi ?: return null
         if (!cameraViewModel.roiEnabled) return null
 
@@ -875,17 +882,57 @@ class CameraOpticalFlowFragment :
         val height = bottom - top
         if (width < MIN_ROI_FRAME_SIZE || height < MIN_ROI_FRAME_SIZE) return null
 
-        return Rect(left, top, width, height)
+        val rect = Rect(left, top, width, height)
+        return ActiveRoi(
+            rect = rect,
+            mask = createRoiMask(
+                normalized = normalized,
+                frameCols = frameCols,
+                frameRows = frameRows,
+                rect = rect,
+                mapX = { value -> mapX(value) },
+                mapY = { value -> mapY(value) }
+            )
+        )
     }
 
-    private fun drawRoiFrame(frame: Mat, roi: Rect) {
-        Imgproc.rectangle(
-            frame,
-            Point(roi.x.toDouble(), roi.y.toDouble()),
-            Point((roi.x + roi.width).toDouble(), (roi.y + roi.height).toDouble()),
-            Scalar(220.0, 203.0, 255.0, 255.0),
-            4
-        )
+    private fun createRoiMask(
+        normalized: CameraOpticalFlowViewModel.NormalizedRoi,
+        frameCols: Int,
+        frameRows: Int,
+        rect: Rect,
+        mapX: (Float) -> Int,
+        mapY: (Float) -> Int
+    ): Mat? {
+        if (normalized.pathPoints.size < 3) return null
+
+        val polygon = normalized.pathPoints.map { point ->
+            Point(
+                mapX(point.x).coerceIn(0, frameCols - 1).minus(rect.x).toDouble(),
+                mapY(point.y).coerceIn(0, frameRows - 1).minus(rect.y).toDouble()
+            )
+        }
+        val mask = Mat.zeros(rect.height, rect.width, CvType.CV_8UC1)
+        val polygonMat = MatOfPoint(*polygon.toTypedArray())
+        Imgproc.fillPoly(mask, listOf(polygonMat), Scalar(255.0))
+        polygonMat.release()
+        return mask
+    }
+
+    private fun restoreOutsideRoiMask(
+        processingFrame: Mat,
+        originalRoiFrame: Mat?,
+        mask: Mat?
+    ) {
+        if (originalRoiFrame == null || mask == null) return
+
+        val inverseMask = Mat()
+        try {
+            Core.bitwise_not(mask, inverseMask)
+            originalRoiFrame.copyTo(processingFrame, inverseMask)
+        } finally {
+            inverseMask.release()
+        }
     }
 
     private fun processAnalysisFrame(frame: Mat) {
@@ -1181,4 +1228,9 @@ class CameraOpticalFlowFragment :
         private const val ANALYSIS_SENSITIVITY = 100
         private const val MIN_ROI_FRAME_SIZE = 32
     }
+
+    private data class ActiveRoi(
+        val rect: Rect,
+        val mask: Mat?
+    )
 }

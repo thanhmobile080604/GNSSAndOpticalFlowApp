@@ -17,7 +17,13 @@ class CameraOpticalFlowViewModel : ViewModel() {
         val top: Float,
         val right: Float,
         val bottom: Float,
-        val viewAspectRatio: Float
+        val viewAspectRatio: Float,
+        val pathPoints: List<NormalizedPoint> = emptyList()
+    )
+
+    data class NormalizedPoint(
+        val x: Float,
+        val y: Float
     )
 
     @Volatile

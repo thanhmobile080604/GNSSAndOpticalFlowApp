@@ -120,7 +120,7 @@ class VideoProcessOptionsDialog :
 
         tvApply.setSingleClick {
             if (roiSelectEnabled && selectedRoi == null) {
-                Toast.makeText(requireContext(), "Drag on preview to select ROI", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), CLOSED_AREA_MESSAGE, Toast.LENGTH_SHORT).show()
                 return@setSingleClick
             }
 
@@ -237,10 +237,16 @@ class VideoProcessOptionsDialog :
                         roiOverlay.width.toFloat() / roiOverlay.height.toFloat()
                     } else {
                         1f
+                    },
+                    pathPoints = roiOverlay.normalizedPath.map { point ->
+                        VideoProcessOptions.NormalizedPoint(point.x, point.y)
                     }
                 )
             }
             updateRoiUi()
+        }
+        roiOverlay.onInvalidSelection = {
+            Toast.makeText(requireContext(), CLOSED_AREA_MESSAGE, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -344,6 +350,7 @@ class VideoProcessOptionsDialog :
         private const val TAG = "VideoProcessOptionsDialog"
         private const val DEFAULT_SENSITIVITY = 50
         private const val ARG_VIDEO_URI = "video_uri"
+        private const val CLOSED_AREA_MESSAGE = "You must draw a closed area"
 
         fun show(
             fragmentManager: FragmentManager,
