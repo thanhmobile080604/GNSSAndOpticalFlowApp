@@ -10,38 +10,21 @@
         android:id="@+id/bgParent"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:background="@drawable/bg_modal_glass"
-        android:layout_marginHorizontal="20dp"
+        android:layout_marginHorizontal="14dp"
         android:layout_marginTop="-10dp"
-        android:layout_marginBottom="-24dp"
+        android:layout_marginBottom="-18dp"
+        android:background="@drawable/bg_modal_glass"
         app:layout_constraintBottom_toBottomOf="@id/buttonPanel"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="@id/ivThumb"/>
-
-    <ImageView
-        android:id="@+id/ivThumb"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginTop="18dp"
-        android:padding="12dp"
-        android:scaleType="fitCenter"
-        android:src="@drawable/ic_process"
-        android:tint="@color/white"
-        app:layout_constraintDimensionRatio="1"
-        app:layout_constraintVertical_bias="0.2"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintWidth_percent="0.19" />
+        app:layout_constraintTop_toTopOf="@id/tvTitle" />
 
     <TextView
         android:id="@+id/tvTitle"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="24dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginHorizontal="32dp"
+        android:layout_marginTop="30dp"
         android:ellipsize="end"
         android:fontFamily="@font/inter_black"
         android:gravity="center"
@@ -49,191 +32,334 @@
         android:text="Video Options"
         android:textColor="@color/white"
         android:textSize="22sp"
-        app:layout_constraintEnd_toEndOf="@id/ivThumb"
-        app:layout_constraintStart_toStartOf="@id/ivThumb"
-        app:layout_constraintTop_toBottomOf="@id/ivThumb" />
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintVertical_bias="0.1"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-    <TextView
-        android:id="@+id/tvSubtitle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="28dp"
-        android:layout_marginTop="6dp"
-        android:ellipsize="end"
-        android:fontFamily="@font/inter_medium"
-        android:gravity="center"
-        android:maxLines="1"
-        android:text="Choose processing mode"
-        android:textColor="#BDAEE5"
-        android:textSize="14sp"
-        app:layout_constraintEnd_toEndOf="@id/ivThumb"
-        app:layout_constraintStart_toStartOf="@id/ivThumb"
-        app:layout_constraintTop_toBottomOf="@id/tvTitle" />
 
-    <LinearLayout
-        android:id="@+id/optionsPanel"
+    <androidx.constraintlayout.utils.widget.ImageFilterView
+        android:id="@+id/previewGlass"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="22dp"
-        android:layout_marginTop="18dp"
-        android:background="@drawable/bg_glass_card"
-        android:orientation="vertical"
-        android:paddingHorizontal="14dp"
-        app:layout_constraintWidth_percent="0.8"
-        android:paddingVertical="8dp"
-        app:layout_constraintEnd_toEndOf="@id/ivThumb"
-        app:layout_constraintStart_toStartOf="@id/ivThumb"
-        app:layout_constraintTop_toBottomOf="@id/tvSubtitle">
+        android:layout_height="0dp"
+        android:layout_marginTop="14dp"
+        android:src="@drawable/bg_camera_glass_frame"
+        app:layout_constraintDimensionRatio="16:10"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tvTitle"
+        app:layout_constraintWidth_percent="0.86"
+        app:round="20dp" />
+
+    <androidx.cardview.widget.CardView
+        android:id="@+id/videoPreviewCard"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="2dp"
+        app:cardBackgroundColor="@android:color/black"
+        app:cardCornerRadius="22dp"
+        app:cardElevation="0dp"
+        app:cardUseCompatPadding="false"
+        app:layout_constraintBottom_toBottomOf="@id/previewGlass"
+        app:layout_constraintEnd_toEndOf="@id/previewGlass"
+        app:layout_constraintStart_toStartOf="@id/previewGlass"
+        app:layout_constraintTop_toTopOf="@id/previewGlass">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <androidx.media3.ui.PlayerView
+                android:id="@+id/videoPreview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                app:resize_mode="zoom"
+                app:surface_type="texture_view"
+                app:use_controller="false" />
+
+            <com.example.gnssandopticalflowapp.view.RoiOverlayView
+                android:id="@+id/roiOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+
+        </FrameLayout>
+
+    </androidx.cardview.widget.CardView>
+
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/optionsScroll"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="12dp"
+        android:clipToPadding="false"
+        android:fillViewport="false"
+        android:overScrollMode="never"
+        android:scrollbars="none"
+        app:layout_constraintBottom_toTopOf="@id/buttonPanel"
+        app:layout_constraintEnd_toEndOf="@id/previewGlass"
+        app:layout_constraintStart_toStartOf="@id/previewGlass"
+        app:layout_constraintTop_toBottomOf="@id/previewGlass">
 
         <LinearLayout
-            android:id="@+id/movingRow"
+            android:id="@+id/optionsPanel"
             android:layout_width="match_parent"
-            android:layout_height="62dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
             <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
+                android:id="@+id/algorithmCard"
+                android:layout_width="match_parent"
+                android:layout_height="66dp"
+                android:background="@drawable/bg_glass_card"
                 android:gravity="center_vertical"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/tvMovingLabel"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:fontFamily="@font/inter_extra_bold"
-                    android:maxLines="1"
-                    android:text="Motion"
-                    android:textColor="@color/white"
-                    android:textSize="15sp" />
-
-                <TextView
-                    android:id="@+id/tvMovingValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:fontFamily="@font/inter_medium"
-                    android:maxLines="1"
-                    android:text="Not Moving"
-                    android:textColor="#BDAEE5"
-                    android:textSize="13sp" />
-
-            </LinearLayout>
-
-            <androidx.appcompat.widget.SwitchCompat
-                android:id="@+id/switchMoving"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:splitTrack="false"
-                app:switchMinWidth="48dp"
-                app:thumbTint="@color/switch_thumb_selector"
-                app:trackTint="@color/switch_track_selector" />
-
-        </LinearLayout>
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#22FFFFFF" />
-
-        <LinearLayout
-            android:id="@+id/algorithmRow"
-            android:layout_width="match_parent"
-            android:layout_height="62dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:gravity="center_vertical"
-                android:orientation="vertical">
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
 
                 <TextView
                     android:id="@+id/tvAlgorithmLabel"
-                    android:layout_width="match_parent"
+                    android:layout_width="88dp"
                     android:layout_height="wrap_content"
-                    android:fontFamily="@font/inter_extra_bold"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/inter_black"
                     android:maxLines="1"
                     android:text="Algorithm"
                     android:textColor="@color/white"
-                    android:textSize="15sp" />
+                    android:textSize="14sp" />
 
                 <TextView
-                    android:id="@+id/tvAlgorithmValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:fontFamily="@font/inter_medium"
+                    android:id="@+id/btnAlgorithmKlt"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_gradient_update_button_12"
+                    android:fontFamily="@font/inter_black"
+                    android:gravity="center"
                     android:maxLines="1"
                     android:text="KLT"
-                    android:textColor="#BDAEE5"
+                    android:textColor="@color/white"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/btnAlgorithmFarneback"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_glass_chip"
+                    android:fontFamily="@font/inter_black"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:text="Farneback"
+                    android:textColor="@color/white"
+                    android:textSize="11sp" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/farnebackViewCard"
+                android:layout_width="match_parent"
+                android:layout_height="66dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_glass_card"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
+                <TextView
+                    android:id="@+id/tvFarnebackViewLabel"
+                    android:layout_width="88dp"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="@font/inter_black"
+                    android:maxLines="1"
+                    android:text="Display"
+                    android:textColor="@color/white"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btnFarnebackVectors"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_gradient_update_button_12"
+                    android:fontFamily="@font/inter_black"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:text="Vector"
+                    android:textColor="@color/white"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/btnFarnebackHeatmap"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_glass_chip"
+                    android:fontFamily="@font/inter_black"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:text="Heatmap"
+                    android:textColor="@color/white"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/motionCard"
+                android:layout_width="match_parent"
+                android:layout_height="66dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_glass_card"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
+                <TextView
+                    android:id="@+id/tvMotionLabel"
+                    android:layout_width="88dp"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter_black"
+                    android:text="Motion"
+                    android:textColor="@color/white"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btnMotionStill"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_gradient_update_button_12"
+                    android:fontFamily="@font/inter_black"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:text="Still"
+                    android:textColor="@color/white"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btnMotionMoving"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_glass_chip"
+                    android:fontFamily="@font/inter_black"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:text="Move"
+                    android:textColor="@color/white"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/roiCard"
+                android:layout_width="match_parent"
+                android:layout_height="66dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_glass_card"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
+                <TextView
+                    android:id="@+id/tvRoiLabel"
+                    android:layout_width="88dp"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter_black"
+                    android:text="ROI"
+                    android:textColor="@color/white"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btnRoiSelect"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_glass_chip"
+                    android:fontFamily="@font/inter_black"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:text="Select"
+                    android:textColor="@color/white"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/btnRoiFull"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_gradient_update_button_12"
+                    android:fontFamily="@font/inter_black"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:text="Full"
+                    android:textColor="@color/white"
                     android:textSize="13sp" />
 
             </LinearLayout>
 
-            <androidx.appcompat.widget.SwitchCompat
-                android:id="@+id/switchAlgorithm"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:splitTrack="false"
-                app:switchMinWidth="48dp"
-                app:thumbTint="@color/switch_thumb_selector"
-                app:trackTint="@color/switch_track_selector" />
+            <LinearLayout
+                android:id="@+id/sensitivityCard"
+                android:layout_width="match_parent"
+                android:layout_height="86dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_glass_card"
+                android:gravity="center_vertical"
+                android:orientation="vertical"
+                android:paddingHorizontal="14dp">
+
+                <TextView
+                    android:id="@+id/tvSensitivity"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/inter_extra_bold"
+                    android:text="Sensitivity: 50"
+                    android:textColor="@color/white"
+                    android:textSize="13sp" />
+
+                <SeekBar
+                    android:id="@+id/sensitivityBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="34dp"
+                    android:layout_marginTop="4dp"
+                    android:max="100"
+                    android:maxHeight="7dp"
+                    android:minHeight="7dp"
+                    android:progress="50"
+                    android:progressDrawable="@drawable/seekbar_glass_purple"
+                    android:thumb="@drawable/ripple_glow_purple_thumb" />
+
+            </LinearLayout>
 
         </LinearLayout>
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#22FFFFFF" />
-
-        <LinearLayout
-            android:id="@+id/sensitivityRow"
-            android:layout_width="match_parent"
-            android:layout_height="68dp"
-            android:gravity="center_vertical"
-            android:orientation="vertical">
-
-            <TextView
-                android:id="@+id/tvSensitivity"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:fontFamily="@font/inter_extra_bold"
-                android:text="Sensitivity"
-                android:textColor="@color/white"
-                android:textSize="15sp" />
-
-            <SeekBar
-                android:id="@+id/sensitivity_bar"
-                android:layout_width="match_parent"
-                android:layout_height="34dp"
-                android:layout_marginTop="4dp"
-                android:max="100"
-                android:maxHeight="7dp"
-                android:minHeight="7dp"
-                android:progress="50"
-                android:progressDrawable="@drawable/seekbar_glass_purple"
-                android:thumb="@drawable/ripple_glow_purple_thumb" />
-
-        </LinearLayout>
-
-    </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 
     <LinearLayout
         android:id="@+id/buttonPanel"
         android:layout_width="0dp"
         android:layout_height="48dp"
-        android:layout_marginHorizontal="4dp"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="18dp"
+      app:layout_constraintVertical_bias="0.86"
         android:orientation="horizontal"
-        app:layout_constraintEnd_toEndOf="@id/optionsPanel"
-        app:layout_constraintStart_toStartOf="@id/optionsPanel"
-        app:layout_constraintTop_toBottomOf="@id/optionsPanel">
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="@id/previewGlass"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="@id/previewGlass">
 
         <TextView
             android:id="@+id/tvCancel"
@@ -264,7 +390,7 @@
             android:gravity="center"
             android:maxLines="1"
             android:paddingHorizontal="10dp"
-            android:text="Apply"
+            android:text="Process"
             android:textColor="@color/white"
             android:textSize="15sp" />
 

@@ -1,6 +1,7 @@
 package com.example.gnssandopticalflowapp.screen.fragment
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
 import android.net.Uri
@@ -28,11 +29,15 @@ import kotlinx.coroutines.withContext
 import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.Mat
+import org.opencv.core.Point
+import org.opencv.core.Rect
+import org.opencv.core.Scalar
 import org.opencv.imgproc.Imgproc
 import org.opencv.videoio.VideoCapture
 import org.opencv.videoio.Videoio
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
@@ -72,7 +77,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     }
 
     private fun showVideoProcessOptions(uri: Uri) {
-        VideoProcessOptionsDialog.show(childFragmentManager) { options ->
+        VideoProcessOptionsDialog.show(childFragmentManager, uri) { options ->
             handleVideoSelection(uri, options)
         }
     }
@@ -134,10 +139,10 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val processed = try {
             processVideoWithOpenCv(sourceFile, outputFile, options)
                 || retryWithCleanOutput(outputFile) {
-                    processVideoWithFrameBatch(sourceFile, outputFile, options)
+                    processVideoWithTimeSeek(sourceFile, outputFile, options)
                 }
                 || retryWithCleanOutput(outputFile) {
-                    processVideoWithTimeSeek(sourceFile, outputFile, options)
+                    processVideoWithFrameBatch(sourceFile, outputFile, options)
                 }
         } finally {
             sourceFile.delete()
@@ -225,6 +230,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 encodeProcessedFrame(
                     opticalFlow = opticalFlow,
                     rgbaMat = frameForProcessing,
+                    options = options,
                     encoder = activeEncoder,
                     presentationTimeUs = framesProcessed * frameDurationUs
                 )
@@ -263,7 +269,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 ?.takeIf { it > 0L }
                 ?: return false
 
-            val firstFrame = retriever.getFrameAtIndex(0) ?: return false
+            val firstFrame = findFirstReadableFrame(retriever, metadata.durationMs * 1000L) ?: return false
             val rotationDegrees = rotationForDecodedFrame(firstFrame.width, firstFrame.height, metadata)
             val width = displayWidth(firstFrame.width, firstFrame.height, rotationDegrees)
             val height = displayHeight(firstFrame.width, firstFrame.height, rotationDegrees)
@@ -285,7 +291,11 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 encoder.start()
                 while (isProcessingVideo() && framesProcessed < frameCount) {
                     val requestCount = minOf(batchFrameSize.toLong(), frameCount - framesProcessed).toInt()
-                    val bitmaps = retriever.getFramesAtIndex(framesProcessed.toInt(), requestCount)
+                    val bitmaps = safeGetFramesAtIndex(
+                        retriever = retriever,
+                        startIndex = framesProcessed.toInt(),
+                        frameCount = requestCount
+                    )
                     if (bitmaps.isNullOrEmpty()) break
 
                     for (bitmap in bitmaps) {
@@ -295,6 +305,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                             encodeProcessedFrame(
                                 opticalFlow = opticalFlow,
                                 rgbaMat = frameForProcessing,
+                                options = options,
                                 encoder = encoder,
                                 presentationTimeUs = framesProcessed * frameDurationUs
                             )
@@ -332,15 +343,23 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             retriever.setDataSource(sourceFile.absolutePath)
             val metadata = readVideoProgressMetadata(sourceFile)
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            val firstFrame = retriever.getFrameAtTime(0) ?: return false
+            val fps = validFps(
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+                    ?.toDoubleOrNull(),
+                fallback = metadata.fps
+            )
+            val frameDurationUs = frameDurationUs(fps)
+            val durationUs = (durationMs.takeIf { it > 0L } ?: metadata.durationMs)
+                .let { it * 1000L }
+                .takeIf { it > 0L }
+                ?: (metadata.frameCount.takeIf { it > 0L }?.times(frameDurationUs) ?: frameDurationUs)
+            val firstFrame = findFirstReadableFrame(retriever, durationUs) ?: return false
             val rotationDegrees = rotationForDecodedFrame(firstFrame.width, firstFrame.height, metadata)
             val width = displayWidth(firstFrame.width, firstFrame.height, rotationDegrees)
             val height = displayHeight(firstFrame.width, firstFrame.height, rotationDegrees)
             firstFrame.recycle()
 
-            val fps = 30.0
-            val frameDurationUs = frameDurationUs(fps)
-            val totalFrames = ((durationMs * 1000L) / frameDurationUs).coerceAtLeast(1L)
+            val totalFrames = (durationUs / frameDurationUs).coerceAtLeast(1L)
             val encoder = VideoEncoder(outputFile.absolutePath, width, height, encoderFrameRate(fps))
             val opticalFlow = createOpticalFlow(options)
             val rgbaMat = Mat()
@@ -350,8 +369,8 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
             try {
                 encoder.start()
-                while (isProcessingVideo() && currentTimeUs < durationMs * 1000L) {
-                    val bitmap = retriever.getFrameAtTime(currentTimeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                while (isProcessingVideo() && currentTimeUs < durationUs) {
+                    val bitmap = safeGetFrameAtTime(retriever, currentTimeUs)
                     if (bitmap != null) {
                         try {
                             Utils.bitmapToMat(bitmap, rgbaMat)
@@ -359,6 +378,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                             encodeProcessedFrame(
                                 opticalFlow = opticalFlow,
                                 rgbaMat = frameForProcessing,
+                                options = options,
                                 encoder = encoder,
                                 presentationTimeUs = framesProcessed * frameDurationUs
                             )
@@ -385,6 +405,64 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         }
     }
 
+    private fun findFirstReadableFrame(
+        retriever: MediaMetadataRetriever,
+        durationUs: Long
+    ): Bitmap? {
+        val safeDurationUs = durationUs.coerceAtLeast(0L)
+        val probeTimes = linkedSetOf(
+            0L,
+            1L,
+            33_333L,
+            100_000L,
+            500_000L
+        )
+        if (safeDurationUs > 1L) {
+            probeTimes.add((safeDurationUs / 2L).coerceAtLeast(0L))
+            probeTimes.add((safeDurationUs - 1L).coerceAtLeast(0L))
+        }
+
+        for (timeUs in probeTimes) {
+            safeGetFrameAtTime(retriever, timeUs)?.let { return it }
+        }
+        return null
+    }
+
+    private fun safeGetFrameAtTime(
+        retriever: MediaMetadataRetriever,
+        timeUs: Long
+    ): Bitmap? {
+        val safeTimeUs = timeUs.coerceAtLeast(0L)
+        val options = intArrayOf(
+            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+            MediaMetadataRetriever.OPTION_CLOSEST,
+            MediaMetadataRetriever.OPTION_NEXT_SYNC,
+            MediaMetadataRetriever.OPTION_PREVIOUS_SYNC
+        )
+
+        for (option in options) {
+            try {
+                retriever.getFrameAtTime(safeTimeUs, option)?.let { return it }
+            } catch (_: Exception) {
+                // Some decoders throw for sparse or non-keyframe timestamps. Try the next mode.
+            }
+        }
+        return null
+    }
+
+    private fun safeGetFramesAtIndex(
+        retriever: MediaMetadataRetriever,
+        startIndex: Int,
+        frameCount: Int
+    ): List<Bitmap> {
+        return try {
+            retriever.getFramesAtIndex(startIndex, frameCount).orEmpty()
+        } catch (e: Exception) {
+            Log.w("VIDEO-PROCESS", "Frame batch unavailable at index $startIndex: ${e.message}")
+            emptyList()
+        }
+    }
+
     private fun createOpticalFlow(options: VideoProcessOptions): OpticalFlow {
         val opticalFlow: OpticalFlow = if (options.useFarneback) {
             Farneback()
@@ -395,6 +473,13 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         return opticalFlow.apply {
             setSensitivity(options.sensitivity)
             setMovingMode(options.isMoving)
+            (this as? Farneback)?.setVisualizationMode(
+                if (options.useFarnebackHeatmap) {
+                    Farneback.VisualizationMode.HEATMAP
+                } else {
+                    Farneback.VisualizationMode.VECTORS
+                }
+            )
         }
     }
 
@@ -441,17 +526,71 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     private fun encodeProcessedFrame(
         opticalFlow: OpticalFlow,
         rgbaMat: Mat,
+        options: VideoProcessOptions,
         encoder: VideoEncoder,
         presentationTimeUs: Long
     ) {
         if (rgbaMat.empty()) return
 
-        val output = opticalFlow.run(rgbaMat)
-        val outFrame = output?.ofFrame ?: rgbaMat
-        encoder.encodeFrame(outFrame, presentationTimeUs)
-        if (outFrame !== rgbaMat) {
-            outFrame.release()
+        val roiRect = activeRoiRect(rgbaMat, options)
+        val processingFrame = roiRect?.let { rgbaMat.submat(it) } ?: rgbaMat
+        try {
+            val output = opticalFlow.run(processingFrame)
+            roiRect?.let { drawRoiFrame(rgbaMat, it) }
+
+            val outFrame = if (roiRect != null) {
+                rgbaMat
+            } else {
+                output?.ofFrame ?: rgbaMat
+            }
+            encoder.encodeFrame(outFrame, presentationTimeUs)
+            if (outFrame !== rgbaMat && outFrame !== processingFrame) {
+                outFrame.release()
+            }
+        } finally {
+            if (processingFrame !== rgbaMat) {
+                processingFrame.release()
+            }
         }
+    }
+
+    private fun activeRoiRect(frame: Mat, options: VideoProcessOptions): Rect? {
+        val normalized = options.roi ?: return null
+        val frameCols = frame.cols().coerceAtLeast(1)
+        val frameRows = frame.rows().coerceAtLeast(1)
+        val viewHeight = 1.0
+        val viewWidth = normalized.viewAspectRatio.toDouble().coerceAtLeast(0.01)
+        val scale = max(viewWidth / frameCols.toDouble(), viewHeight / frameRows.toDouble())
+        val offsetX = ((frameCols * scale) - viewWidth) / 2.0
+        val offsetY = ((frameRows * scale) - viewHeight) / 2.0
+
+        fun mapX(normalizedX: Float): Int {
+            return (((normalizedX * viewWidth) + offsetX) / scale).roundToInt()
+        }
+
+        fun mapY(normalizedY: Float): Int {
+            return (((normalizedY * viewHeight) + offsetY) / scale).roundToInt()
+        }
+
+        val left = mapX(normalized.left).coerceIn(0, frameCols - 1)
+        val top = mapY(normalized.top).coerceIn(0, frameRows - 1)
+        val right = mapX(normalized.right).coerceIn(left + 1, frameCols)
+        val bottom = mapY(normalized.bottom).coerceIn(top + 1, frameRows)
+        val width = right - left
+        val height = bottom - top
+        if (width < MIN_ROI_FRAME_SIZE || height < MIN_ROI_FRAME_SIZE) return null
+
+        return Rect(left, top, width, height)
+    }
+
+    private fun drawRoiFrame(frame: Mat, roi: Rect) {
+        Imgproc.rectangle(
+            frame,
+            Point(roi.x.toDouble(), roi.y.toDouble()),
+            Point((roi.x + roi.width).toDouble(), (roi.y + roi.height).toDouble()),
+            Scalar(220.0, 203.0, 255.0, 255.0),
+            4
+        )
     }
 
     private suspend fun updateProgressIfNeeded(framesProcessed: Long, totalFrames: Long) {
@@ -579,5 +718,9 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     }
 
     override fun initObserver() {
+    }
+
+    private companion object {
+        const val MIN_ROI_FRAME_SIZE = 32
     }
 }
