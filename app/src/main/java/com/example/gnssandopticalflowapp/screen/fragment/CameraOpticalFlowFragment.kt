@@ -458,7 +458,7 @@ class CameraOpticalFlowFragment :
 
     private fun setSegmentSelected(view: TextView, selected: Boolean) {
         view.setBackgroundResource(
-            if (selected) R.drawable.bg_gradient_update_button else R.drawable.bg_glass_chip
+            if (selected) R.drawable.bg_gradient_update_button_12 else R.drawable.bg_glass_chip
         )
     }
 
