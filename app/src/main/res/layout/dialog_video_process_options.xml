@@ -43,47 +43,55 @@
         android:id="@+id/previewGlass"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginTop="14dp"
+        android:layout_marginStart="-2dp"
+        android:layout_marginTop="-2dp"
+        android:layout_marginEnd="-2dp"
+        android:layout_marginBottom="-2dp"
         android:src="@drawable/bg_camera_glass_frame"
-        app:layout_constraintDimensionRatio="16:10"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/tvTitle"
-        app:layout_constraintWidth_percent="0.86"
+        app:layout_constraintBottom_toBottomOf="@id/videoPreviewCard"
+        app:layout_constraintEnd_toEndOf="@id/videoPreviewCard"
+        app:layout_constraintStart_toStartOf="@id/videoPreviewCard"
+        app:layout_constraintTop_toTopOf="@id/videoPreviewCard"
         app:round="20dp" />
 
     <androidx.cardview.widget.CardView
         android:id="@+id/videoPreviewCard"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_margin="2dp"
+        android:layout_marginVertical="6dp"
         app:cardBackgroundColor="@android:color/black"
         app:cardCornerRadius="28dp"
         app:cardElevation="0dp"
         app:cardUseCompatPadding="false"
-        app:layout_constraintBottom_toBottomOf="@id/previewGlass"
-        app:layout_constraintEnd_toEndOf="@id/previewGlass"
-        app:layout_constraintStart_toStartOf="@id/previewGlass"
-        app:layout_constraintTop_toTopOf="@id/previewGlass">
+        app:layout_constraintBottom_toTopOf="@id/optionsScroll"
+        app:layout_constraintDimensionRatio="16:10"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tvTitle"
+        app:layout_constraintWidth_percent="0.86">
 
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent">
 
-            <androidx.media3.ui.PlayerView
-                android:id="@+id/videoPreview"
+            <androidx.media3.ui.AspectRatioFrameLayout
+                android:id="@+id/previewAspectFrame"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                app:resize_mode="zoom"
-                app:surface_type="texture_view"
-                app:use_controller="false" />
+                app:resize_mode="fill">
 
-            <com.example.gnssandopticalflowapp.view.RoiOverlayView
-                android:id="@+id/roiOverlay"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:visibility="gone" />
+                <TextureView
+                    android:id="@+id/videoPreview"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
 
+                <com.example.gnssandopticalflowapp.view.RoiOverlayView
+                    android:id="@+id/roiOverlay"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:visibility="gone" />
+
+            </androidx.media3.ui.AspectRatioFrameLayout>
 
         </FrameLayout>
 
@@ -93,16 +101,16 @@
         android:id="@+id/optionsScroll"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="12dp"
+        android:layout_marginVertical="10dp"
         android:clipToPadding="false"
         android:fillViewport="false"
         android:overScrollMode="never"
         android:scrollbars="none"
+        app:layout_constraintHeight_percent="0.28"
         app:layout_constraintBottom_toTopOf="@id/buttonPanel"
-        app:layout_constraintEnd_toEndOf="@id/previewGlass"
-        app:layout_constraintStart_toStartOf="@id/previewGlass"
-        app:layout_constraintTop_toBottomOf="@id/previewGlass">
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintWidth_percent="0.86">
 
         <LinearLayout
             android:id="@+id/optionsPanel"
@@ -357,9 +365,9 @@
       app:layout_constraintVertical_bias="0.86"
         android:orientation="horizontal"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="@id/previewGlass"
+        app:layout_constraintEnd_toEndOf="@id/optionsScroll"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="@id/previewGlass">
+        app:layout_constraintStart_toStartOf="@id/optionsScroll">
 
         <TextView
             android:id="@+id/tvCancel"

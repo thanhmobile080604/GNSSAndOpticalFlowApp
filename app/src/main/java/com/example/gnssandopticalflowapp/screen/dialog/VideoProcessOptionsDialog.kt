@@ -1,20 +1,28 @@
 package com.example.gnssandopticalflowapp.screen.dialog
 
+import android.graphics.SurfaceTexture
 import android.net.Uri
 import android.os.Bundle
+import android.view.Surface
+import android.view.TextureView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.fragment.app.FragmentManager
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseDialogFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.DialogVideoProcessOptionsBinding
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
+import kotlin.math.roundToInt
 
 class VideoProcessOptionsDialog :
     BaseDialogFragment<DialogVideoProcessOptionsBinding>(DialogVideoProcessOptionsBinding::inflate) {
@@ -22,8 +30,10 @@ class VideoProcessOptionsDialog :
     var onApplyOptions: ((VideoProcessOptions) -> Unit)? = null
 
     private var player: ExoPlayer? = null
+    private var previewSurface: Surface? = null
     private var previewPrepared = false
     private var videoUri: Uri? = null
+    private var videoAspectRatio = 0f
 
     private var useFarneback = false
     private var useFarnebackHeatmap = false
@@ -37,6 +47,7 @@ class VideoProcessOptionsDialog :
         sensitivityBar.progress = DEFAULT_SENSITIVITY
 
         setupPreviewPlayer()
+        setupPreviewSurface()
         setupRoiOverlay()
         updateAlgorithmModeUi()
         updateFarnebackDisplayUi()
@@ -144,7 +155,9 @@ class VideoProcessOptionsDialog :
     }
 
     override fun onDestroyView() {
-        binding.videoPreview.player = null
+        player?.clearVideoSurface()
+        previewSurface?.release()
+        previewSurface = null
         player?.release()
         player = null
         onApplyOptions = null
@@ -156,9 +169,60 @@ class VideoProcessOptionsDialog :
             repeatMode = Player.REPEAT_MODE_ONE
             playWhenReady = true
             volume = 0f
+            addListener(object : Player.Listener {
+                @OptIn(UnstableApi::class)
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    if (!isAdded || view == null) return
+                    if (videoSize.width <= 0 || videoSize.height <= 0) return
+                    val aspectRatio = (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height
+                    if (aspectRatio > 0f) {
+                        videoAspectRatio = aspectRatio
+                        binding.root.post { applyVideoPreviewBounds() }
+                    }
+                }
+            })
         }
-        videoPreview.player = player
-        startLoopPreview()
+    }
+
+    private fun DialogVideoProcessOptionsBinding.setupPreviewSurface() {
+        videoPreview.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(
+                surfaceTexture: SurfaceTexture,
+                width: Int,
+                height: Int
+            ) {
+                bindPreviewSurface(surfaceTexture)
+                startLoopPreview()
+            }
+
+            override fun onSurfaceTextureSizeChanged(
+                surfaceTexture: SurfaceTexture,
+                width: Int,
+                height: Int
+            ) = Unit
+
+            override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
+                player?.setVideoSurface(null)
+                previewSurface?.release()
+                previewSurface = null
+                return true
+            }
+
+            override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) = Unit
+        }
+
+        if (videoPreview.isAvailable) {
+            videoPreview.surfaceTexture?.let { surfaceTexture ->
+                bindPreviewSurface(surfaceTexture)
+                startLoopPreview()
+            }
+        }
+    }
+
+    private fun bindPreviewSurface(surfaceTexture: SurfaceTexture) {
+        previewSurface?.release()
+        previewSurface = Surface(surfaceTexture)
+        player?.setVideoSurface(previewSurface)
     }
 
     private fun DialogVideoProcessOptionsBinding.setupRoiOverlay() {
@@ -229,6 +293,46 @@ class VideoProcessOptionsDialog :
         view.setBackgroundResource(
             if (selected) R.drawable.bg_gradient_update_button_12 else R.drawable.bg_glass_chip
         )
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun applyVideoPreviewBounds() = with(binding) {
+        val aspectRatio = videoAspectRatio.takeIf { it > 0f } ?: return@with
+        val maxWidth = optionsScroll.width.takeIf { it > 0 } ?: return@with
+        val layoutParams = videoPreviewCard.layoutParams as ConstraintLayout.LayoutParams
+
+        val extraGap = dpToPx(6)
+        val maxHeight = (optionsScroll.top - tvTitle.bottom - layoutParams.topMargin - layoutParams.bottomMargin - extraGap)
+            .coerceAtLeast(1)
+
+        val targetSize = if (aspectRatio >= 1f) {
+            val widthByMaxWidth = maxWidth
+            val heightByMaxWidth = (widthByMaxWidth / aspectRatio).roundToInt()
+            if (heightByMaxWidth <= maxHeight) {
+                widthByMaxWidth to heightByMaxWidth.coerceAtLeast(1)
+            } else {
+                ((maxHeight * aspectRatio).roundToInt().coerceAtMost(maxWidth).coerceAtLeast(1)) to maxHeight
+            }
+        } else {
+            val heightByMaxHeight = maxHeight
+            val widthByMaxHeight = (heightByMaxHeight * aspectRatio).roundToInt()
+            if (widthByMaxHeight <= maxWidth) {
+                widthByMaxHeight.coerceAtLeast(1) to heightByMaxHeight
+            } else {
+                maxWidth to (maxWidth / aspectRatio).roundToInt().coerceAtMost(maxHeight).coerceAtLeast(1)
+            }
+        }
+
+        previewAspectFrame.setAspectRatio(aspectRatio)
+        layoutParams.width = targetSize.first
+        layoutParams.height = targetSize.second
+        layoutParams.dimensionRatio = null
+
+        videoPreviewCard.layoutParams = layoutParams
+    }
+
+    private fun dpToPx(value: Int): Int {
+        return (value * resources.displayMetrics.density).roundToInt()
     }
 
     private enum class VideoMotionMode {
