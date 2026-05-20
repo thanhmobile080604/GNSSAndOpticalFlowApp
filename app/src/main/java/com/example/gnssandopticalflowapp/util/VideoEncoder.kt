@@ -32,6 +32,7 @@ class VideoEncoder(
     private var nv12Bytes = ByteArray(0)
 
     private var isReleased = false
+    private var codecName: String = ""
 
     fun start() {
         Log.d("VideoEncoder", "Starting encoder for $width x $height")
@@ -48,10 +49,12 @@ class VideoEncoder(
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
 
         try {
-            mediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            mediaCodec = codec
+            codecName = codec.name ?: ""
             mediaCodec?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             mediaCodec?.start()
-            Log.d("VideoEncoder", "MediaCodec started successfully")
+            Log.d("VideoEncoder", "MediaCodec started successfully (codec: $codecName)")
         } catch (e: Exception) {
             Log.e("VideoEncoder", "Failed to init MediaCodec: ${e.message}")
             throw e
@@ -64,10 +67,22 @@ class VideoEncoder(
         frameIndex = 0L
     }
 
+    private fun shouldSwapUV(): Boolean {
+        val name = codecName.lowercase()
+        return name.contains("exynos") || name.contains("sec.") || (name.contains("samsung") && !name.contains("qcom") && !name.contains("qti"))
+    }
+
     private fun selectSupportedColorFormat(mimeType: String): Int {
         val codec = MediaCodec.createEncoderByType(mimeType)
         return try {
             val capabilities = codec.codecInfo.getCapabilitiesForType(mimeType)
+            // Prioritize flexible format to avoid NV12/NV21 swaps on Exynos
+            for (format in capabilities.colorFormats) {
+                if (format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) {
+                    return format
+                }
+            }
+            // Fallback
             var selectedFormat = capabilities.colorFormats[0]
             for (format in capabilities.colorFormats) {
                 if (format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar ||
@@ -95,7 +110,6 @@ class VideoEncoder(
     fun encodeFrame(rgbaMat: Mat, presentationTimeUs: Long) {
         if (isReleased) return
 
-        // Ensure frame size matches encoder exactly
         val preparedMat = if (rgbaMat.cols() != width || rgbaMat.rows() != height) {
             val resized = Mat()
             Imgproc.resize(rgbaMat, resized, org.opencv.core.Size(width.toDouble(), height.toDouble()))
@@ -104,19 +118,83 @@ class VideoEncoder(
             rgbaMat
         }
 
-        // Convert RGBA to the required YUV format
-        val yuvBytes = rgbaToYuv(preparedMat, colorFormat)
-
         try {
             val inputBufferIndex = mediaCodec?.dequeueInputBuffer(10000) ?: -1
             if (inputBufferIndex >= 0) {
-                val inputBuffer = mediaCodec?.getInputBuffer(inputBufferIndex)
-                inputBuffer?.clear()
-
-                inputBuffer?.put(yuvBytes)
+                if (colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) {
+                    val inputImage = mediaCodec?.getInputImage(inputBufferIndex)
+                    if (inputImage != null) {
+                        Imgproc.cvtColor(preparedMat, i420Mat, Imgproc.COLOR_RGBA2YUV_I420)
+                        val size = (i420Mat.total() * i420Mat.channels()).toInt()
+                        if (i420Bytes.size != size) i420Bytes = ByteArray(size)
+                        i420Mat.get(0, 0, i420Bytes)
+                        
+                        val yPlane = inputImage.planes[0]
+                        val uPlane = inputImage.planes[1]
+                        val vPlane = inputImage.planes[2]
+                        
+                        val ySize = width * height
+                        val yBuffer = yPlane.buffer
+                        val yStart = yBuffer.position()
+                        
+                        if (yPlane.rowStride == width) {
+                            yBuffer.position(yStart)
+                            yBuffer.put(i420Bytes, 0, ySize)
+                        } else {
+                            for (r in 0 until height) {
+                                yBuffer.position(yStart + r * yPlane.rowStride)
+                                yBuffer.put(i420Bytes, r * width, width)
+                            }
+                        }
+                        
+                        val uBuffer = uPlane.buffer
+                        val vBuffer = vPlane.buffer
+                        val uRowStride = uPlane.rowStride
+                        val vRowStride = vPlane.rowStride
+                        val uPixelStride = uPlane.pixelStride
+                        val vPixelStride = vPlane.pixelStride
+                        
+                        val uStart = uBuffer.position()
+                        val vStart = vBuffer.position()
+                        
+                        var uSrc = ySize
+                        var vSrc = ySize + (ySize / 4)
+                        
+                        val swapUV = shouldSwapUV()
+                        for (r in 0 until height / 2) {
+                            val uRowPos = r * uRowStride
+                            val vRowPos = r * vRowStride
+                            var uPos = uRowPos
+                            var vPos = vRowPos
+                            for (c in 0 until width / 2) {
+                                val uVal = i420Bytes[uSrc++]
+                                val vVal = i420Bytes[vSrc++]
+                                if (swapUV) {
+                                    uBuffer.put(uStart + uPos, vVal)
+                                    vBuffer.put(vStart + vPos, uVal)
+                                } else {
+                                    uBuffer.put(uStart + uPos, uVal)
+                                    vBuffer.put(vStart + vPos, vVal)
+                                }
+                                uPos += uPixelStride
+                                vPos += vPixelStride
+                            }
+                        }
+                    }
+                } else {
+                    val yuvBytes = rgbaToYuv(preparedMat, colorFormat)
+                    val inputBuffer = mediaCodec?.getInputBuffer(inputBufferIndex)
+                    inputBuffer?.clear()
+                    inputBuffer?.put(yuvBytes)
+                }
 
                 lastPresentationTimeUs = presentationTimeUs.coerceAtLeast(lastPresentationTimeUs)
-                mediaCodec?.queueInputBuffer(inputBufferIndex, 0, yuvBytes.size, lastPresentationTimeUs, 0)
+                mediaCodec?.queueInputBuffer(inputBufferIndex, 0,
+                    if (colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) 
+                        (width * height * 3 / 2) 
+                    else 
+                        (width * height * 3 / 2), // Size parameter is mostly ignored for Image API, but safe to pass standard size
+                    lastPresentationTimeUs, 0)
                 frameIndex++
             }
         } catch (e: Exception) {
@@ -128,7 +206,6 @@ class VideoEncoder(
     }
 
     private fun rgbaToYuv(rgbaMat: Mat, format: Int): ByteArray {
-        // OpenCV's COLOR_RGBA2YUV_I420 produces YUV Planar (I420)
         Imgproc.cvtColor(rgbaMat, i420Mat, Imgproc.COLOR_RGBA2YUV_I420)
 
         val size = (i420Mat.total() * i420Mat.channels()).toInt()
@@ -137,28 +214,46 @@ class VideoEncoder(
         }
         i420Mat.get(0, 0, i420Bytes)
 
+        val swapUV = shouldSwapUV()
         return if (format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) {
-            // Convert I420 (Planar: YYYY... UU... VV...) to NV12 (Semi-Planar: YYYY... UVUV...)
             val ySize = width * height
             val nv12Size = ySize * 3 / 2
             if (nv12Bytes.size != nv12Size) {
                 nv12Bytes = ByteArray(nv12Size)
             }
 
-            // Y plane is identical
             System.arraycopy(i420Bytes, 0, nv12Bytes, 0, ySize)
 
-            // Interleave U and V planes
             val uOffset = ySize
             val vOffset = ySize + (ySize / 4)
             var nvIndex = ySize
             for (i in 0 until ySize / 4) {
-                nv12Bytes[nvIndex++] = i420Bytes[uOffset + i] // U
-                nv12Bytes[nvIndex++] = i420Bytes[vOffset + i] // V
+                val uVal = i420Bytes[uOffset + i]
+                val vVal = i420Bytes[vOffset + i]
+                if (swapUV) {
+                    nv12Bytes[nvIndex++] = vVal
+                    nv12Bytes[nvIndex++] = uVal
+                } else {
+                    nv12Bytes[nvIndex++] = uVal
+                    nv12Bytes[nvIndex++] = vVal
+                }
             }
             nv12Bytes
+        } else if (format == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar) {
+            if (swapUV) {
+                val ySize = width * height
+                val uOffset = ySize
+                val vOffset = ySize + (ySize / 4)
+                val halfSize = ySize / 4
+                val yuvCopy = ByteArray(size)
+                System.arraycopy(i420Bytes, 0, yuvCopy, 0, ySize)
+                System.arraycopy(i420Bytes, uOffset, yuvCopy, vOffset, halfSize)
+                System.arraycopy(i420Bytes, vOffset, yuvCopy, uOffset, halfSize)
+                yuvCopy
+            } else {
+                i420Bytes
+            }
         } else {
-            // For COLOR_FormatYUV420Planar or others, assume I420 Planar for now
             i420Bytes
         }
     }

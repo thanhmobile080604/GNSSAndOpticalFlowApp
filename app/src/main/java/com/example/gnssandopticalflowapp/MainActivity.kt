@@ -200,7 +200,11 @@ class MainActivity : AppCompatActivity() {
     private fun observeVideoProcessingOverlay() {
         viewModel.videoProcessingMessage.observe(this) { message ->
             if (message.isNullOrBlank()) {
-                videoProcessingOverlay.hide()
+                if (viewModel.processedVideoPathToOpen.value.isNullOrBlank() &&
+                    VideoProcessingBus.processedVideoPathToOpen.value.isNullOrBlank()
+                ) {
+                    videoProcessingOverlay.hide()
+                }
             } else {
                 clearPendingProcessedVideo()
                 videoProcessingOverlay.showProcessing(message)
@@ -208,7 +212,11 @@ class MainActivity : AppCompatActivity() {
         }
         VideoProcessingBus.processingMessage.observe(this) { message ->
             if (message.isNullOrBlank()) {
-                videoProcessingOverlay.hide()
+                if (viewModel.processedVideoPathToOpen.value.isNullOrBlank() &&
+                    VideoProcessingBus.processedVideoPathToOpen.value.isNullOrBlank()
+                ) {
+                    videoProcessingOverlay.hide()
+                }
             } else {
                 clearPendingProcessedVideo()
                 videoProcessingOverlay.showProcessing(message)

@@ -108,18 +108,18 @@ class VideoProcessingForegroundService : Service() {
                 ) { _, _ -> }
                 MediaStorageUtil.addVideo(applicationContext, outputFile.absolutePath)
                 VideoProcessingBus.postFinished(outputFile.absolutePath)
-                updateNotification("Processing done", ongoing = false)
+                showCompletedNotification("Processing done", outputFile.absolutePath)
             } catch (_: CancellationException) {
                 Log.d(TAG, "Processing cancelled")
                 VideoProcessingBus.postIdle()
             } catch (e: Exception) {
                 Log.e(TAG, "Processing failed: ${e.message}", e)
                 VideoProcessingBus.postIdle()
-                updateNotification("Processing failed", ongoing = false)
+                showCompletedNotification("Processing failed", null)
             } finally {
                 sourceFile.delete()
                 releaseWakeLock()
-                stopForeground(STOP_FOREGROUND_DETACH)
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
         }
@@ -570,7 +570,9 @@ class VideoProcessingForegroundService : Service() {
         val openIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val cancelIntent = PendingIntent.getService(
@@ -591,6 +593,30 @@ class VideoProcessingForegroundService : Service() {
             .build()
     }
 
+    private fun showCompletedNotification(message: String, videoPath: String?) {
+        val manager = getSystemService(NotificationManager::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (videoPath != null) {
+                putExtra("processed_video_path", videoPath)
+            }
+        }
+        val openIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, COMPLETED_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_process)
+            .setContentTitle("Video processing")
+            .setContentText(message)
+            .setAutoCancel(true)
+            .setContentIntent(openIntent)
+            .build()
+        manager.notify(COMPLETED_NOTIFICATION_ID, notification)
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java)
@@ -599,7 +625,13 @@ class VideoProcessingForegroundService : Service() {
             "Video processing",
             NotificationManager.IMPORTANCE_LOW
         )
+        val completedChannel = NotificationChannel(
+            COMPLETED_CHANNEL_ID,
+            "Video processing completed",
+            NotificationManager.IMPORTANCE_DEFAULT
+        )
         manager.createNotificationChannel(channel)
+        manager.createNotificationChannel(completedChannel)
     }
 
     private fun acquireWakeLock() {
@@ -802,7 +834,9 @@ class VideoProcessingForegroundService : Service() {
     companion object {
         private const val TAG = "VIDEO-SERVICE"
         private const val CHANNEL_ID = "video_processing"
+        private const val COMPLETED_CHANNEL_ID = "video_processing_completed"
         private const val NOTIFICATION_ID = 3001
+        private const val COMPLETED_NOTIFICATION_ID = 3002
         private const val ACTION_PROCESS = "com.example.gnssandopticalflowapp.video.PROCESS"
         private const val ACTION_CANCEL = "com.example.gnssandopticalflowapp.video.CANCEL"
         private const val EXTRA_SOURCE_PATH = "source_path"

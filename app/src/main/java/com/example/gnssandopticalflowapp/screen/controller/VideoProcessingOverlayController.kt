@@ -182,6 +182,12 @@ class VideoProcessingOverlayController(
     }
 
     fun hide(clearProcessedVideo: Boolean = false) {
+        if (!clearProcessedVideo && isProcessedVideoReady) {
+            // Don't hide if the video is processed and we haven't been asked to clear it.
+            // This prevents the "Done" UI from being hidden by "processing idle" messages.
+            return
+        }
+
         isVideoProcessingVisible = false
         isVideoProcessingCollapsed = false
         isVideoProcessingTransitioning = false
