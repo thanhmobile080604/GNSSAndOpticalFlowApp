@@ -1,12 +1,15 @@
 package com.example.gnssandopticalflowapp.model
 
+import java.io.Serializable
+
 data class VideoProcessOptions(
     val isMoving: Boolean,
     val useFarneback: Boolean,
     val sensitivity: Int,
     val useFarnebackHeatmap: Boolean = false,
+    val useAi: Boolean = false,
     val roi: NormalizedRoi? = null
-) {
+) : Serializable {
     data class NormalizedRoi(
         val left: Float,
         val top: Float,
@@ -14,10 +17,10 @@ data class VideoProcessOptions(
         val bottom: Float,
         val viewAspectRatio: Float,
         val pathPoints: List<NormalizedPoint> = emptyList()
-    )
+    ) : Serializable
 
     data class NormalizedPoint(
         val x: Float,
         val y: Float
-    )
+    ) : Serializable
 }

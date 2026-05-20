@@ -36,6 +36,7 @@ class VideoProcessOptionsDialog :
     private var videoAspectRatio = 0f
 
     private var useFarneback = false
+    private var useAi = false
     private var useFarnebackHeatmap = false
     private var selectedMotionMode = VideoMotionMode.STILL
     private var roiSelectEnabled = false
@@ -59,24 +60,33 @@ class VideoProcessOptionsDialog :
     override fun DialogVideoProcessOptionsBinding.initListener() {
         btnAlgorithmKlt.setSingleClick {
             useFarneback = false
+            useAi = false
             updateAlgorithmModeUi()
             updateFarnebackDisplayUi()
         }
 
         btnAlgorithmFarneback.setSingleClick {
             useFarneback = true
+            useAi = false
+            updateAlgorithmModeUi()
+            updateFarnebackDisplayUi()
+        }
+
+        btnAlgorithmAi.setSingleClick {
+            useFarneback = false
+            useAi = true
             updateAlgorithmModeUi()
             updateFarnebackDisplayUi()
         }
 
         btnFarnebackVectors.setSingleClick {
-            if (!useFarneback) return@setSingleClick
+            if (!usesDenseDisplay()) return@setSingleClick
             useFarnebackHeatmap = false
             updateFarnebackDisplayUi()
         }
 
         btnFarnebackHeatmap.setSingleClick {
-            if (!useFarneback) return@setSingleClick
+            if (!usesDenseDisplay()) return@setSingleClick
             useFarnebackHeatmap = true
             updateFarnebackDisplayUi()
         }
@@ -129,6 +139,7 @@ class VideoProcessOptionsDialog :
                 useFarneback = useFarneback,
                 sensitivity = sensitivityBar.progress.coerceIn(0, 100),
                 useFarnebackHeatmap = useFarnebackHeatmap,
+                useAi = useAi,
                 roi = selectedRoi.takeIf { roiSelectEnabled }
             )
             onApplyOptions?.invoke(options)
@@ -264,19 +275,25 @@ class VideoProcessOptionsDialog :
     }
 
     private fun updateAlgorithmModeUi() = with(binding) {
-        setSegmentSelected(btnAlgorithmKlt, !useFarneback)
+        setSegmentSelected(btnAlgorithmKlt, !useFarneback && !useAi)
         setSegmentSelected(btnAlgorithmFarneback, useFarneback)
+        setSegmentSelected(btnAlgorithmAi, useAi)
     }
 
     private fun updateFarnebackDisplayUi() = with(binding) {
+        val denseDisplayEnabled = usesDenseDisplay()
         setSegmentSelected(btnFarnebackVectors, !useFarnebackHeatmap)
         setSegmentSelected(btnFarnebackHeatmap, useFarnebackHeatmap)
-        btnFarnebackVectors.isEnabled = useFarneback
-        btnFarnebackHeatmap.isEnabled = useFarneback
-        val alpha = if (useFarneback) 1f else 0.45f
+        btnFarnebackVectors.isEnabled = denseDisplayEnabled
+        btnFarnebackHeatmap.isEnabled = denseDisplayEnabled
+        val alpha = if (denseDisplayEnabled) 1f else 0.45f
         farnebackViewCard.alpha = alpha
         btnFarnebackVectors.alpha = alpha
         btnFarnebackHeatmap.alpha = alpha
+    }
+
+    private fun usesDenseDisplay(): Boolean {
+        return useFarneback || useAi
     }
 
     private fun updateMotionModeUi() = with(binding) {

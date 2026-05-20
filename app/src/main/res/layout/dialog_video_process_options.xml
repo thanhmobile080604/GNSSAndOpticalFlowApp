@@ -129,7 +129,7 @@
 
                 <TextView
                     android:id="@+id/tvAlgorithmLabel"
-                    android:layout_width="88dp"
+                    android:layout_width="78dp"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:fontFamily="@font/inter_black"
@@ -165,7 +165,21 @@
                     android:maxLines="1"
                     android:text="Farneback"
                     android:textColor="@color/white"
-                    android:textSize="11sp" />
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/btnAlgorithmAi"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_glass_chip"
+                    android:fontFamily="@font/inter_black"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:text="AI"
+                    android:textColor="@color/white"
+                    android:textSize="13sp" />
 
             </LinearLayout>
 

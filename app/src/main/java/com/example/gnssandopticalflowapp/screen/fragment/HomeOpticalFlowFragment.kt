@@ -9,6 +9,7 @@ import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.safeContext
@@ -16,12 +17,18 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentHomeOpticalFlowBinding
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
 import com.example.gnssandopticalflowapp.model.VideoProgressMetadata
+import com.example.gnssandopticalflowapp.optical_flow.classes.AIRaftOpticalFlow
+import com.example.gnssandopticalflowapp.optical_flow.classes.FailoverOpticalFlow
 import com.example.gnssandopticalflowapp.optical_flow.classes.Farneback
+import com.example.gnssandopticalflowapp.optical_flow.classes.FrameStrideOpticalFlow
 import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
+import com.example.gnssandopticalflowapp.optical_flow.interfaces.FrameProgressAwareOpticalFlow
 import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.screen.dialog.VideoProcessOptionsDialog
 import com.example.gnssandopticalflowapp.util.VideoEncoder
 import com.example.gnssandopticalflowapp.util.MediaStorageUtil
+import com.example.gnssandopticalflowapp.video.VideoProcessingBus
+import com.example.gnssandopticalflowapp.video.VideoProcessingForegroundService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -106,7 +113,15 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                     }
                 }
                 
-                processVideoOffline(sourceFile, options, appContext)
+                VideoProcessingBus.postProcessing("Starting background processing...")
+                ContextCompat.startForegroundService(
+                    appContext,
+                    VideoProcessingForegroundService.processIntent(
+                        context = appContext,
+                        sourcePath = sourceFile.absolutePath,
+                        options = options
+                    )
+                )
                 
             } catch (_: CancellationException) {
                 withContext(Dispatchers.Main) {
@@ -133,18 +148,18 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         appContext: Context
     ) {
         withContext(Dispatchers.Main) {
-            showProcessingProgress(0)
+            showUploadLoading("Preparing video...")
         }
 
         val outputFile = File(sourceFile.parentFile, "processed_${System.currentTimeMillis()}.mp4")
 
         val processed = try {
-            processVideoWithOpenCv(sourceFile, outputFile, options)
+            processVideoWithOpenCv(sourceFile, outputFile, options, appContext)
                 || retryWithCleanOutput(outputFile) {
-                    processVideoWithTimeSeek(sourceFile, outputFile, options)
+                    processVideoWithTimeSeek(sourceFile, outputFile, options, appContext)
                 }
                 || retryWithCleanOutput(outputFile) {
-                    processVideoWithFrameBatch(sourceFile, outputFile, options)
+                    processVideoWithFrameBatch(sourceFile, outputFile, options, appContext)
                 }
         } finally {
             sourceFile.delete()
@@ -181,7 +196,8 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     private suspend fun processVideoWithOpenCv(
         sourceFile: File,
         outputFile: File,
-        options: VideoProcessOptions
+        options: VideoProcessOptions,
+        appContext: Context
     ): Boolean {
         val capture = VideoCapture(sourceFile.absolutePath)
         if (!capture.isOpened) {
@@ -204,7 +220,8 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val totalFrames = validFrameCount(capture.get(Videoio.CAP_PROP_FRAME_COUNT))
             .takeIf { it > 0L }
             ?: estimatedTotalFrames(metadata, fps)
-        val opticalFlow = createOpticalFlow(options)
+        showProcessingStage("Preparing ${algorithmLabel(options)}...")
+        val opticalFlow = createOpticalFlow(options, appContext)
         val sourceMat = Mat()
         val rgbaMat = Mat()
         val orientedMat = Mat()
@@ -229,6 +246,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
                 val frameForProcessing = rotateFrameForDisplay(rgbaMat, orientedMat, rotationDegrees)
                 val activeEncoder = encoder ?: continue
+                showFrameProcessingStageIfNeeded(opticalFlow, options, framesProcessed + 1L, totalFrames)
                 encodeProcessedFrame(
                     opticalFlow = opticalFlow,
                     rgbaMat = frameForProcessing,
@@ -257,7 +275,8 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     private suspend fun processVideoWithFrameBatch(
         sourceFile: File,
         outputFile: File,
-        options: VideoProcessOptions
+        options: VideoProcessOptions,
+        appContext: Context
     ): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false
 
@@ -284,7 +303,8 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             )
             val frameDurationUs = frameDurationUs(fps)
             val encoder = VideoEncoder(outputFile.absolutePath, width, height, encoderFrameRate(fps))
-            val opticalFlow = createOpticalFlow(options)
+            showProcessingStage("Preparing ${algorithmLabel(options)}...")
+            val opticalFlow = createOpticalFlow(options, appContext)
             val rgbaMat = Mat()
             val orientedMat = Mat()
             var framesProcessed = 0L
@@ -304,6 +324,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                         try {
                             Utils.bitmapToMat(bitmap, rgbaMat)
                             val frameForProcessing = rotateFrameForDisplay(rgbaMat, orientedMat, rotationDegrees)
+                            showFrameProcessingStageIfNeeded(opticalFlow, options, framesProcessed + 1L, frameCount)
                             encodeProcessedFrame(
                                 opticalFlow = opticalFlow,
                                 rgbaMat = frameForProcessing,
@@ -338,7 +359,8 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     private suspend fun processVideoWithTimeSeek(
         sourceFile: File,
         outputFile: File,
-        options: VideoProcessOptions
+        options: VideoProcessOptions,
+        appContext: Context
     ): Boolean {
         val retriever = MediaMetadataRetriever()
         return try {
@@ -363,7 +385,8 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
             val totalFrames = (durationUs / frameDurationUs).coerceAtLeast(1L)
             val encoder = VideoEncoder(outputFile.absolutePath, width, height, encoderFrameRate(fps))
-            val opticalFlow = createOpticalFlow(options)
+            showProcessingStage("Preparing ${algorithmLabel(options)}...")
+            val opticalFlow = createOpticalFlow(options, appContext)
             val rgbaMat = Mat()
             val orientedMat = Mat()
             var currentTimeUs = 0L
@@ -377,6 +400,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                         try {
                             Utils.bitmapToMat(bitmap, rgbaMat)
                             val frameForProcessing = rotateFrameForDisplay(rgbaMat, orientedMat, rotationDegrees)
+                            showFrameProcessingStageIfNeeded(opticalFlow, options, framesProcessed + 1L, totalFrames)
                             encodeProcessedFrame(
                                 opticalFlow = opticalFlow,
                                 rgbaMat = frameForProcessing,
@@ -465,28 +489,106 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         }
     }
 
-    private fun createOpticalFlow(options: VideoProcessOptions): OpticalFlow {
-        val opticalFlow: OpticalFlow = if (options.useFarneback) {
-            Farneback()
-        } else {
-            KLT()
+    private fun createOpticalFlow(options: VideoProcessOptions, appContext: Context): OpticalFlow {
+        if (options.useAi) {
+            val fallback = createConfiguredFarneback(options)
+            if (!AIRaftOpticalFlow.isModelAvailable(appContext)) {
+                mainViewModel.videoProcessingMessage.postValue("AI model missing; using Farneback...")
+                return fallback
+            }
+
+            return try {
+                val aiFlow = AIRaftOpticalFlow(appContext) { message ->
+                    mainViewModel.videoProcessingMessage.postValue(message)
+                }.apply {
+                    setSensitivity(options.sensitivity)
+                    setMovingMode(options.isMoving)
+                    setVisualizationMode(currentAiVisualizationMode(options))
+                }
+                val failover = FailoverOpticalFlow(aiFlow, fallback, "AI-RAFT") { error ->
+                    mainViewModel.videoProcessingMessage.postValue(
+                        "AI failed; using Farneback..."
+                    )
+                    Log.e("AI-RAFT", "Falling back to Farneback: ${error.message}", error)
+                }
+                FrameStrideOpticalFlow(failover, AI_FRAME_STRIDE, "AI-RAFT")
+            } catch (e: Exception) {
+                Log.e("AI-RAFT", "Failed to initialize AI optical flow: ${e.message}", e)
+                mainViewModel.videoProcessingMessage.postValue("AI unavailable; using Farneback...")
+                fallback
+            }
         }
 
-        return opticalFlow.apply {
-            setSensitivity(options.sensitivity)
-            setMovingMode(options.isMoving)
-            (this as? Farneback)?.setVisualizationMode(
-                if (options.useFarnebackHeatmap) {
-                    Farneback.VisualizationMode.HEATMAP
-                } else {
-                    Farneback.VisualizationMode.VECTORS
-                }
-            )
+        return if (options.useFarneback) {
+            createConfiguredFarneback(options)
+        } else {
+            KLT().apply {
+                setSensitivity(options.sensitivity)
+                setMovingMode(options.isMoving)
+            }
         }
     }
 
+    private fun createConfiguredFarneback(options: VideoProcessOptions): Farneback {
+        return Farneback().apply {
+            setSensitivity(options.sensitivity)
+            setMovingMode(options.isMoving)
+            setVisualizationMode(currentFarnebackVisualizationMode(options))
+        }
+    }
+
+    private fun currentFarnebackVisualizationMode(options: VideoProcessOptions): Farneback.VisualizationMode {
+        return if (options.useFarnebackHeatmap) {
+            Farneback.VisualizationMode.HEATMAP
+        } else {
+            Farneback.VisualizationMode.VECTORS
+        }
+    }
+
+    private fun currentAiVisualizationMode(options: VideoProcessOptions): AIRaftOpticalFlow.VisualizationMode {
+        return if (options.useFarnebackHeatmap) {
+            AIRaftOpticalFlow.VisualizationMode.HEATMAP
+        } else {
+            AIRaftOpticalFlow.VisualizationMode.VECTORS
+        }
+    }
+
+    private fun algorithmLabel(options: VideoProcessOptions): String {
+        return when {
+            options.useAi -> "AI RAFT"
+            options.useFarneback -> "Farneback"
+            else -> "KLT"
+        }
+    }
+
+    private fun showProcessingStage(message: String) {
+        Log.d("VIDEO-PROCESS", message)
+        mainViewModel.videoProcessingMessage.postValue(message)
+    }
+
+    private fun showFrameProcessingStageIfNeeded(
+        opticalFlow: OpticalFlow,
+        options: VideoProcessOptions,
+        frameNumber: Long,
+        totalFrames: Long
+    ) {
+        if (!options.useAi) return
+        (opticalFlow as? FrameProgressAwareOpticalFlow)?.updateFrameProgress(frameNumber, totalFrames)
+
+        if (frameNumber > 3L && frameNumber % 10L != 0L) return
+
+        val totalLabel = totalFrames.takeIf { it > 0L }?.toString() ?: "?"
+        val action = if (shouldRunAiFrame(frameNumber)) "AI processing" else "AI reusing"
+        Log.d("AI-RAFT", "pipeline: $action frame $frameNumber / $totalLabel")
+        mainViewModel.videoProcessingMessage.postValue("$action frame $frameNumber / $totalLabel...")
+    }
+
+    private fun shouldRunAiFrame(frameNumber: Long): Boolean {
+        return frameNumber <= 1L || ((frameNumber - 1L) % AI_FRAME_STRIDE == 0L)
+    }
+
     private fun isProcessingVideo(): Boolean {
-        return mainViewModel.videoUploadJob?.isActive == true
+        return mainViewModel.videoUploadJob?.isActive == true || VideoProcessingBus.isProcessing
     }
 
     private fun showProcessingToast() {
@@ -639,13 +741,15 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     }
 
     private suspend fun updateProgressIfNeeded(framesProcessed: Long, totalFrames: Long) {
-        if (totalFrames <= 0L || framesProcessed % progressUpdateIntervalFrames != 0L) return
+        if (totalFrames <= 0L) return
+        val shouldUpdate = framesProcessed <= 3L || framesProcessed % progressUpdateIntervalFrames == 0L
+        if (!shouldUpdate) return
 
         val progress = ((framesProcessed.toDouble() / totalFrames.toDouble()) * 100.0)
             .roundToInt()
             .coerceIn(0, 100)
         withContext(Dispatchers.Main) {
-            showProcessingProgress(progress)
+            showProcessingProgress(if (framesProcessed > 0L && progress == 0) 1 else progress)
         }
     }
 
@@ -767,6 +871,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
     private companion object {
         const val MIN_ROI_FRAME_SIZE = 32
+        const val AI_FRAME_STRIDE = 1
     }
 
     private data class ActiveRoi(

@@ -20,6 +20,8 @@ import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
 import com.example.gnssandopticalflowapp.screen.controller.VideoProcessingOverlayController
 import com.example.gnssandopticalflowapp.screen.dialog.NoGPSDialog
 import com.example.gnssandopticalflowapp.screen.dialog.NoLocationDialog
+import com.example.gnssandopticalflowapp.video.VideoProcessingBus
+import com.example.gnssandopticalflowapp.video.VideoProcessingForegroundService
 import kotlinx.coroutines.launch
 import org.opencv.android.OpenCVLoader
 import org.orekit.data.DataContext
@@ -204,6 +206,14 @@ class MainActivity : AppCompatActivity() {
                 videoProcessingOverlay.showProcessing(message)
             }
         }
+        VideoProcessingBus.processingMessage.observe(this) { message ->
+            if (message.isNullOrBlank()) {
+                videoProcessingOverlay.hide()
+            } else {
+                clearPendingProcessedVideo()
+                videoProcessingOverlay.showProcessing(message)
+            }
+        }
     }
 
     private fun observeProcessedVideoReady() {
@@ -212,11 +222,20 @@ class MainActivity : AppCompatActivity() {
 
             videoProcessingOverlay.showProcessedVideoReady(path)
         }
+        VideoProcessingBus.processedVideoPathToOpen.observe(this) { path ->
+            if (path.isNullOrBlank()) return@observe
+
+            videoProcessingOverlay.showProcessedVideoReady(path)
+        }
+        VideoProcessingBus.videoLibraryUpdated.observe(this) {
+            viewModel.videoLibraryUpdated.value = it
+        }
     }
 
     private fun cancelVideoProcessing() {
         viewModel.videoUploadJob?.cancel()
         viewModel.videoProcessingMessage.value = null
+        startService(VideoProcessingForegroundService.cancelIntent(this))
     }
 
     private fun watchProcessedVideo(path: String) {
@@ -254,11 +273,15 @@ class MainActivity : AppCompatActivity() {
     private fun dismissProcessedVideoReady() {
         clearVideoProcessingOverlayState()
         viewModel.processedVideoPathToOpen.value = null
+        VideoProcessingBus.processedVideoPathToOpen.value = null
     }
 
     private fun clearPendingProcessedVideo() {
         if (viewModel.processedVideoPathToOpen.value != null) {
             viewModel.processedVideoPathToOpen.value = null
+        }
+        if (VideoProcessingBus.processedVideoPathToOpen.value != null) {
+            VideoProcessingBus.processedVideoPathToOpen.value = null
         }
     }
 
@@ -266,6 +289,12 @@ class MainActivity : AppCompatActivity() {
         videoProcessingOverlay.hide(clearProcessedVideo = true)
         if (viewModel.videoProcessingMessage.value != null) {
             viewModel.videoProcessingMessage.value = null
+        }
+        if (VideoProcessingBus.processingMessage.value != null) {
+            VideoProcessingBus.processingMessage.value = null
+        }
+        if (VideoProcessingBus.processedVideoPathToOpen.value != null) {
+            VideoProcessingBus.processedVideoPathToOpen.value = null
         }
     }
 }
