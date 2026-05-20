@@ -403,6 +403,12 @@ class VideoProcessingForegroundService : Service() {
                 setMovingMode(options.isMoving)
                 setVisualizationMode(currentAiVisualizationMode(options))
             }
+            // Load model in background thread to avoid blocking service startup
+            Thread {
+                try { aiFlow.prepare() } catch (e: Exception) {
+                    Log.w("AI-RAFT", "prepare() failed: ${e.message}")
+                }
+            }.start()
             val failover = FailoverOpticalFlow(aiFlow, fallback, "AI-RAFT") { error ->
                 postProgress("AI failed; using Farneback...")
                 Log.e("AI-RAFT", "Falling back to Farneback: ${error.message}", error)

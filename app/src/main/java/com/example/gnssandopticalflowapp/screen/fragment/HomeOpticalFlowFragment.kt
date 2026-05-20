@@ -505,6 +505,12 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                     setMovingMode(options.isMoving)
                     setVisualizationMode(currentAiVisualizationMode(options))
                 }
+                // Prepare model asynchronously to avoid blocking UI thread
+                Thread {
+                    try { aiFlow.prepare() } catch (e: Exception) {
+                        Log.w("AI-RAFT", "prepare() failed: ${e.message}")
+                    }
+                }.start()
                 val failover = FailoverOpticalFlow(aiFlow, fallback, "AI-RAFT") { error ->
                     mainViewModel.videoProcessingMessage.postValue(
                         "AI failed; using Farneback..."

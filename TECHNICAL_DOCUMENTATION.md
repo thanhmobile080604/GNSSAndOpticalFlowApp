@@ -241,6 +241,67 @@ Khi nhấn vào một điểm trên biểu đồ, màn hình chi tiết sẽ hi�
 
 ---
 
+### 6.3 Tóm tắt phân tích (từ `optical_flow_analysis.md`)
+
+Phần này tóm lược luồng phân tích và so sánh hai chế độ Optical Flow được mô tả trong `optical_flow_analysis.md`.
+
+- **KLT (Sparse Optical Flow)**
+  - Phát hiện các điểm đặc trưng bằng Shi-Tomasi và theo dõi bằng Lucas-Kanade Pyramid (`calcOpticalFlowPyrLK`).
+  - Nhận vector dịch chuyển cho các điểm được chọn, nhanh và ít tốn tài nguyên.
+  - Thích hợp khi có nhiều góc cạnh rõ nét; thường dùng tối đa ~50 điểm.
+
+- **Farneback (Dense Optical Flow)**
+  - Tính toán trường vector cho nhiều điểm/pixel trên toàn khung hình (`calcOpticalFlowFarneback`).
+  - Cung cấp trường chuyển động chi tiết nhưng chi phí tính toán lớn hơn.
+  - Thường được hiển thị dưới dạng mũi tên/đường nhỏ trên một lưới (ví dụ `64x64` hoặc `step=32`).
+
+- **Ý nghĩa Motion Vector trong Project**
+  - Cả hai chế độ đều được quy về một `Point` (dịch chuyển trung bình) để phục vụ hiển thị và so sánh.
+  - Lớp `MotionVectorViz` dựng trail/đường đi từ các điểm dịch chuyển để trực quan hoá quỹ đạo camera.
+  - `IMUEstimator` đọc dữ liệu IMU để hỗ trợ phát hiện trạng thái di chuyển, nhưng hiện chưa có fusion tích cực với Optical Flow.
+
+- **Độ tin cậy (Confidence)**
+  - Tính bằng phương pháp Forward-Backward Error (FBE): chạy flow chiều tiến và chiều lùi, kiểm tra điểm có quay về gần điểm ban đầu (<1.5 px) không.
+  - Confidence = (Số Inliers / Tổng điểm phát hiện) * 100.
+
+| Đặc điểm | KLT (Sparse) | Farneback (Dense) |
+| :--- | :--- | :--- |
+| **Đối tượng detect** | Các góc, điểm đặc trưng mạnh. | Mọi vùng/pixel trên ảnh. |
+| **Số lượng Vector** | Ít (chỉ tại các điểm đặc trưng). | Rất nhiều (toàn bộ khung hình). |
+| **Độ phức tạp** | Thấp, tiết kiệm pin/CPU hơn. | Cao, yêu cầu xử lý mạnh hơn. |
+| **Mục đích chính** | Theo dõi vật thể, đo vận tốc camera. | Phân tích dòng chảy hình ảnh, phân đoạn chuyển động. |
+
+### 6.4 Mô hình AI `RAFT` (class `AIRaftOpticalFlow`)
+
+Phần `AIRaftOpticalFlow` tích hợp một model RAFT được đóng gói dạng ONNX để ước lượng optical flow bằng mạng neural. Những điểm chính:
+
+- **Vị trí model (assets)**: Ứng dụng tìm model trong `app/src/main/assets/models/` với các tên khả dĩ:
+  - `models/optical_flow_estimation_raft_2023aug_int8bq.onnx` (quantized int8 + batch-quant)
+  - `models/optical_flow_estimation_raft_2023aug.onnx` (float)
+  Nếu không tìm thấy, hàm `isModelAvailable(context)` trả về false và `ModelMissingException` sẽ được ném khi cần nạp model.
+
+- **Cách nạp & inference**:
+  - Model được sao chép từ assets vào thư mục cache `files/models/` rồi nạp bằng OpenCV DNN: `Dnn.readNet(modelPath)`.
+  - Backend: `Dnn.DNN_BACKEND_OPENCV`, Target: `Dnn.DNN_TARGET_CPU`.
+  - Preprocessing: `Dnn.blobFromImage` chuyển ảnh sang BGR, resize về `480x360`, dtype `CV_32F`.
+  - Hai input tensor đặt tên là `"0"` và `"1"` (previous, current frame).
+  - Sau `forward`, class chọn output có độ phân giải lớn nhất làm trường flow.
+
+- **Visualization**:
+  - `VisualizationMode.VECTORS`: vẽ mũi tên và điểm trên khung hình (grid với `drawStep` tùy theo `sensitivity`).
+  - `VisualizationMode.HEATMAP`: tạo heatmap dựa trên độ lớn vector, blend với frame.
+
+- **Thông số & metrics trả về**:
+  - `OpticalFlowMetrics.algorithm` = "AI RAFT"; gồm `processTimeMs`, `instantFps`, `featureCount`, `activeVectorCount`, `avgDx/avgDy`, `avgMagnitude`, `confidence`, `threshold`, `sensitivity`.
+  - `confidence` trong `AIRaftOpticalFlow` tính gần tương tự như một tỉ lệ active-vectors: `(activeRatio * 100)`.
+
+- **Fallback & pipeline**:
+  - `AIRaftOpticalFlow` thường được dùng kết hợp với `FailoverOpticalFlow` để quay về các thuật toán cổ điển (ví dụ Farneback) nếu model không sẵn sàng hoặc inference lỗi.
+  - Ở cấp pipeline, `FrameStrideOpticalFlow` có thể được dùng để giảm tần suất gọi model (ví dụ `AI_FRAME_STRIDE`).
+
+Ghi chú: nếu muốn thêm phiên bản model mới, đặt file .onnx vào `app/src/main/assets/models/` với một trong các tên khuôn mẫu trên hoặc cập nhật `MODEL_ASSET_CANDIDATES` trong `AIRaftOpticalFlow.kt`.
+
+
 ## 7. Sensor Fusion - Kết hợp IMU
 
 App tích hợp khả năng đọc cảm biến đo lường quán tính thông qua `IMUEstimator.kt`.

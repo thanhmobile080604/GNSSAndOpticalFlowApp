@@ -139,6 +139,11 @@ class AIRaftOpticalFlow(
     fun prepare() {
         Log.d(TAG, "prepare: loading model if needed")
         reportStatus("Loading AI model...")
+        try {
+            Log.i(TAG, "OpenCV build info:\n${Core.getBuildInformation()}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to fetch OpenCV build information: ${e.message}")
+        }
         ensureNet()
     }
 
@@ -185,7 +190,7 @@ class AIRaftOpticalFlow(
             activeNet.setInput(prevBlob, FIRST_INPUT_NAME)
             activeNet.setInput(currentBlob, SECOND_INPUT_NAME)
             val outputs = ArrayList<Mat>()
-            val layerNames = outputLayerNames ?: activeNet.getUnconnectedOutLayersNames()
+            val layerNames = outputLayerNames ?: activeNet.unconnectedOutLayersNames
             Log.d(TAG, "infer: frame=${progressLabel()} forward outputLayers=$layerNames")
             val forwardStart = System.nanoTime()
             activeNet.forward(outputs, layerNames)
@@ -202,21 +207,124 @@ class AIRaftOpticalFlow(
         }
     }
 
+    @Synchronized
     private fun ensureNet(): Net {
         net?.let { return it }
+
         val modelPath = ensureModelFile().absolutePath
         Log.i(TAG, "ensureNet: loading ONNX model from $modelPath")
         reportStatus("Loading AI model...")
+
         val loadStart = System.nanoTime()
-        return Dnn.readNet(modelPath).also { loadedNet ->
-            loadedNet.setPreferableBackend(Dnn.DNN_BACKEND_OPENCV)
-            loadedNet.setPreferableTarget(Dnn.DNN_TARGET_CPU)
-            outputLayerNames = loadedNet.getUnconnectedOutLayersNames()
-            net = loadedNet
-            val loadMs = (System.nanoTime() - loadStart) / 1_000_000.0
-            Log.i(TAG, "ensureNet: model loaded in ${"%.2f".format(loadMs)} ms, outputs=$outputLayerNames")
-            reportStatus("AI model ready")
+
+        val candidates = listOf(
+            Triple("OpenCL FP16", Dnn.DNN_BACKEND_OPENCV, Dnn.DNN_TARGET_OPENCL_FP16),
+            Triple("OpenCL", Dnn.DNN_BACKEND_OPENCV, Dnn.DNN_TARGET_OPENCL),
+            Triple("CPU", Dnn.DNN_BACKEND_OPENCV, Dnn.DNN_TARGET_CPU)
+        )
+
+        val errors = mutableListOf<String>()
+
+        for ((runtimeName, backend, target) in candidates) {
+            try {
+                Log.i(TAG, "ensureNet: trying runtime=$runtimeName")
+
+                val loadedNet = Dnn.readNet(modelPath)
+                loadedNet.setPreferableBackend(backend)
+                loadedNet.setPreferableTarget(target)
+
+                val layerNames = loadedNet.unconnectedOutLayersNames
+
+                // Warm-up forward để chắc chắn runtime này chạy thật, không chỉ set target thành công.
+                val dummy = Mat.zeros(MODEL_INPUT_HEIGHT, MODEL_INPUT_WIDTH, CvType.CV_8UC3)
+                val blobPrev = Dnn.blobFromImage(
+                    dummy,
+                    1.0 / 255.0,
+                    Size(MODEL_INPUT_WIDTH.toDouble(), MODEL_INPUT_HEIGHT.toDouble()),
+                    Scalar(0.0, 0.0, 0.0),
+                    true,
+                    false
+                )
+                val blobCurr = blobPrev.clone()
+
+                val outs = mutableListOf<Mat>()
+
+                try {
+                    // Many RAFT ONNX models expect two inputs (previous and current frames named "0" and "1").
+                    var warmed = false
+                    try {
+                        loadedNet.setInput(blobPrev, FIRST_INPUT_NAME)
+                        loadedNet.setInput(blobCurr, SECOND_INPUT_NAME)
+                        if (layerNames.isNotEmpty()) {
+                            loadedNet.forward(outs, layerNames)
+                            warmed = true
+                            if (outs.isEmpty() || outs.any { it.empty() }) {
+                                throw IllegalStateException("Empty output from DNN forward (two-input warmup)")
+                            }
+                        } else {
+                            val out = loadedNet.forward()
+                            try {
+                                if (out.empty()) throw IllegalStateException("Empty output from DNN forward (two-input warmup)")
+                            } finally {
+                                out.release()
+                            }
+                            warmed = true
+                        }
+                    } catch (_: Exception) {
+                        // Fallback: try single-input warmup
+                    }
+
+                    if (!warmed) {
+                        try {
+                            loadedNet.setInput(blobPrev)
+                            if (layerNames.isNotEmpty()) {
+                                loadedNet.forward(outs, layerNames)
+                                if (outs.isEmpty() || outs.any { it.empty() }) {
+                                    throw IllegalStateException("Empty output from DNN forward (single-input warmup)")
+                                }
+                            } else {
+                                val out = loadedNet.forward()
+                                try {
+                                    if (out.empty()) throw IllegalStateException("Empty output from DNN forward (single-input warmup)")
+                                } finally {
+                                    out.release()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            throw e
+                        }
+                    }
+                } finally {
+                    dummy.release()
+                    blobPrev.release()
+                    blobCurr.release()
+                    outs.forEach { it.release() }
+                }
+
+                outputLayerNames = layerNames
+                net = loadedNet
+
+                val loadMs = (System.nanoTime() - loadStart) / 1_000_000.0
+                Log.i(
+                    TAG,
+                    "ensureNet: model loaded in ${"%.2f".format(loadMs)} ms, " +
+                            "runtime=$runtimeName, outputs=$outputLayerNames"
+                )
+
+                reportStatus("AI model ready")
+                return loadedNet
+
+            } catch (e: Exception) {
+                val error = "$runtimeName failed: ${e.message}"
+                errors.add(error)
+                Log.w(TAG, "ensureNet: $error", e)
+            }
         }
+
+        reportStatus("Failed to load AI model")
+        throw IllegalStateException(
+            "ensureNet: all DNN runtimes failed: ${errors.joinToString(" | ")}"
+        )
     }
 
     private fun ensureModelFile(): File {
@@ -267,7 +375,7 @@ class AIRaftOpticalFlow(
         val flowShape = resolveFlowShape(flowOutput) ?: return emptyStats()
         Log.d(TAG, "drawFlow: selected=${matShape(flowOutput)} resolved=$flowShape")
         val data = FloatArray((flowOutput.total() * flowOutput.channels()).toInt())
-        val startIndex = IntArray(flowOutput.dims()) { 0 }
+        val startIndex = IntArray(flowOutput.dims())
         flowOutput.get(startIndex, data)
 
         if (visualizationMode == VisualizationMode.HEATMAP) {
