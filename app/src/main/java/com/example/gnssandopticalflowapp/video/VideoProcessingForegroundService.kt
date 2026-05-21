@@ -135,13 +135,7 @@ class VideoProcessingForegroundService : Service() {
         val outputFile = File(sourceFile.parentFile, "processed_${System.currentTimeMillis()}.mp4")
 
         val processed = try {
-            processVideoWithOpenCv(sourceFile, outputFile, options)
-                || retryWithCleanOutput(outputFile) {
-                    processVideoWithTimeSeek(sourceFile, outputFile, options)
-                }
-                || retryWithCleanOutput(outputFile) {
-                    processVideoWithFrameBatch(sourceFile, outputFile, options)
-                }
+            processVideoOnServer(sourceFile, outputFile, options)
         } catch (e: CancellationException) {
             outputFile.delete()
             throw e
@@ -163,6 +157,64 @@ class VideoProcessingForegroundService : Service() {
         if (!isProcessingActive()) return false
         outputFile.delete()
         return block()
+    }
+
+    private suspend fun processVideoOnServer(
+        sourceFile: File,
+        outputFile: File,
+        options: VideoProcessOptions
+    ): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        try {
+            postCurrentProgress("Uploading to server...")
+            val serverUrl = "http://localhost:8000/process-video"
+            val url = java.net.URL(serverUrl)
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.doOutput = true
+            connection.doInput = true
+            connection.useCaches = false
+            
+            val boundary = "Boundary-" + System.currentTimeMillis()
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+
+            java.io.DataOutputStream(connection.outputStream).use { dos ->
+                dos.writeBytes("--$boundary\r\n")
+                dos.writeBytes("Content-Disposition: form-data; name=\"mode\"\r\n\r\n")
+                val mode = if (options.useFarnebackHeatmap) "HEATMAP" else "VECTORS"
+                dos.writeBytes("$mode\r\n")
+
+                dos.writeBytes("--$boundary\r\n")
+                dos.writeBytes("Content-Disposition: form-data; name=\"is_moving\"\r\n\r\n")
+                dos.writeBytes("${options.isMoving}\r\n")
+
+                dos.writeBytes("--$boundary\r\n")
+                dos.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"${sourceFile.name}\"\r\n")
+                dos.writeBytes("Content-Type: video/mp4\r\n\r\n")
+
+                java.io.FileInputStream(sourceFile).use { fis ->
+                    fis.copyTo(dos)
+                }
+                dos.writeBytes("\r\n")
+                dos.writeBytes("--$boundary--\r\n")
+                dos.flush()
+            }
+
+            postCurrentProgress("Processing on server...")
+            val responseCode = connection.responseCode
+            if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                postCurrentProgress("Downloading processed video...")
+                java.io.FileOutputStream(outputFile).use { fos ->
+                    connection.inputStream.use { it.copyTo(fos) }
+                }
+                return@withContext true
+            } else {
+                Log.e(TAG, "Server error: $responseCode")
+                return@withContext false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Server connection failed: ${e.message}", e)
+            return@withContext false
+        }
     }
 
     private suspend fun processVideoWithOpenCv(
