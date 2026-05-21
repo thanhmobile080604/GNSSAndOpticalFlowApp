@@ -8,8 +8,14 @@ data class VideoProcessOptions(
     val sensitivity: Int,
     val useFarnebackHeatmap: Boolean = false,
     val useAi: Boolean = false,
-    val roi: NormalizedRoi? = null
+    val roi: NormalizedRoi? = null,
+    val processingMode: ProcessingMode = ProcessingMode.OFFLINE
 ) : Serializable {
+    enum class ProcessingMode : Serializable {
+        OFFLINE,
+        ONLINE
+    }
+
     data class NormalizedRoi(
         val left: Float,
         val top: Float,

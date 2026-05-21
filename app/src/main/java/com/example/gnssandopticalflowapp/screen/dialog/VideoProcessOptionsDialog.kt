@@ -36,8 +36,9 @@ class VideoProcessOptionsDialog :
     private var videoAspectRatio = 0f
 
     private var useFarneback = false
-    private var useAi = false
+    private var useAi = true
     private var useFarnebackHeatmap = false
+    private var selectedProcessingMode = VideoProcessOptions.ProcessingMode.OFFLINE
     private var selectedMotionMode = VideoMotionMode.STILL
     private var roiSelectEnabled = false
     private var selectedRoi: VideoProcessOptions.NormalizedRoi? = null
@@ -50,6 +51,8 @@ class VideoProcessOptionsDialog :
         setupPreviewPlayer()
         setupPreviewSurface()
         setupRoiOverlay()
+        enforceProcessingModeAlgorithm()
+        updateProcessingModeUi()
         updateAlgorithmModeUi()
         updateFarnebackDisplayUi()
         updateMotionModeUi()
@@ -58,7 +61,23 @@ class VideoProcessOptionsDialog :
     }
 
     override fun DialogVideoProcessOptionsBinding.initListener() {
+        btnProcessingOffline.setSingleClick {
+            selectedProcessingMode = VideoProcessOptions.ProcessingMode.OFFLINE
+            enforceProcessingModeAlgorithm()
+            updateProcessingModeUi()
+            updateAlgorithmModeUi()
+            updateFarnebackDisplayUi()
+        }
+
+        btnProcessingOnline.setSingleClick {
+            selectedProcessingMode = VideoProcessOptions.ProcessingMode.ONLINE
+            updateProcessingModeUi()
+            updateAlgorithmModeUi()
+            updateFarnebackDisplayUi()
+        }
+
         btnAlgorithmKlt.setSingleClick {
+            if (isOfflineProcessing()) return@setSingleClick
             useFarneback = false
             useAi = false
             updateAlgorithmModeUi()
@@ -66,6 +85,7 @@ class VideoProcessOptionsDialog :
         }
 
         btnAlgorithmFarneback.setSingleClick {
+            if (isOfflineProcessing()) return@setSingleClick
             useFarneback = true
             useAi = false
             updateAlgorithmModeUi()
@@ -73,6 +93,7 @@ class VideoProcessOptionsDialog :
         }
 
         btnAlgorithmAi.setSingleClick {
+            if (isOfflineProcessing()) return@setSingleClick
             useFarneback = false
             useAi = true
             updateAlgorithmModeUi()
@@ -134,13 +155,15 @@ class VideoProcessOptionsDialog :
                 return@setSingleClick
             }
 
+            enforceProcessingModeAlgorithm()
             val options = VideoProcessOptions(
                 isMoving = selectedMotionMode == VideoMotionMode.MOVING,
                 useFarneback = useFarneback,
                 sensitivity = sensitivityBar.progress.coerceIn(0, 100),
                 useFarnebackHeatmap = useFarnebackHeatmap,
                 useAi = useAi,
-                roi = selectedRoi.takeIf { roiSelectEnabled }
+                roi = selectedRoi.takeIf { roiSelectEnabled },
+                processingMode = selectedProcessingMode
             )
             onApplyOptions?.invoke(options)
             dismissAllowingStateLoss()
@@ -274,10 +297,37 @@ class VideoProcessOptionsDialog :
         previewPrepared = true
     }
 
+    private fun updateProcessingModeUi() = with(binding) {
+        setSegmentSelected(
+            btnProcessingOffline,
+            selectedProcessingMode == VideoProcessOptions.ProcessingMode.OFFLINE
+        )
+        setSegmentSelected(
+            btnProcessingOnline,
+            selectedProcessingMode == VideoProcessOptions.ProcessingMode.ONLINE
+        )
+    }
+
     private fun updateAlgorithmModeUi() = with(binding) {
+        val algorithmEnabled = !isOfflineProcessing()
         setSegmentSelected(btnAlgorithmKlt, !useFarneback && !useAi)
         setSegmentSelected(btnAlgorithmFarneback, useFarneback)
         setSegmentSelected(btnAlgorithmAi, useAi)
+        btnAlgorithmKlt.isEnabled = algorithmEnabled
+        btnAlgorithmFarneback.isEnabled = algorithmEnabled
+        btnAlgorithmAi.isEnabled = algorithmEnabled
+        algorithmCard.alpha = if (algorithmEnabled) 1f else 0.7f
+    }
+
+    private fun enforceProcessingModeAlgorithm() {
+        if (!isOfflineProcessing()) return
+
+        useFarneback = false
+        useAi = true
+    }
+
+    private fun isOfflineProcessing(): Boolean {
+        return selectedProcessingMode == VideoProcessOptions.ProcessingMode.OFFLINE
     }
 
     private fun updateFarnebackDisplayUi() = with(binding) {

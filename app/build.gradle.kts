@@ -1,6 +1,25 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
 }
+
+val localProperties = Properties().apply {
+    val propertiesFile = rootProject.file("local.properties")
+    if (propertiesFile.isFile) {
+        propertiesFile.inputStream().use(::load)
+    }
+}
+
+fun String.toBuildConfigString(): String {
+    return "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+}
+
+val opticalFlowServerBaseUrl = (
+    localProperties.getProperty("opticalFlowServerBaseUrl")
+        ?: providers.gradleProperty("opticalFlowServerBaseUrl").orNull
+        ?: "https://optical-flow.example.com"
+    ).trim().trimEnd('/')
 
 android {
     namespace = "com.example.gnssandopticalflowapp"
@@ -14,6 +33,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField(
+            "String",
+            "OPTICAL_FLOW_SERVER_BASE_URL",
+            opticalFlowServerBaseUrl.toBuildConfigString()
+        )
     }
 
     buildTypes {
@@ -31,6 +55,9 @@ android {
     }
     viewBinding {
         enable = true
+    }
+    buildFeatures {
+        buildConfig = true
     }
 }
 
@@ -53,6 +80,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("com.github.bumptech.glide:glide:4.16.0")
     annotationProcessor("com.github.bumptech.glide:compiler:4.16.0")
+    implementation("com.squareup.retrofit2:retrofit:3.0.0")
+    implementation("com.squareup.retrofit2:converter-gson:3.0.0")
 
     implementation("androidx.camera:camera-core:1.4.1")
     implementation("androidx.camera:camera-camera2:1.4.1")

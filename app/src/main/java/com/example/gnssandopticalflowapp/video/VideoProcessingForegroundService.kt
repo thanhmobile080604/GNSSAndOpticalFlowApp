@@ -34,8 +34,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -102,7 +108,7 @@ class VideoProcessingForegroundService : Service() {
         processingJob = serviceScope.launch {
             val sourceFile = File(sourcePath)
             try {
-                val outputFile = processVideoOffline(sourceFile, options)
+                val outputFile = processVideo(sourceFile, options)
                 MediaScannerConnection.scanFile(
                     applicationContext,
                     arrayOf(outputFile.absolutePath),
@@ -127,7 +133,7 @@ class VideoProcessingForegroundService : Service() {
         }
     }
 
-    private suspend fun processVideoOffline(
+    private suspend fun processVideo(
         sourceFile: File,
         options: VideoProcessOptions
     ): File {
@@ -135,19 +141,50 @@ class VideoProcessingForegroundService : Service() {
         val outputFile = File(sourceFile.parentFile, "processed_${System.currentTimeMillis()}.mp4")
 
         val processed = try {
-            processVideoOnServer(sourceFile, outputFile, options)
+            when (options.processingMode) {
+                VideoProcessOptions.ProcessingMode.OFFLINE -> processVideoLocally(
+                    sourceFile,
+                    outputFile,
+                    options
+                )
+                VideoProcessOptions.ProcessingMode.ONLINE -> processVideoOnServer(
+                    sourceFile,
+                    outputFile,
+                    options
+                )
+            }
         } catch (e: CancellationException) {
             outputFile.delete()
             throw e
         }
 
-        if (!processed || !isProcessingActive()) {
+        if (!isProcessingActive()) {
             outputFile.delete()
             throw CancellationException("Video processing did not complete")
+        }
+        if (!processed) {
+            outputFile.delete()
+            throw IllegalStateException("Video processing did not complete")
         }
 
         postProgressPercent(VideoProcessingProgressText.COMPLETE_PERCENT)
         return outputFile
+    }
+
+    private suspend fun processVideoLocally(
+        sourceFile: File,
+        outputFile: File,
+        options: VideoProcessOptions
+    ): Boolean {
+        val aiOptions = options.copy(useFarneback = false, useAi = true)
+        postCurrentProgress("Processing on-device AI model...")
+        return processVideoWithOpenCv(sourceFile, outputFile, aiOptions) ||
+            retryWithCleanOutput(outputFile) {
+                processVideoWithFrameBatch(sourceFile, outputFile, aiOptions)
+            } ||
+            retryWithCleanOutput(outputFile) {
+                processVideoWithTimeSeek(sourceFile, outputFile, aiOptions)
+            }
     }
 
     private suspend fun retryWithCleanOutput(
@@ -166,54 +203,127 @@ class VideoProcessingForegroundService : Service() {
     ): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
             postCurrentProgress("Uploading to server...")
-            val serverUrl = "http://localhost:8000/process-video"
-            val url = java.net.URL(serverUrl)
-            val connection = url.openConnection() as java.net.HttpURLConnection
-            connection.requestMethod = "POST"
-            connection.doOutput = true
-            connection.doInput = true
-            connection.useCaches = false
-            
-            val boundary = "Boundary-" + System.currentTimeMillis()
-            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-
-            java.io.DataOutputStream(connection.outputStream).use { dos ->
-                dos.writeBytes("--$boundary\r\n")
-                dos.writeBytes("Content-Disposition: form-data; name=\"mode\"\r\n\r\n")
-                val mode = if (options.useFarnebackHeatmap) "HEATMAP" else "VECTORS"
-                dos.writeBytes("$mode\r\n")
-
-                dos.writeBytes("--$boundary\r\n")
-                dos.writeBytes("Content-Disposition: form-data; name=\"is_moving\"\r\n\r\n")
-                dos.writeBytes("${options.isMoving}\r\n")
-
-                dos.writeBytes("--$boundary\r\n")
-                dos.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"${sourceFile.name}\"\r\n")
-                dos.writeBytes("Content-Type: video/mp4\r\n\r\n")
-
-                java.io.FileInputStream(sourceFile).use { fis ->
-                    fis.copyTo(dos)
-                }
-                dos.writeBytes("\r\n")
-                dos.writeBytes("--$boundary--\r\n")
-                dos.flush()
-            }
-
+            val jobId = createServerVideoJob(sourceFile, options) ?: return@withContext false
             postCurrentProgress("Processing on server...")
-            val responseCode = connection.responseCode
-            if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
-                postCurrentProgress("Downloading processed video...")
-                java.io.FileOutputStream(outputFile).use { fos ->
-                    connection.inputStream.use { it.copyTo(fos) }
-                }
-                return@withContext true
-            } else {
-                Log.e(TAG, "Server error: $responseCode")
-                return@withContext false
-            }
+            return@withContext waitForServerVideoJob(jobId, outputFile)
         } catch (e: Exception) {
             Log.e(TAG, "Server connection failed: ${e.message}", e)
             return@withContext false
+        }
+    }
+
+    private suspend fun createServerVideoJob(
+        sourceFile: File,
+        options: VideoProcessOptions
+    ): String? {
+        val videoBody = sourceFile.asRequestBody("video/mp4".toMediaType())
+        val videoPart = MultipartBody.Part.createFormData("file", sourceFile.name, videoBody)
+        val response = OpticalFlowServerClient.api.createProcessVideoJob(
+            file = videoPart,
+            fields = serverMultipartFields(options)
+        )
+
+        return if (response.isSuccessful) {
+            response.body()?.jobId?.takeIf { it.isNotBlank() }
+        } else {
+            Log.e(TAG, "Server job create error: ${response.code()} ${response.errorBodyText()}")
+            null
+        }
+    }
+
+    private suspend fun waitForServerVideoJob(jobId: String, outputFile: File): Boolean {
+        while (isProcessingActive()) {
+            val statusPayload = fetchServerVideoJob(jobId) ?: return false
+            statusPayload.progress?.let { postProgressPercent(it) }
+            when (val status = statusPayload.status) {
+                "queued" -> {
+                    delay(SERVER_POLL_INTERVAL_MS)
+                }
+                "processing" -> {
+                    delay(SERVER_POLL_INTERVAL_MS)
+                }
+                "completed" -> {
+                    postCurrentProgress("Downloading processed video...")
+                    return downloadServerVideoJobResult(jobId, outputFile)
+                }
+                "failed" -> {
+                    Log.e(TAG, "Server job failed: ${statusPayload.error.orEmpty()}")
+                    return false
+                }
+                else -> {
+                    Log.e(TAG, "Unknown server job status: $status")
+                    return false
+                }
+            }
+        }
+        return false
+    }
+
+    private suspend fun fetchServerVideoJob(jobId: String): ServerVideoJobResponse? {
+        val response = OpticalFlowServerClient.api.getProcessVideoJob(jobId)
+        return if (response.isSuccessful) {
+            response.body()
+        } else {
+            Log.e(TAG, "Server job status error: ${response.code()} ${response.errorBodyText()}")
+            null
+        }
+    }
+
+    private suspend fun downloadServerVideoJobResult(jobId: String, outputFile: File): Boolean {
+        val response = OpticalFlowServerClient.api.downloadProcessVideoJobResult(jobId)
+        val body = response.body()
+        return if (response.isSuccessful && body != null) {
+            java.io.FileOutputStream(outputFile).use { fos ->
+                body.byteStream().use { it.copyTo(fos) }
+            }
+            outputFile.length() > 100
+        } else {
+            Log.e(TAG, "Server result download error: ${response.code()} ${response.errorBodyText()}")
+            false
+        }
+    }
+
+    private fun serverMultipartFields(options: VideoProcessOptions): Map<String, RequestBody> {
+        val fields = mutableMapOf<String, RequestBody>()
+        fields["mode"] = textPart(if (options.useFarnebackHeatmap) "HEATMAP" else "VECTORS")
+        fields["processing_mode"] = textPart(options.processingMode.name)
+        fields["algorithm"] = textPart(serverAlgorithmName(options))
+        fields["sensitivity"] = textPart(options.sensitivity.toString())
+        fields["is_moving"] = textPart(options.isMoving.toString())
+        fields["roi_enabled"] = textPart((options.roi != null).toString())
+
+        options.roi?.let { roi ->
+            fields["roi_left"] = textPart(roi.left.toString())
+            fields["roi_top"] = textPart(roi.top.toString())
+            fields["roi_right"] = textPart(roi.right.toString())
+            fields["roi_bottom"] = textPart(roi.bottom.toString())
+            fields["roi_view_aspect_ratio"] = textPart(roi.viewAspectRatio.toString())
+            fields["roi_path_points"] = textPart(
+                roi.pathPoints.joinToString(separator = ";") { point ->
+                    "${point.x},${point.y}"
+                }
+            )
+        }
+        return fields
+    }
+
+    private fun textPart(value: String): RequestBody {
+        return value.toRequestBody("text/plain".toMediaType())
+    }
+
+    private fun retrofit2.Response<*>.errorBodyText(): String {
+        return try {
+            errorBody()?.string().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun serverAlgorithmName(options: VideoProcessOptions): String {
+        return when {
+            options.useAi -> "AI"
+            options.useFarneback -> "FARNEBACK"
+            else -> "KLT"
         }
     }
 
@@ -447,8 +557,12 @@ class VideoProcessingForegroundService : Service() {
     private fun createOpticalFlow(options: VideoProcessOptions): OpticalFlow {
         if (options.useAi) {
             val fallback = createConfiguredFarneback(options)
+            val requireAiModel = options.processingMode == VideoProcessOptions.ProcessingMode.OFFLINE
             if (!AIRaftOpticalFlow.isModelAvailable(applicationContext)) {
-                postCurrentProgress("AI model missing; using Farneback")
+                postCurrentProgress(
+                    if (requireAiModel) "AI model missing" else "AI model missing; using Farneback"
+                )
+                if (requireAiModel) throw AIRaftOpticalFlow.ModelMissingException()
                 return fallback
             }
 
@@ -463,6 +577,10 @@ class VideoProcessingForegroundService : Service() {
                     Log.w("AI-RAFT", "prepare() failed: ${e.message}")
                 }
             }.start()
+            if (requireAiModel) {
+                return FrameStrideOpticalFlow(aiFlow, AI_FRAME_STRIDE, "AI-RAFT")
+            }
+
             val failover = FailoverOpticalFlow(aiFlow, fallback, "AI-RAFT") { error ->
                 postCurrentProgress("AI failed; using Farneback")
                 Log.e("AI-RAFT", "Falling back to Farneback: ${error.message}", error)
@@ -923,6 +1041,7 @@ class VideoProcessingForegroundService : Service() {
         private const val MIN_ROI_FRAME_SIZE = 32
         private const val AI_FRAME_STRIDE = 1
         private const val WAKE_LOCK_TIMEOUT_MS = 6L * 60L * 60L * 1000L
+        private const val SERVER_POLL_INTERVAL_MS = 2_000L
 
         fun processIntent(context: Context, sourcePath: String, options: VideoProcessOptions): Intent {
             return Intent(context, VideoProcessingForegroundService::class.java).apply {
