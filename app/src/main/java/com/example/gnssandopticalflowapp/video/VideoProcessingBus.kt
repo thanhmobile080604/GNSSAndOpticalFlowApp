@@ -11,19 +11,32 @@ object VideoProcessingBus {
     var isProcessing: Boolean = false
         private set
 
+    @Volatile
+    private var currentProcessingPercent = VideoProcessingProgressText.DEFAULT_PERCENT
+
     fun postProcessing(message: String) {
+        val fallbackPercent = if (isProcessing) {
+            currentProcessingPercent
+        } else {
+            VideoProcessingProgressText.DEFAULT_PERCENT
+        }
+        val normalizedMessage = VideoProcessingProgressText.normalize(message, fallbackPercent)
+        currentProcessingPercent = VideoProcessingProgressText.extractPercent(normalizedMessage)
+            ?: fallbackPercent
         isProcessing = true
-        processingMessage.postValue(message)
+        processingMessage.postValue(normalizedMessage)
     }
 
     fun postFinished(path: String) {
         isProcessing = false
+        currentProcessingPercent = VideoProcessingProgressText.COMPLETE_PERCENT
         videoLibraryUpdated.postValue(System.currentTimeMillis())
         processedVideoPathToOpen.postValue(path)
     }
 
     fun postIdle() {
         isProcessing = false
+        currentProcessingPercent = VideoProcessingProgressText.DEFAULT_PERCENT
         processingMessage.postValue(null)
     }
 }

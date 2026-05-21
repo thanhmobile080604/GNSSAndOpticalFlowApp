@@ -12,6 +12,7 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
+import com.example.gnssandopticalflowapp.video.VideoProcessingProgressText
 import kotlin.math.abs
 
 class VideoProcessingOverlayController(
@@ -125,7 +126,12 @@ class VideoProcessingOverlayController(
     }
 
     fun showProcessing(message: String) {
-        currentVideoProcessingMessage = message
+        val fallbackPercent = if (isVideoProcessingVisible) {
+            currentProgressPercent()
+        } else {
+            VideoProcessingProgressText.DEFAULT_PERCENT
+        }
+        currentVideoProcessingMessage = VideoProcessingProgressText.normalize(message, fallbackPercent)
         isProcessedVideoReady = false
         pendingProcessedVideoPath = null
 
@@ -366,7 +372,7 @@ class VideoProcessingOverlayController(
     }
 
     private fun applyProcessingUi(message: String) {
-        binding.tvLoadingMessage.text = message
+        binding.tvLoadingMessage.text = VideoProcessingProgressText.normalize(message, currentProgressPercent())
         binding.btnCancel.text = CANCEL_TEXT
         binding.btnCancel.visibility = View.VISIBLE
         binding.btnLater.visibility = View.GONE
@@ -381,6 +387,11 @@ class VideoProcessingOverlayController(
         binding.btnLater.visibility = View.VISIBLE
         binding.progressCircular.visibility = View.INVISIBLE
         binding.processingDoneDot.visibility = View.VISIBLE
+    }
+
+    private fun currentProgressPercent(): Int {
+        return VideoProcessingProgressText.extractPercent(currentVideoProcessingMessage)
+            ?: VideoProcessingProgressText.DEFAULT_PERCENT
     }
 
     private fun resetAnimatedView(view: View) {
@@ -478,9 +489,9 @@ class VideoProcessingOverlayController(
     }
 
     private companion object {
-        const val DEFAULT_PROCESSING_MESSAGE = "Processing..."
+        const val DEFAULT_PROCESSING_MESSAGE = "Processing: 0%"
         const val CANCEL_TEXT = "Cancel"
-        const val DONE_TEXT = "Done!"
+        const val DONE_TEXT = "Processing: 100%"
         const val WATCH_TEXT = "Watch"
         const val OVERLAY_TRANSITION_DURATION_MS = 260L
         const val BUBBLE_FADE_DURATION_MS = 160L

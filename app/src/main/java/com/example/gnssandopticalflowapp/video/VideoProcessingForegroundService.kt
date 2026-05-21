@@ -57,6 +57,7 @@ class VideoProcessingForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var processingJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var currentProgressPercent = VideoProcessingProgressText.DEFAULT_PERCENT
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -93,9 +94,10 @@ class VideoProcessingForegroundService : Service() {
             return
         }
 
-        startForeground(NOTIFICATION_ID, buildNotification("Preparing video...", ongoing = true))
+        currentProgressPercent = VideoProcessingProgressText.DEFAULT_PERCENT
+        startForeground(NOTIFICATION_ID, buildNotification(currentProgressMessage(), ongoing = true))
         acquireWakeLock()
-        VideoProcessingBus.postProcessing("Preparing video...")
+        VideoProcessingBus.postProcessing(currentProgressMessage())
 
         processingJob = serviceScope.launch {
             val sourceFile = File(sourcePath)
@@ -129,7 +131,7 @@ class VideoProcessingForegroundService : Service() {
         sourceFile: File,
         options: VideoProcessOptions
     ): File {
-        postProgress("Preparing ${algorithmLabel(options)}...")
+        postProgressPercent(VideoProcessingProgressText.DEFAULT_PERCENT)
         val outputFile = File(sourceFile.parentFile, "processed_${System.currentTimeMillis()}.mp4")
 
         val processed = try {
@@ -150,7 +152,7 @@ class VideoProcessingForegroundService : Service() {
             throw CancellationException("Video processing did not complete")
         }
 
-        postProgress("Processing: 100%")
+        postProgressPercent(VideoProcessingProgressText.COMPLETE_PERCENT)
         return outputFile
     }
 
@@ -394,11 +396,11 @@ class VideoProcessingForegroundService : Service() {
         if (options.useAi) {
             val fallback = createConfiguredFarneback(options)
             if (!AIRaftOpticalFlow.isModelAvailable(applicationContext)) {
-                postProgress("AI model missing; using Farneback...")
+                postCurrentProgress("AI model missing; using Farneback")
                 return fallback
             }
 
-            val aiFlow = AIRaftOpticalFlow(applicationContext, ::postProgress).apply {
+            val aiFlow = AIRaftOpticalFlow(applicationContext, ::postCurrentProgress).apply {
                 setSensitivity(options.sensitivity)
                 setMovingMode(options.isMoving)
                 setVisualizationMode(currentAiVisualizationMode(options))
@@ -410,7 +412,7 @@ class VideoProcessingForegroundService : Service() {
                 }
             }.start()
             val failover = FailoverOpticalFlow(aiFlow, fallback, "AI-RAFT") { error ->
-                postProgress("AI failed; using Farneback...")
+                postCurrentProgress("AI failed; using Farneback")
                 Log.e("AI-RAFT", "Falling back to Farneback: ${error.message}", error)
             }
             return FrameStrideOpticalFlow(failover, AI_FRAME_STRIDE, "AI-RAFT")
@@ -546,8 +548,7 @@ class VideoProcessingForegroundService : Service() {
         (opticalFlow as? FrameProgressAwareOpticalFlow)?.updateFrameProgress(frameNumber, totalFrames)
         if (frameNumber > 3L && frameNumber % 10L != 0L) return
 
-        val totalLabel = totalFrames.takeIf { it > 0L }?.toString() ?: "?"
-        postProgress("AI processing frame $frameNumber / $totalLabel...")
+        postProgressPercent(progressPercent(frameNumber, totalFrames))
     }
 
     private suspend fun updateProgressIfNeeded(framesProcessed: Long, totalFrames: Long) {
@@ -555,16 +556,42 @@ class VideoProcessingForegroundService : Service() {
         val shouldUpdate = framesProcessed <= 3L || framesProcessed % PROGRESS_UPDATE_INTERVAL_FRAMES == 0L
         if (!shouldUpdate) return
 
-        val progress = ((framesProcessed.toDouble() / totalFrames.toDouble()) * 100.0)
-            .roundToInt()
-            .coerceIn(0, 100)
-        postProgress("Processing: ${if (framesProcessed > 0L && progress == 0) 1 else progress}%")
+        postProgressPercent(progressPercent(framesProcessed, totalFrames))
+    }
+
+    private fun postCurrentProgress(status: String) {
+        Log.d(TAG, status)
+        postProgressPercent(currentProgressPercent)
+    }
+
+    private fun postProgressPercent(percent: Int) {
+        currentProgressPercent = percent.coerceIn(
+            VideoProcessingProgressText.DEFAULT_PERCENT,
+            VideoProcessingProgressText.COMPLETE_PERCENT
+        )
+        postProgress(currentProgressMessage())
     }
 
     private fun postProgress(message: String) {
         Log.d(TAG, message)
         VideoProcessingBus.postProcessing(message)
         updateNotification(message, ongoing = true)
+    }
+
+    private fun currentProgressMessage(): String {
+        return VideoProcessingProgressText.format(currentProgressPercent)
+    }
+
+    private fun progressPercent(framesProcessed: Long, totalFrames: Long): Int {
+        if (totalFrames <= 0L) return currentProgressPercent
+
+        val progress = ((framesProcessed.toDouble() / totalFrames.toDouble()) * 100.0)
+            .roundToInt()
+            .coerceIn(
+                VideoProcessingProgressText.DEFAULT_PERCENT,
+                VideoProcessingProgressText.COMPLETE_PERCENT
+            )
+        return if (framesProcessed > 0L && progress == 0) 1 else progress
     }
 
     private fun updateNotification(message: String, ongoing: Boolean) {
@@ -815,14 +842,6 @@ class VideoProcessingForegroundService : Service() {
         return when (normalized) {
             90, 180, 270 -> normalized
             else -> 0
-        }
-    }
-
-    private fun algorithmLabel(options: VideoProcessOptions): String {
-        return when {
-            options.useAi -> "AI RAFT"
-            options.useFarneback -> "Farneback"
-            else -> "KLT"
         }
     }
 
