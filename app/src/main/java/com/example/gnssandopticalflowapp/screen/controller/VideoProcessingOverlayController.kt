@@ -491,7 +491,7 @@ class VideoProcessingOverlayController(
     private companion object {
         const val DEFAULT_PROCESSING_MESSAGE = "Processing: 0%"
         const val CANCEL_TEXT = "Cancel"
-        const val DONE_TEXT = "Processing: 100%"
+        const val DONE_TEXT = "Done!"
         const val WATCH_TEXT = "Watch"
         const val OVERLAY_TRANSITION_DURATION_MS = 260L
         const val BUBBLE_FADE_DURATION_MS = 160L
