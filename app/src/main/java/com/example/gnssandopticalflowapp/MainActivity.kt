@@ -1,5 +1,7 @@
 package com.example.gnssandopticalflowapp
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -7,8 +9,10 @@ import android.os.StrictMode
 import android.util.Log
 import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
@@ -17,7 +21,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.NavHostFragment
 import com.example.gnssandopticalflowapp.common.AndroidLocationObserver
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
-import com.example.gnssandopticalflowapp.screen.controller.VideoProcessingOverlayController
+import com.example.gnssandopticalflowapp.screen.controller.VideoProcessingManager
 import com.example.gnssandopticalflowapp.screen.dialog.NoGPSDialog
 import com.example.gnssandopticalflowapp.screen.dialog.NoLocationDialog
 import com.example.gnssandopticalflowapp.video.VideoProcessingBus
@@ -48,7 +52,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val viewModel: MainViewModel by viewModels()
-    private lateinit var videoProcessingOverlay: VideoProcessingOverlayController
+    private lateinit var videoProcessingManager: VideoProcessingManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,9 +68,7 @@ class MainActivity : AppCompatActivity() {
 
         viewModel.seedFakeLocationIfNeeded()
         setupOrekit()
-        setupVideoProcessingOverlay()
-        observeVideoProcessingOverlay()
-        observeProcessedVideoReady()
+        videoProcessingManager = VideoProcessingManager(this, binding, viewModel).also { it.attach() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -127,6 +129,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        askNotificationPermission()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -134,14 +137,14 @@ class MainActivity : AppCompatActivity() {
         if (::binding.isInitialized) {
             ViewCompat.requestApplyInsets(binding.main)
         }
-        if (::videoProcessingOverlay.isInitialized) {
-            videoProcessingOverlay.onConfigurationChanged()
+        if (::videoProcessingManager.isInitialized) {
+            videoProcessingManager.onConfigurationChanged()
         }
     }
 
     override fun onDestroy() {
-        if (::videoProcessingOverlay.isInitialized) {
-            videoProcessingOverlay.dispose()
+        if (::videoProcessingManager.isInitialized) {
+            videoProcessingManager.dispose()
         }
         super.onDestroy()
     }
@@ -188,121 +191,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupVideoProcessingOverlay() {
-        videoProcessingOverlay = VideoProcessingOverlayController(
-            binding = binding,
-            onCancelProcessing = ::cancelVideoProcessing,
-            onWatchProcessedVideo = ::watchProcessedVideo,
-            onDismissProcessedVideo = ::dismissProcessedVideoReady
-        ).also { it.attach() }
-    }
+    private val requestPermissionLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted: Boolean ->
 
-    private fun observeVideoProcessingOverlay() {
-        viewModel.videoProcessingMessage.observe(this) { message ->
-            if (message.isNullOrBlank()) {
-                if (viewModel.processedVideoPathToOpen.value.isNullOrBlank() &&
-                    VideoProcessingBus.processedVideoPathToOpen.value.isNullOrBlank()
-                ) {
-                    videoProcessingOverlay.hide()
-                }
+            if (isGranted) {
+                // Được cấp quyền
             } else {
-                clearPendingProcessedVideo()
-                videoProcessingOverlay.showProcessing(message)
+                // Bị từ chối
             }
         }
-        VideoProcessingBus.processingMessage.observe(this) { message ->
-            if (message.isNullOrBlank()) {
-                if (viewModel.processedVideoPathToOpen.value.isNullOrBlank() &&
-                    VideoProcessingBus.processedVideoPathToOpen.value.isNullOrBlank()
-                ) {
-                    videoProcessingOverlay.hide()
+
+    private fun askNotificationPermission() {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            when {
+
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED -> {
+
+                    // Đã có quyền
                 }
-            } else {
-                clearPendingProcessedVideo()
-                videoProcessingOverlay.showProcessing(message)
-            }
-        }
-    }
 
-    private fun observeProcessedVideoReady() {
-        viewModel.processedVideoPathToOpen.observe(this) { path ->
-            if (path.isNullOrBlank()) return@observe
-
-            videoProcessingOverlay.showProcessedVideoReady(path)
-        }
-        VideoProcessingBus.processedVideoPathToOpen.observe(this) { path ->
-            if (path.isNullOrBlank()) return@observe
-
-            videoProcessingOverlay.showProcessedVideoReady(path)
-        }
-        VideoProcessingBus.videoLibraryUpdated.observe(this) {
-            viewModel.videoLibraryUpdated.value = it
-        }
-    }
-
-    private fun cancelVideoProcessing() {
-        viewModel.videoUploadJob?.cancel()
-        viewModel.videoProcessingMessage.value = null
-        startService(VideoProcessingForegroundService.cancelIntent(this))
-    }
-
-    private fun watchProcessedVideo(path: String) {
-        val navController = (supportFragmentManager.findFragmentById(R.id.nav_host_fragment) as? NavHostFragment)
-            ?.navController
-            ?: return
-
-        viewModel.selectedVideoPath.value = path
-        clearVideoProcessingOverlayState()
-
-        val navigateToVideo = {
-            if (navController.currentDestination?.id == R.id.videoOpticalFlowFragment) {
-                navController.popBackStack()
-            }
-            navController.navigate(R.id.videoOpticalFlowFragment)
-            viewModel.processedVideoPathToOpen.value = null
-        }
-
-        runCatching {
-            if (supportFragmentManager.isStateSaved) {
-                binding.root.post {
-                    runCatching { navigateToVideo() }
-                        .onFailure { error ->
-                            Log.e("NavigationError", "Open processed video failed: $error")
-                        }
+                else -> {
+                    requestPermissionLauncher.launch(
+                        Manifest.permission.POST_NOTIFICATIONS
+                    )
                 }
-            } else {
-                navigateToVideo()
             }
-        }.onFailure { error ->
-            Log.e("NavigationError", "Open processed video failed: $error")
-        }
-    }
-
-    private fun dismissProcessedVideoReady() {
-        clearVideoProcessingOverlayState()
-        viewModel.processedVideoPathToOpen.value = null
-        VideoProcessingBus.processedVideoPathToOpen.value = null
-    }
-
-    private fun clearPendingProcessedVideo() {
-        if (viewModel.processedVideoPathToOpen.value != null) {
-            viewModel.processedVideoPathToOpen.value = null
-        }
-        if (VideoProcessingBus.processedVideoPathToOpen.value != null) {
-            VideoProcessingBus.processedVideoPathToOpen.value = null
-        }
-    }
-
-    private fun clearVideoProcessingOverlayState() {
-        videoProcessingOverlay.hide(clearProcessedVideo = true)
-        if (viewModel.videoProcessingMessage.value != null) {
-            viewModel.videoProcessingMessage.value = null
-        }
-        if (VideoProcessingBus.processingMessage.value != null) {
-            VideoProcessingBus.processingMessage.value = null
-        }
-        if (VideoProcessingBus.processedVideoPathToOpen.value != null) {
-            VideoProcessingBus.processedVideoPathToOpen.value = null
         }
     }
 }

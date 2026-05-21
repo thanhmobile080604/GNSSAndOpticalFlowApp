@@ -5,22 +5,38 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.WindowInsets
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.navigation.fragment.NavHostFragment
+import com.example.gnssandopticalflowapp.MainViewModel
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
+import com.example.gnssandopticalflowapp.video.VideoProcessingBus
+import com.example.gnssandopticalflowapp.video.VideoProcessingForegroundService
 import com.example.gnssandopticalflowapp.video.VideoProcessingProgressText
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
-class VideoProcessingOverlayController(
+/**
+ * Single class that manages both the video processing overlay UI and
+ * the LiveData/Bus observation + navigation logic.
+ */
+class VideoProcessingManager(
+    private val activity: AppCompatActivity,
     private val binding: ActivityMainBinding,
-    private val onCancelProcessing: () -> Unit,
-    private val onWatchProcessedVideo: (String) -> Unit,
-    private val onDismissProcessedVideo: () -> Unit
+    private val viewModel: MainViewModel
 ) {
+    // Overlay state
     private var isVideoProcessingVisible = false
     private var isVideoProcessingCollapsed = false
     private var isVideoProcessingTransitioning = false
@@ -49,17 +65,18 @@ class VideoProcessingOverlayController(
         isAttached = true
         bubbleTouchSlop = ViewConfiguration.get(binding.root.context).scaledTouchSlop
 
+        // Setup UI handlers
         binding.btnCancel.setSingleClick {
             val processedVideoPath = pendingProcessedVideoPath
             if (isProcessedVideoReady && !processedVideoPath.isNullOrBlank()) {
-                onWatchProcessedVideo(processedVideoPath)
+                watchProcessedVideo(processedVideoPath)
             } else {
-                onCancelProcessing()
+                cancelVideoProcessing()
             }
         }
 
         binding.btnLater.setSingleClick {
-            onDismissProcessedVideo()
+            dismissProcessedVideoReady()
         }
 
         binding.ivClose.setSingleClick {
@@ -123,9 +140,76 @@ class VideoProcessingOverlayController(
         }
 
         binding.main.addOnLayoutChangeListener(layoutChangeListener)
+
+        // Observe LiveData / Bus
+        activity.lifecycleScope.launch {
+            activity.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    viewModel.videoProcessingMessage.observe(activity) { message ->
+                        if (message.isNullOrBlank()) {
+                            if (viewModel.processedVideoPathToOpen.value.isNullOrBlank() &&
+                                VideoProcessingBus.processedVideoPathToOpen.value.isNullOrBlank()
+                            ) {
+                                hide()
+                            }
+                        } else {
+                            clearPendingProcessedVideo()
+                            showProcessing(message)
+                        }
+                    }
+                }
+
+                launch {
+                    VideoProcessingBus.processingMessage.observe(activity) { message ->
+                        if (message.isNullOrBlank()) {
+                            if (viewModel.processedVideoPathToOpen.value.isNullOrBlank() &&
+                                VideoProcessingBus.processedVideoPathToOpen.value.isNullOrBlank()
+                            ) {
+                                hide()
+                            }
+                        } else {
+                            clearPendingProcessedVideo()
+                            showProcessing(message)
+                        }
+                    }
+                }
+            }
+        }
+
+        viewModel.processedVideoPathToOpen.observe(activity) { path ->
+            if (path.isNullOrBlank()) return@observe
+            showProcessedVideoReady(path)
+        }
+
+        VideoProcessingBus.processedVideoPathToOpen.observe(activity) { path ->
+            if (path.isNullOrBlank()) return@observe
+            showProcessedVideoReady(path)
+        }
+
+        VideoProcessingBus.videoLibraryUpdated.observe(activity) {
+            viewModel.videoLibraryUpdated.value = it
+        }
     }
 
-    fun showProcessing(message: String) {
+    fun onConfigurationChanged() {
+        binding.main.post {
+            if (isVideoProcessingCollapsed) {
+                clampBubbleInsideParent()
+                snapBubbleToNearestEdge()
+            }
+        }
+    }
+
+    fun dispose() {
+        cancelActiveVideoProcessingAnimation()
+        binding.processingBubble.animate().cancel()
+        binding.processingBubble.setOnTouchListener(null)
+        binding.processingBubble.setOnClickListener(null)
+        binding.main.removeOnLayoutChangeListener(layoutChangeListener)
+        isAttached = false
+    }
+
+    private fun showProcessing(message: String) {
         val fallbackPercent = if (isVideoProcessingVisible) {
             currentProgressPercent()
         } else {
@@ -149,7 +233,7 @@ class VideoProcessingOverlayController(
         }
     }
 
-    fun showProcessedVideoReady(path: String) {
+    private fun showProcessedVideoReady(path: String) {
         val keepTopTabOpen = isVideoProcessingVisible &&
             !isVideoProcessingCollapsed &&
             !isVideoProcessingTransitioning
@@ -187,10 +271,8 @@ class VideoProcessingOverlayController(
         }
     }
 
-    fun hide(clearProcessedVideo: Boolean = false) {
+    private fun hide(clearProcessedVideo: Boolean = false) {
         if (!clearProcessedVideo && isProcessedVideoReady) {
-            // Don't hide if the video is processed and we haven't been asked to clear it.
-            // This prevents the "Done" UI from being hidden by "processing idle" messages.
             return
         }
 
@@ -214,24 +296,6 @@ class VideoProcessingOverlayController(
         resetAnimatedView(binding.processingBubble)
         binding.processingDoneDot.visibility = View.GONE
         binding.processingBubble.visibility = View.INVISIBLE
-    }
-
-    fun onConfigurationChanged() {
-        binding.main.post {
-            if (isVideoProcessingCollapsed) {
-                clampBubbleInsideParent()
-                snapBubbleToNearestEdge()
-            }
-        }
-    }
-
-    fun dispose() {
-        cancelActiveVideoProcessingAnimation()
-        binding.processingBubble.animate().cancel()
-        binding.processingBubble.setOnTouchListener(null)
-        binding.processingBubble.setOnClickListener(null)
-        binding.main.removeOnLayoutChangeListener(layoutChangeListener)
-        isAttached = false
     }
 
     private fun collapseVideoProcessingOverlay() {
@@ -486,6 +550,68 @@ class VideoProcessingOverlayController(
 
     private fun dp(value: Int): Float {
         return value * binding.root.resources.displayMetrics.density
+    }
+
+    private fun cancelVideoProcessing() {
+        viewModel.videoUploadJob?.cancel()
+        viewModel.videoProcessingMessage.value = null
+        activity.startService(VideoProcessingForegroundService.cancelIntent(activity))
+    }
+
+    private fun watchProcessedVideo(path: String) {
+        val navController = (activity.supportFragmentManager.findFragmentById(com.example.gnssandopticalflowapp.R.id.nav_host_fragment) as? NavHostFragment)
+            ?.navController
+            ?: return
+
+        viewModel.selectedVideoPath.value = path
+        clearVideoProcessingOverlayState()
+
+        val navigateToVideo = {
+            if (navController.currentDestination?.id == com.example.gnssandopticalflowapp.R.id.videoOpticalFlowFragment) {
+                navController.popBackStack()
+            }
+            navController.navigate(com.example.gnssandopticalflowapp.R.id.videoOpticalFlowFragment)
+            viewModel.processedVideoPathToOpen.value = null
+        }
+
+        runCatching {
+            if (activity.supportFragmentManager.isStateSaved) {
+                binding.root.post {
+                    runCatching { navigateToVideo() }
+                        .onFailure { error -> Log.e("NavigationError", "Open processed video failed: $error") }
+                }
+            } else {
+                navigateToVideo()
+            }
+        }.onFailure { error -> Log.e("NavigationError", "Open processed video failed: $error") }
+    }
+
+    private fun dismissProcessedVideoReady() {
+        clearVideoProcessingOverlayState()
+        viewModel.processedVideoPathToOpen.value = null
+        VideoProcessingBus.processedVideoPathToOpen.value = null
+    }
+
+    private fun clearPendingProcessedVideo() {
+        if (viewModel.processedVideoPathToOpen.value != null) {
+            viewModel.processedVideoPathToOpen.value = null
+        }
+        if (VideoProcessingBus.processedVideoPathToOpen.value != null) {
+            VideoProcessingBus.processedVideoPathToOpen.value = null
+        }
+    }
+
+    private fun clearVideoProcessingOverlayState() {
+        hide(clearProcessedVideo = true)
+        if (viewModel.videoProcessingMessage.value != null) {
+            viewModel.videoProcessingMessage.value = null
+        }
+        if (VideoProcessingBus.processingMessage.value != null) {
+            VideoProcessingBus.processingMessage.value = null
+        }
+        if (VideoProcessingBus.processedVideoPathToOpen.value != null) {
+            VideoProcessingBus.processedVideoPathToOpen.value = null
+        }
     }
 
     private companion object {
