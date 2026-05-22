@@ -22,7 +22,10 @@ class VideoProcessOptionsViewModel : ViewModel() {
         val algorithm: Algorithm = Algorithm.AI,
         val processingMode: VideoProcessOptions.ProcessingMode = VideoProcessOptions.ProcessingMode.OFFLINE,
         val useFarnebackHeatmap: Boolean = false,
-        val motionMode: MotionMode = MotionMode.STILL
+        val motionMode: MotionMode = MotionMode.STILL,
+        val roiSelectEnabled: Boolean = false,
+        val selectedRoi: VideoProcessOptions.NormalizedRoi? = null,
+        val sensitivity: Int = DEFAULT_SENSITIVITY
     ) {
         val showProcessing: Boolean
             get() = algorithm == Algorithm.AI
@@ -38,6 +41,15 @@ class VideoProcessOptionsViewModel : ViewModel() {
 
         val isMoving: Boolean
             get() = motionMode == MotionMode.MOVING
+
+        val hasRoi: Boolean
+            get() = selectedRoi != null
+
+        val shouldRequireRoiBeforeApply: Boolean
+            get() = roiSelectEnabled && selectedRoi == null
+
+        val roiForApply: VideoProcessOptions.NormalizedRoi?
+            get() = selectedRoi.takeIf { roiSelectEnabled }
     }
 
     private val _uiState = MutableLiveData(UiState())
@@ -55,7 +67,6 @@ class VideoProcessOptionsViewModel : ViewModel() {
             processingMode = when (algorithm) {
                 Algorithm.KLT,
                 Algorithm.FARNEBACK -> VideoProcessOptions.ProcessingMode.OFFLINE
-
                 Algorithm.AI -> current.processingMode
             },
             useFarnebackHeatmap = when (algorithm) {
@@ -92,5 +103,41 @@ class VideoProcessOptionsViewModel : ViewModel() {
         _uiState.value = current.copy(
             motionMode = motionMode
         )
+    }
+
+    fun enableRoiSelection() {
+        val current = currentState()
+
+        _uiState.value = current.copy(
+            roiSelectEnabled = true
+        )
+    }
+
+    fun clearRoiSelection() {
+        val current = currentState()
+
+        _uiState.value = current.copy(
+            roiSelectEnabled = false,
+            selectedRoi = null
+        )
+    }
+
+    fun updateSelectedRoi(roi: VideoProcessOptions.NormalizedRoi?) {
+        val current = currentState()
+
+        _uiState.value = current.copy(
+            selectedRoi = roi
+        )
+    }
+
+    fun updateSensitivity(progress: Int) {
+        val current = currentState()
+
+        _uiState.value = current.copy(
+            sensitivity = progress.coerceIn(0, 100)
+        )
+    }
+    companion object {
+        private const val DEFAULT_SENSITIVITY = 50
     }
 }

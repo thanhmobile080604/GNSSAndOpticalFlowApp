@@ -3,7 +3,6 @@ package com.example.gnssandopticalflowapp.screen.dialog
 import android.graphics.SurfaceTexture
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import android.view.Surface
 import android.view.TextureView
 import android.widget.SeekBar
@@ -40,22 +39,17 @@ class VideoProcessOptionsDialog :
     private var previewPrepared = false
     private var videoUri: Uri? = null
     private var videoAspectRatio = 0f
-    private var roiSelectEnabled = false
-    private var selectedRoi: VideoProcessOptions.NormalizedRoi? = null
 
     override fun DialogVideoProcessOptionsBinding.initView() {
         isCancelable = true
 
         videoUri = arguments?.getString(ARG_VIDEO_URI)?.toUri()
-        sensitivityBar.progress = DEFAULT_SENSITIVITY
 
         setupPreviewPlayer()
         setupPreviewSurface()
         setupRoiOverlay()
 
         renderOptionsState(optionsViewModel.currentState())
-        updateRoiUi()
-        updateSensitivityValue(DEFAULT_SENSITIVITY)
     }
 
     override fun DialogVideoProcessOptionsBinding.initListener() {
@@ -96,17 +90,14 @@ class VideoProcessOptionsDialog :
         }
 
         btnRoiSelect.setSingleClick {
-            roiSelectEnabled = true
             roiOverlay.setSelectionEnabled(true)
-            updateRoiUi()
+            optionsViewModel.enableRoiSelection()
         }
 
         btnRoiFull.setSingleClick {
-            roiSelectEnabled = false
-            selectedRoi = null
             roiOverlay.setSelectionEnabled(false)
             roiOverlay.clearSelection()
-            updateRoiUi()
+            optionsViewModel.clearRoiSelection()
         }
 
         sensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -115,7 +106,8 @@ class VideoProcessOptionsDialog :
                 progress: Int,
                 fromUser: Boolean
             ) {
-                updateSensitivityValue(progress)
+                if (!fromUser) return
+                optionsViewModel.updateSensitivity(progress)
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
@@ -170,20 +162,20 @@ class VideoProcessOptionsDialog :
     }
 
     private fun applyOptions() = with(binding) {
-        if (roiSelectEnabled && selectedRoi == null) {
+        val state = optionsViewModel.currentState()
+
+        if (state.shouldRequireRoiBeforeApply) {
             Toast.makeText(requireContext(), CLOSED_AREA_MESSAGE, Toast.LENGTH_SHORT).show()
             return@with
         }
 
-        val state = optionsViewModel.currentState()
-
         val options = VideoProcessOptions(
             isMoving = state.isMoving,
             useFarneback = state.useFarneback,
-            sensitivity = sensitivityBar.progress.coerceIn(0, 100),
+            sensitivity = state.sensitivity,
             useFarnebackHeatmap = state.useFarnebackHeatmap,
             useAi = state.useAi,
-            roi = selectedRoi.takeIf { roiSelectEnabled },
+            roi = state.roiForApply,
             processingMode = state.processingMode
         )
 
@@ -241,6 +233,30 @@ class VideoProcessOptionsDialog :
             btnMotionMoving,
             state.motionMode == VideoProcessOptionsViewModel.MotionMode.MOVING
         )
+
+        setSegmentSelected(
+            btnRoiSelect,
+            state.roiSelectEnabled || state.hasRoi
+        )
+
+        setSegmentSelected(
+            btnRoiFull,
+            !state.roiSelectEnabled && !state.hasRoi
+        )
+
+        tvRoiLabel.text = if (state.hasRoi) {
+            "ROI On"
+        } else {
+            "ROI"
+        }
+
+        roiOverlay.setSelectionEnabled(state.roiSelectEnabled)
+
+        if (sensitivityBar.progress != state.sensitivity) {
+            sensitivityBar.progress = state.sensitivity
+        }
+
+        tvSensitivity.text = "Sensitivity: ${state.sensitivity}"
     }
 
     private fun setupPreviewPlayer() {
@@ -315,7 +331,7 @@ class VideoProcessOptionsDialog :
 
     private fun setupRoiOverlay() = with(binding) {
         roiOverlay.onRoiChanged = {
-            selectedRoi = roiOverlay.normalizedRoi?.let { roi ->
+            val selectedRoi = roiOverlay.normalizedRoi?.let { roi ->
                 VideoProcessOptions.NormalizedRoi(
                     left = roi.left,
                     top = roi.top,
@@ -332,7 +348,7 @@ class VideoProcessOptionsDialog :
                 )
             }
 
-            updateRoiUi()
+            optionsViewModel.updateSelectedRoi(selectedRoi)
         }
 
         roiOverlay.onInvalidSelection = {
@@ -353,30 +369,6 @@ class VideoProcessOptionsDialog :
         player?.play()
 
         previewPrepared = true
-    }
-
-    private fun updateRoiUi() = with(binding) {
-        val hasRoi = selectedRoi != null
-
-        setSegmentSelected(
-            btnRoiSelect,
-            roiSelectEnabled || hasRoi
-        )
-
-        setSegmentSelected(
-            btnRoiFull,
-            !roiSelectEnabled && !hasRoi
-        )
-
-        tvRoiLabel.text = if (hasRoi) {
-            "ROI On"
-        } else {
-            "ROI"
-        }
-    }
-
-    private fun updateSensitivityValue(sensitivity: Int) {
-        binding.tvSensitivity.text = "Sensitivity: ${sensitivity.coerceIn(0, 100)}"
     }
 
     private fun setSegmentSelected(view: TextView, selected: Boolean) {
@@ -449,7 +441,6 @@ class VideoProcessOptionsDialog :
 
     companion object {
         private const val TAG = "VideoProcessOptionsDialog"
-        private const val DEFAULT_SENSITIVITY = 50
         private const val ARG_VIDEO_URI = "video_uri"
         private const val CLOSED_AREA_MESSAGE = "You must draw a closed area"
 
@@ -464,6 +455,7 @@ class VideoProcessOptionsDialog :
                 arguments = Bundle().apply {
                     putString(ARG_VIDEO_URI, videoUri.toString())
                 }
+
                 this.onApplyOptions = onApplyOptions
             }.show(fragmentManager, TAG)
         }
