@@ -14,6 +14,9 @@ import androidx.core.net.toUri
 import androidx.core.view.isVisible
 import androidx.fragment.app.FragmentManager
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
@@ -25,6 +28,7 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.DialogVideoProcessOptionsBinding
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
 import com.example.gnssandopticalflowapp.screen.viewmodel.VideoProcessOptionsViewModel
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 class VideoProcessOptionsDialog :
@@ -125,8 +129,12 @@ class VideoProcessOptionsDialog :
     }
 
     override fun initObserver() {
-        optionsViewModel.uiState.observe(viewLifecycleOwner) { state ->
-            binding.renderOptionsState(state)
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                optionsViewModel.uiState.collect { state ->
+                    binding.renderOptionsState(state)
+                }
+            }
         }
     }
 
