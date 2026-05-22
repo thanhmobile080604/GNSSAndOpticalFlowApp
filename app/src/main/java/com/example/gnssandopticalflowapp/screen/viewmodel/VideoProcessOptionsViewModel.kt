@@ -13,10 +13,16 @@ class VideoProcessOptionsViewModel : ViewModel() {
         AI
     }
 
+    enum class MotionMode {
+        STILL,
+        MOVING
+    }
+
     data class UiState(
         val algorithm: Algorithm = Algorithm.AI,
-        val processingMode: VideoProcessOptions.ProcessingMode = VideoProcessOptions.ProcessingMode.ONLINE,
-        val useFarnebackHeatmap: Boolean = false
+        val processingMode: VideoProcessOptions.ProcessingMode = VideoProcessOptions.ProcessingMode.OFFLINE,
+        val useFarnebackHeatmap: Boolean = false,
+        val motionMode: MotionMode = MotionMode.STILL
     ) {
         val showProcessing: Boolean
             get() = algorithm == Algorithm.AI
@@ -29,6 +35,9 @@ class VideoProcessOptionsViewModel : ViewModel() {
 
         val useAi: Boolean
             get() = algorithm == Algorithm.AI
+
+        val isMoving: Boolean
+            get() = motionMode == MotionMode.MOVING
     }
 
     private val _uiState = MutableLiveData(UiState())
@@ -74,6 +83,14 @@ class VideoProcessOptionsViewModel : ViewModel() {
 
         _uiState.value = current.copy(
             useFarnebackHeatmap = useHeatmap
+        )
+    }
+
+    fun selectMotionMode(motionMode: MotionMode) {
+        val current = currentState()
+
+        _uiState.value = current.copy(
+            motionMode = motionMode
         )
     }
 }

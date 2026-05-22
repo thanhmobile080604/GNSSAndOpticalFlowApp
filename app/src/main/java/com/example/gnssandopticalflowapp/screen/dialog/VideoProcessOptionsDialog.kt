@@ -40,8 +40,6 @@ class VideoProcessOptionsDialog :
     private var previewPrepared = false
     private var videoUri: Uri? = null
     private var videoAspectRatio = 0f
-
-    private var selectedMotionMode = VideoMotionMode.STILL
     private var roiSelectEnabled = false
     private var selectedRoi: VideoProcessOptions.NormalizedRoi? = null
 
@@ -56,7 +54,6 @@ class VideoProcessOptionsDialog :
         setupRoiOverlay()
 
         renderOptionsState(optionsViewModel.currentState())
-        updateMotionModeUi()
         updateRoiUi()
         updateSensitivityValue(DEFAULT_SENSITIVITY)
     }
@@ -91,13 +88,11 @@ class VideoProcessOptionsDialog :
         }
 
         btnMotionStill.setSingleClick {
-            selectedMotionMode = VideoMotionMode.STILL
-            updateMotionModeUi()
+            optionsViewModel.selectMotionMode(VideoProcessOptionsViewModel.MotionMode.STILL)
         }
 
         btnMotionMoving.setSingleClick {
-            selectedMotionMode = VideoMotionMode.MOVING
-            updateMotionModeUi()
+            optionsViewModel.selectMotionMode(VideoProcessOptionsViewModel.MotionMode.MOVING)
         }
 
         btnRoiSelect.setSingleClick {
@@ -183,7 +178,7 @@ class VideoProcessOptionsDialog :
         val state = optionsViewModel.currentState()
 
         val options = VideoProcessOptions(
-            isMoving = selectedMotionMode == VideoMotionMode.MOVING,
+            isMoving = state.isMoving,
             useFarneback = state.useFarneback,
             sensitivity = sensitivityBar.progress.coerceIn(0, 100),
             useFarnebackHeatmap = state.useFarnebackHeatmap,
@@ -191,6 +186,7 @@ class VideoProcessOptionsDialog :
             roi = selectedRoi.takeIf { roiSelectEnabled },
             processingMode = state.processingMode
         )
+
         onApplyOptions?.invoke(options)
         dismissAllowingStateLoss()
     }
@@ -234,6 +230,16 @@ class VideoProcessOptionsDialog :
         setSegmentSelected(
             btnFarnebackHeatmap,
             state.useFarnebackHeatmap
+        )
+
+        setSegmentSelected(
+            btnMotionStill,
+            state.motionMode == VideoProcessOptionsViewModel.MotionMode.STILL
+        )
+
+        setSegmentSelected(
+            btnMotionMoving,
+            state.motionMode == VideoProcessOptionsViewModel.MotionMode.MOVING
         )
     }
 
@@ -349,18 +355,6 @@ class VideoProcessOptionsDialog :
         previewPrepared = true
     }
 
-    private fun updateMotionModeUi() = with(binding) {
-        setSegmentSelected(
-            btnMotionStill,
-            selectedMotionMode == VideoMotionMode.STILL
-        )
-
-        setSegmentSelected(
-            btnMotionMoving,
-            selectedMotionMode == VideoMotionMode.MOVING
-        )
-    }
-
     private fun updateRoiUi() = with(binding) {
         val hasRoi = selectedRoi != null
 
@@ -451,11 +445,6 @@ class VideoProcessOptionsDialog :
 
     private fun dpToPx(value: Int): Int {
         return (value * resources.displayMetrics.density).roundToInt()
-    }
-
-    private enum class VideoMotionMode {
-        STILL,
-        MOVING
     }
 
     companion object {
