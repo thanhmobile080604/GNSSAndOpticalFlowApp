@@ -3,15 +3,18 @@ package com.example.gnssandopticalflowapp.screen.dialog
 import android.graphics.SurfaceTexture
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.Surface
 import android.view.TextureView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.OptIn
-import androidx.core.net.toUri
-import androidx.fragment.app.FragmentManager
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.core.net.toUri
+import androidx.core.view.isVisible
+import androidx.fragment.app.FragmentManager
+import androidx.fragment.app.viewModels
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
@@ -22,6 +25,7 @@ import com.example.gnssandopticalflowapp.base.BaseDialogFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.DialogVideoProcessOptionsBinding
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
+import com.example.gnssandopticalflowapp.screen.viewmodel.VideoProcessOptionsViewModel
 import kotlin.math.roundToInt
 
 class VideoProcessOptionsDialog :
@@ -29,87 +33,61 @@ class VideoProcessOptionsDialog :
 
     var onApplyOptions: ((VideoProcessOptions) -> Unit)? = null
 
+    private val optionsViewModel: VideoProcessOptionsViewModel by viewModels()
+
     private var player: ExoPlayer? = null
     private var previewSurface: Surface? = null
     private var previewPrepared = false
     private var videoUri: Uri? = null
     private var videoAspectRatio = 0f
 
-    private var useFarneback = false
-    private var useAi = true
-    private var useFarnebackHeatmap = false
-    private var selectedProcessingMode = VideoProcessOptions.ProcessingMode.OFFLINE
     private var selectedMotionMode = VideoMotionMode.STILL
     private var roiSelectEnabled = false
     private var selectedRoi: VideoProcessOptions.NormalizedRoi? = null
 
     override fun DialogVideoProcessOptionsBinding.initView() {
         isCancelable = true
+
         videoUri = arguments?.getString(ARG_VIDEO_URI)?.toUri()
         sensitivityBar.progress = DEFAULT_SENSITIVITY
 
         setupPreviewPlayer()
         setupPreviewSurface()
         setupRoiOverlay()
-        enforceProcessingModeAlgorithm()
-        updateProcessingModeUi()
-        updateAlgorithmModeUi()
-        updateFarnebackDisplayUi()
+
+        renderOptionsState(optionsViewModel.currentState())
         updateMotionModeUi()
         updateRoiUi()
         updateSensitivityValue(DEFAULT_SENSITIVITY)
     }
 
     override fun DialogVideoProcessOptionsBinding.initListener() {
-        btnProcessingOffline.setSingleClick {
-            selectedProcessingMode = VideoProcessOptions.ProcessingMode.OFFLINE
-            enforceProcessingModeAlgorithm()
-            updateProcessingModeUi()
-            updateAlgorithmModeUi()
-            updateFarnebackDisplayUi()
-        }
-
-        btnProcessingOnline.setSingleClick {
-            selectedProcessingMode = VideoProcessOptions.ProcessingMode.ONLINE
-            updateProcessingModeUi()
-            updateAlgorithmModeUi()
-            updateFarnebackDisplayUi()
-        }
-
         btnAlgorithmKlt.setSingleClick {
-            if (isOfflineProcessing()) return@setSingleClick
-            useFarneback = false
-            useAi = false
-            updateAlgorithmModeUi()
-            updateFarnebackDisplayUi()
+            optionsViewModel.selectAlgorithm(VideoProcessOptionsViewModel.Algorithm.KLT)
         }
 
         btnAlgorithmFarneback.setSingleClick {
-            if (isOfflineProcessing()) return@setSingleClick
-            useFarneback = true
-            useAi = false
-            updateAlgorithmModeUi()
-            updateFarnebackDisplayUi()
+            optionsViewModel.selectAlgorithm(VideoProcessOptionsViewModel.Algorithm.FARNEBACK)
         }
 
         btnAlgorithmAi.setSingleClick {
-            if (isOfflineProcessing()) return@setSingleClick
-            useFarneback = false
-            useAi = true
-            updateAlgorithmModeUi()
-            updateFarnebackDisplayUi()
+            optionsViewModel.selectAlgorithm(VideoProcessOptionsViewModel.Algorithm.AI)
+        }
+
+        btnProcessingOffline.setSingleClick {
+            optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.OFFLINE)
+        }
+
+        btnProcessingOnline.setSingleClick {
+            optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.ONLINE)
         }
 
         btnFarnebackVectors.setSingleClick {
-            if (!usesDenseDisplay()) return@setSingleClick
-            useFarnebackHeatmap = false
-            updateFarnebackDisplayUi()
+            optionsViewModel.selectDisplayMode(useHeatmap = false)
         }
 
         btnFarnebackHeatmap.setSingleClick {
-            if (!usesDenseDisplay()) return@setSingleClick
-            useFarnebackHeatmap = true
-            updateFarnebackDisplayUi()
+            optionsViewModel.selectDisplayMode(useHeatmap = true)
         }
 
         btnMotionStill.setSingleClick {
@@ -137,11 +115,16 @@ class VideoProcessOptionsDialog :
         }
 
         sensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+            override fun onProgressChanged(
+                seekBar: SeekBar?,
+                progress: Int,
+                fromUser: Boolean
+            ) {
                 updateSensitivityValue(progress)
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         })
 
@@ -150,27 +133,15 @@ class VideoProcessOptionsDialog :
         }
 
         tvApply.setSingleClick {
-            if (roiSelectEnabled && selectedRoi == null) {
-                Toast.makeText(requireContext(), CLOSED_AREA_MESSAGE, Toast.LENGTH_SHORT).show()
-                return@setSingleClick
-            }
-
-            enforceProcessingModeAlgorithm()
-            val options = VideoProcessOptions(
-                isMoving = selectedMotionMode == VideoMotionMode.MOVING,
-                useFarneback = useFarneback,
-                sensitivity = sensitivityBar.progress.coerceIn(0, 100),
-                useFarnebackHeatmap = useFarnebackHeatmap,
-                useAi = useAi,
-                roi = selectedRoi.takeIf { roiSelectEnabled },
-                processingMode = selectedProcessingMode
-            )
-            onApplyOptions?.invoke(options)
-            dismissAllowingStateLoss()
+            applyOptions()
         }
     }
 
-    override fun initObserver() = Unit
+    override fun initObserver() {
+        optionsViewModel.uiState.observe(viewLifecycleOwner) { state ->
+            binding.renderOptionsState(state)
+        }
+    }
 
     override fun onBackPressed() {
         dismissAllowingStateLoss()
@@ -178,6 +149,7 @@ class VideoProcessOptionsDialog :
 
     override fun onResume() {
         super.onResume()
+
         if (previewPrepared) {
             player?.play()
         }
@@ -190,35 +162,108 @@ class VideoProcessOptionsDialog :
 
     override fun onDestroyView() {
         player?.clearVideoSurface()
+
         previewSurface?.release()
         previewSurface = null
+
         player?.release()
         player = null
+
         onApplyOptions = null
+
         super.onDestroyView()
     }
 
-    private fun DialogVideoProcessOptionsBinding.setupPreviewPlayer() {
+    private fun applyOptions() = with(binding) {
+        if (roiSelectEnabled && selectedRoi == null) {
+            Toast.makeText(requireContext(), CLOSED_AREA_MESSAGE, Toast.LENGTH_SHORT).show()
+            return@with
+        }
+
+        val state = optionsViewModel.currentState()
+
+        val options = VideoProcessOptions(
+            isMoving = selectedMotionMode == VideoMotionMode.MOVING,
+            useFarneback = state.useFarneback,
+            sensitivity = sensitivityBar.progress.coerceIn(0, 100),
+            useFarnebackHeatmap = state.useFarnebackHeatmap,
+            useAi = state.useAi,
+            roi = selectedRoi.takeIf { roiSelectEnabled },
+            processingMode = state.processingMode
+        )
+        onApplyOptions?.invoke(options)
+        dismissAllowingStateLoss()
+    }
+
+    private fun DialogVideoProcessOptionsBinding.renderOptionsState(
+        state: VideoProcessOptionsViewModel.UiState
+    ) {
+        setSegmentSelected(
+            btnAlgorithmKlt,
+            state.algorithm == VideoProcessOptionsViewModel.Algorithm.KLT
+        )
+
+        setSegmentSelected(
+            btnAlgorithmFarneback,
+            state.algorithm == VideoProcessOptionsViewModel.Algorithm.FARNEBACK
+        )
+
+        setSegmentSelected(
+            btnAlgorithmAi,
+            state.algorithm == VideoProcessOptionsViewModel.Algorithm.AI
+        )
+
+        processingModeCard.isVisible = state.showProcessing
+        farnebackViewCard.isVisible = state.showDisplay
+
+        setSegmentSelected(
+            btnProcessingOffline,
+            state.processingMode == VideoProcessOptions.ProcessingMode.OFFLINE
+        )
+
+        setSegmentSelected(
+            btnProcessingOnline,
+            state.processingMode == VideoProcessOptions.ProcessingMode.ONLINE
+        )
+
+        setSegmentSelected(
+            btnFarnebackVectors,
+            !state.useFarnebackHeatmap
+        )
+
+        setSegmentSelected(
+            btnFarnebackHeatmap,
+            state.useFarnebackHeatmap
+        )
+    }
+
+    private fun setupPreviewPlayer() {
         player = ExoPlayer.Builder(requireContext()).build().apply {
             repeatMode = Player.REPEAT_MODE_ONE
             playWhenReady = true
             volume = 0f
+
             addListener(object : Player.Listener {
                 @OptIn(UnstableApi::class)
                 override fun onVideoSizeChanged(videoSize: VideoSize) {
                     if (!isAdded || view == null) return
                     if (videoSize.width <= 0 || videoSize.height <= 0) return
-                    val aspectRatio = (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height
+
+                    val aspectRatio =
+                        (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height
+
                     if (aspectRatio > 0f) {
                         videoAspectRatio = aspectRatio
-                        binding.root.post { applyVideoPreviewBounds() }
+                        binding.root.post {
+                            applyVideoPreviewBounds()
+                        }
                     }
                 }
             })
         }
     }
 
-    private fun DialogVideoProcessOptionsBinding.setupPreviewSurface() {
+    private fun setupPreviewSurface() = with(binding) {
         videoPreview.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(
                 surfaceTexture: SurfaceTexture,
@@ -237,8 +282,10 @@ class VideoProcessOptionsDialog :
 
             override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
                 player?.setVideoSurface(null)
+
                 previewSurface?.release()
                 previewSurface = null
+
                 return true
             }
 
@@ -255,11 +302,12 @@ class VideoProcessOptionsDialog :
 
     private fun bindPreviewSurface(surfaceTexture: SurfaceTexture) {
         previewSurface?.release()
+
         previewSurface = Surface(surfaceTexture)
         player?.setVideoSurface(previewSurface)
     }
 
-    private fun DialogVideoProcessOptionsBinding.setupRoiOverlay() {
+    private fun setupRoiOverlay() = with(binding) {
         roiOverlay.onRoiChanged = {
             selectedRoi = roiOverlay.normalizedRoi?.let { roi ->
                 VideoProcessOptions.NormalizedRoi(
@@ -277,8 +325,10 @@ class VideoProcessOptionsDialog :
                     }
                 )
             }
+
             updateRoiUi()
         }
+
         roiOverlay.onInvalidSelection = {
             Toast.makeText(requireContext(), CLOSED_AREA_MESSAGE, Toast.LENGTH_SHORT).show()
         }
@@ -291,71 +341,44 @@ class VideoProcessOptionsDialog :
         }
 
         val uri = videoUri ?: return
+
         player?.setMediaItem(MediaItem.fromUri(uri))
         player?.prepare()
         player?.play()
+
         previewPrepared = true
     }
 
-    private fun updateProcessingModeUi() = with(binding) {
-        setSegmentSelected(
-            btnProcessingOffline,
-            selectedProcessingMode == VideoProcessOptions.ProcessingMode.OFFLINE
-        )
-        setSegmentSelected(
-            btnProcessingOnline,
-            selectedProcessingMode == VideoProcessOptions.ProcessingMode.ONLINE
-        )
-    }
-
-    private fun updateAlgorithmModeUi() = with(binding) {
-        val algorithmEnabled = !isOfflineProcessing()
-        setSegmentSelected(btnAlgorithmKlt, !useFarneback && !useAi)
-        setSegmentSelected(btnAlgorithmFarneback, useFarneback)
-        setSegmentSelected(btnAlgorithmAi, useAi)
-        btnAlgorithmKlt.isEnabled = algorithmEnabled
-        btnAlgorithmFarneback.isEnabled = algorithmEnabled
-        btnAlgorithmAi.isEnabled = algorithmEnabled
-        algorithmCard.alpha = if (algorithmEnabled) 1f else 0.7f
-    }
-
-    private fun enforceProcessingModeAlgorithm() {
-        if (!isOfflineProcessing()) return
-
-        useFarneback = false
-        useAi = true
-    }
-
-    private fun isOfflineProcessing(): Boolean {
-        return selectedProcessingMode == VideoProcessOptions.ProcessingMode.OFFLINE
-    }
-
-    private fun updateFarnebackDisplayUi() = with(binding) {
-        val denseDisplayEnabled = usesDenseDisplay()
-        setSegmentSelected(btnFarnebackVectors, !useFarnebackHeatmap)
-        setSegmentSelected(btnFarnebackHeatmap, useFarnebackHeatmap)
-        btnFarnebackVectors.isEnabled = denseDisplayEnabled
-        btnFarnebackHeatmap.isEnabled = denseDisplayEnabled
-        val alpha = if (denseDisplayEnabled) 1f else 0.45f
-        farnebackViewCard.alpha = alpha
-        btnFarnebackVectors.alpha = alpha
-        btnFarnebackHeatmap.alpha = alpha
-    }
-
-    private fun usesDenseDisplay(): Boolean {
-        return useFarneback || useAi
-    }
-
     private fun updateMotionModeUi() = with(binding) {
-        setSegmentSelected(btnMotionStill, selectedMotionMode == VideoMotionMode.STILL)
-        setSegmentSelected(btnMotionMoving, selectedMotionMode == VideoMotionMode.MOVING)
+        setSegmentSelected(
+            btnMotionStill,
+            selectedMotionMode == VideoMotionMode.STILL
+        )
+
+        setSegmentSelected(
+            btnMotionMoving,
+            selectedMotionMode == VideoMotionMode.MOVING
+        )
     }
 
     private fun updateRoiUi() = with(binding) {
         val hasRoi = selectedRoi != null
-        setSegmentSelected(btnRoiSelect, roiSelectEnabled || hasRoi)
-        setSegmentSelected(btnRoiFull, !roiSelectEnabled && !hasRoi)
-        tvRoiLabel.text = if (hasRoi) "ROI On" else "ROI"
+
+        setSegmentSelected(
+            btnRoiSelect,
+            roiSelectEnabled || hasRoi
+        )
+
+        setSegmentSelected(
+            btnRoiFull,
+            !roiSelectEnabled && !hasRoi
+        )
+
+        tvRoiLabel.text = if (hasRoi) {
+            "ROI On"
+        } else {
+            "ROI"
+        }
     }
 
     private fun updateSensitivityValue(sensitivity: Int) {
@@ -364,7 +387,11 @@ class VideoProcessOptionsDialog :
 
     private fun setSegmentSelected(view: TextView, selected: Boolean) {
         view.setBackgroundResource(
-            if (selected) R.drawable.bg_gradient_update_button_12 else R.drawable.bg_glass_chip
+            if (selected) {
+                R.drawable.bg_gradient_update_button_12
+            } else {
+                R.drawable.bg_glass_chip
+            }
         )
     }
 
@@ -375,28 +402,46 @@ class VideoProcessOptionsDialog :
         val layoutParams = videoPreviewCard.layoutParams as ConstraintLayout.LayoutParams
 
         val extraGap = dpToPx(6)
-        val maxHeight = (optionsScroll.top - tvTitle.bottom - layoutParams.topMargin - layoutParams.bottomMargin - extraGap)
-            .coerceAtLeast(1)
+        val maxHeight = (
+                optionsScroll.top -
+                        tvTitle.bottom -
+                        layoutParams.topMargin -
+                        layoutParams.bottomMargin -
+                        extraGap
+                ).coerceAtLeast(1)
 
         val targetSize = if (aspectRatio >= 1f) {
             val widthByMaxWidth = maxWidth
             val heightByMaxWidth = (widthByMaxWidth / aspectRatio).roundToInt()
+
             if (heightByMaxWidth <= maxHeight) {
                 widthByMaxWidth to heightByMaxWidth.coerceAtLeast(1)
             } else {
-                ((maxHeight * aspectRatio).roundToInt().coerceAtMost(maxWidth).coerceAtLeast(1)) to maxHeight
+                val width = (maxHeight * aspectRatio)
+                    .roundToInt()
+                    .coerceAtMost(maxWidth)
+                    .coerceAtLeast(1)
+
+                width to maxHeight
             }
         } else {
             val heightByMaxHeight = maxHeight
             val widthByMaxHeight = (heightByMaxHeight * aspectRatio).roundToInt()
+
             if (widthByMaxHeight <= maxWidth) {
                 widthByMaxHeight.coerceAtLeast(1) to heightByMaxHeight
             } else {
-                maxWidth to (maxWidth / aspectRatio).roundToInt().coerceAtMost(maxHeight).coerceAtLeast(1)
+                val height = (maxWidth / aspectRatio)
+                    .roundToInt()
+                    .coerceAtMost(maxHeight)
+                    .coerceAtLeast(1)
+
+                maxWidth to height
             }
         }
 
         previewAspectFrame.setAspectRatio(aspectRatio)
+
         layoutParams.width = targetSize.first
         layoutParams.height = targetSize.second
         layoutParams.dimensionRatio = null
