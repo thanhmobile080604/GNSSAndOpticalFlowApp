@@ -44,9 +44,22 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var animationSpeed: Float = 0.1f
 
     private var program = 0
+    private var atmosphereProgram = 0
+    private var blurProgram = 0
+    private var compositeProgram = 0
     private var vbo = 0
     private var vao = 0
     private var ebo = 0
+    private var screenQuadVao = 0
+    private var screenQuadVbo = 0
+    private var surfaceWidth = 1
+    private var surfaceHeight = 1
+    private var atmosphereBlurWidth = 0
+    private var atmosphereBlurHeight = 0
+    private var atmosphereFboA = 0
+    private var atmosphereFboB = 0
+    private var atmosphereTextureA = 0
+    private var atmosphereTextureB = 0
 
     private var skyboxVAO = 0
     private var skyboxVBO = 0
@@ -70,6 +83,7 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var isCameraInitialized = false
 
     private var earthTextureId = 0
+    private var earthNightTextureId = 0
     private var moonTextureId = 0
     private var sunTextureId = 0
 
@@ -86,6 +100,8 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private val satLock = Any()
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        resetAtmosphereBlurStateForNewContext()
+
         val sphere = createSphere(radius = 0.1f, stacks = 62, slices = 62)
         sphereVertices = sphere.vertices
         sphereIndices = sphere.indices
@@ -137,6 +153,31 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
             ShaderHelper.validateProgram(program)
         }
 
+        val atmosphereVertexShaderSource =
+            ShaderReader.readTextFileFromResource(context, R.raw.atmosphere_vertex_shader)
+        val atmosphereFragmentShaderSource =
+            ShaderReader.readTextFileFromResource(context, R.raw.atmosphere_fragment_shader)
+        atmosphereProgram = ShaderHelper.buildProgram(
+            atmosphereVertexShaderSource,
+            atmosphereFragmentShaderSource
+        )
+
+        val screenQuadVertexShaderSource =
+            ShaderReader.readTextFileFromResource(context, R.raw.screen_quad_vertex_shader)
+        val gaussianBlurFragmentShaderSource =
+            ShaderReader.readTextFileFromResource(context, R.raw.gaussian_blur_fragment_shader)
+        blurProgram = ShaderHelper.buildProgram(
+            screenQuadVertexShaderSource,
+            gaussianBlurFragmentShaderSource
+        )
+        val additiveCompositeFragmentShaderSource =
+            ShaderReader.readTextFileFromResource(context, R.raw.additive_composite_fragment_shader)
+        compositeProgram = ShaderHelper.buildProgram(
+            screenQuadVertexShaderSource,
+            additiveCompositeFragmentShaderSource
+        )
+        setupScreenQuad()
+
         val satVertexSrc = ShaderReader.readTextFileFromResource(context, R.raw.sat_vertex_shader)
         val satFragSrc = ShaderReader.readTextFileFromResource(context, R.raw.sat_fragment_shader)
         satProgram = ShaderHelper.buildProgram(satVertexSrc, satFragSrc)
@@ -178,7 +219,8 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES32.glBindBuffer(GLES32.GL_ELEMENT_ARRAY_BUFFER, ebo)
         GLES32.glBufferData(GLES32.GL_ELEMENT_ARRAY_BUFFER, sphereIndices.size * Int.SIZE_BYTES, indicesBuffer, GLES32.GL_STATIC_DRAW)
 
-        earthTextureId = TextureLoader.loadTexture2D(context, R.drawable.earth_texture)
+        earthTextureId = TextureLoader.loadTexture2D(context, R.drawable.earth_texture_day)
+        earthNightTextureId = TextureLoader.loadTexture2D(context, R.drawable.earth_texture_night)
         moonTextureId = TextureLoader.loadTexture2D(context, R.drawable.moon_texture)
         sunTextureId = TextureLoader.loadTexture2D(context, R.drawable.sun_texture)
 
@@ -215,7 +257,13 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-        val aspectRatio = if (width > height) width.toFloat() / height else height.toFloat() / width
+        surfaceWidth = width.coerceAtLeast(1)
+        surfaceHeight = height.coerceAtLeast(1)
+        val aspectRatio = if (surfaceWidth > surfaceHeight) {
+            surfaceWidth.toFloat() / surfaceHeight
+        } else {
+            surfaceHeight.toFloat() / surfaceWidth
+        }
 
         Matrix.perspectiveM(projectionMatrix, 0, 45f, 1/aspectRatio, 0.1f, 20f)
 
@@ -223,7 +271,153 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val uniformLocation = GLES20.glGetUniformLocation(program, "projectionMatrix")
         GLES32.glUniformMatrix4fv(uniformLocation, 1, false, projectionMatrix, 0)
 
-        GLES20.glViewport(0, 0, width, height)
+        GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight)
+        setupAtmosphereBlurTargets(surfaceWidth, surfaceHeight)
+    }
+
+    private fun setupScreenQuad() {
+        val quadVertices = floatArrayOf(
+            -1f, -1f, 0f, 0f,
+            1f, -1f, 1f, 0f,
+            -1f, 1f, 0f, 1f,
+            1f, 1f, 1f, 1f
+        )
+        val vaoBuffer = IntArray(1)
+        val vboBuffer = IntArray(1)
+        GLES32.glGenVertexArrays(1, vaoBuffer, 0)
+        GLES32.glGenBuffers(1, vboBuffer, 0)
+        screenQuadVao = vaoBuffer[0]
+        screenQuadVbo = vboBuffer[0]
+
+        val vertexBuffer = ByteBuffer
+            .allocateDirect(quadVertices.size * Float.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+            .put(quadVertices)
+        vertexBuffer.position(0)
+
+        GLES32.glBindVertexArray(screenQuadVao)
+        GLES32.glBindBuffer(GLES32.GL_ARRAY_BUFFER, screenQuadVbo)
+        GLES32.glBufferData(
+            GLES32.GL_ARRAY_BUFFER,
+            quadVertices.size * Float.SIZE_BYTES,
+            vertexBuffer,
+            GLES32.GL_STATIC_DRAW
+        )
+        GLES32.glVertexAttribPointer(0, 2, GLES32.GL_FLOAT, false, 4 * Float.SIZE_BYTES, 0)
+        GLES32.glEnableVertexAttribArray(0)
+        GLES32.glVertexAttribPointer(
+            1,
+            2,
+            GLES32.GL_FLOAT,
+            false,
+            4 * Float.SIZE_BYTES,
+            2 * Float.SIZE_BYTES
+        )
+        GLES32.glEnableVertexAttribArray(1)
+        GLES32.glBindBuffer(GLES32.GL_ARRAY_BUFFER, 0)
+        GLES32.glBindVertexArray(0)
+    }
+
+    private fun setupAtmosphereBlurTargets(width: Int, height: Int) {
+        val targetWidth = (width / ATMOSPHERE_BLUR_DOWNSCALE).coerceAtLeast(1)
+        val targetHeight = (height / ATMOSPHERE_BLUR_DOWNSCALE).coerceAtLeast(1)
+        if (
+            atmosphereTextureA != 0 &&
+            atmosphereTextureB != 0 &&
+            atmosphereBlurWidth == targetWidth &&
+            atmosphereBlurHeight == targetHeight
+        ) {
+            return
+        }
+
+        deleteAtmosphereBlurTargets()
+        atmosphereBlurWidth = targetWidth
+        atmosphereBlurHeight = targetHeight
+
+        val first = createAtmosphereBlurTarget(targetWidth, targetHeight)
+        val second = createAtmosphereBlurTarget(targetWidth, targetHeight)
+        atmosphereTextureA = first.first
+        atmosphereFboA = first.second
+        atmosphereTextureB = second.first
+        atmosphereFboB = second.second
+
+        if (atmosphereTextureA == 0 || atmosphereTextureB == 0) {
+            Log.w(TAG, "Atmosphere blur FBO setup failed; using direct halo fallback")
+            deleteAtmosphereBlurTargets()
+        }
+    }
+
+    private fun deleteAtmosphereBlurTargets() {
+        intArrayOf(atmosphereFboA, atmosphereFboB)
+            .filter { it != 0 }
+            .takeIf { it.isNotEmpty() }
+            ?.let { GLES20.glDeleteFramebuffers(it.size, it.toIntArray(), 0) }
+        intArrayOf(atmosphereTextureA, atmosphereTextureB)
+            .filter { it != 0 }
+            .takeIf { it.isNotEmpty() }
+            ?.let { GLES20.glDeleteTextures(it.size, it.toIntArray(), 0) }
+
+        atmosphereFboA = 0
+        atmosphereFboB = 0
+        atmosphereTextureA = 0
+        atmosphereTextureB = 0
+    }
+
+    private fun resetAtmosphereBlurStateForNewContext() {
+        atmosphereFboA = 0
+        atmosphereFboB = 0
+        atmosphereTextureA = 0
+        atmosphereTextureB = 0
+        atmosphereBlurWidth = 0
+        atmosphereBlurHeight = 0
+    }
+
+    private fun createAtmosphereBlurTarget(width: Int, height: Int): Pair<Int, Int> {
+        val textureBuffer = IntArray(1)
+        GLES20.glGenTextures(1, textureBuffer, 0)
+        val textureId = textureBuffer[0]
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D,
+            0,
+            GLES20.GL_RGBA,
+            width,
+            height,
+            0,
+            GLES20.GL_RGBA,
+            GLES20.GL_UNSIGNED_BYTE,
+            null as java.nio.Buffer?
+        )
+
+        val fboBuffer = IntArray(1)
+        GLES20.glGenFramebuffers(1, fboBuffer, 0)
+        val fboId = fboBuffer[0]
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboId)
+        GLES20.glFramebufferTexture2D(
+            GLES20.GL_FRAMEBUFFER,
+            GLES20.GL_COLOR_ATTACHMENT0,
+            GLES20.GL_TEXTURE_2D,
+            textureId,
+            0
+        )
+
+        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+
+        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            Log.w(TAG, "Incomplete atmosphere blur FBO status=$status")
+            GLES20.glDeleteFramebuffers(1, intArrayOf(fboId), 0)
+            GLES20.glDeleteTextures(1, intArrayOf(textureId), 0)
+            return 0 to 0
+        }
+
+        return textureId to fboId
     }
 
     override fun onDrawFrame(gl: GL10?) {
@@ -285,6 +479,9 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
         GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, earthTextureId)
         GLES32.glUniform1i(GLES20.glGetUniformLocation(program, "bodyTexture"), 0)
+        GLES32.glActiveTexture(GLES32.GL_TEXTURE1)
+        GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, earthNightTextureId)
+        GLES32.glUniform1i(GLES20.glGetUniformLocation(program, "nightTexture"), 1)
         GLES32.glUniform1i(GLES20.glGetUniformLocation(program, "bodyType"), 0) // Earth
 
         Matrix.setIdentityM(viewMatrix, 0)
@@ -304,6 +501,15 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
             0f, 0f, 0f,        // looking at origin (Earth)
             0f, 1f, 0f)        // up vector
 
+        drawSkybox()
+        GLES32.glUseProgram(program)
+        GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
+        GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, earthTextureId)
+        GLES32.glUniform1i(GLES20.glGetUniformLocation(program, "bodyTexture"), 0)
+        GLES32.glActiveTexture(GLES32.GL_TEXTURE1)
+        GLES32.glBindTexture(GLES32.GL_TEXTURE_2D, earthNightTextureId)
+        GLES32.glUniform1i(GLES20.glGetUniformLocation(program, "nightTexture"), 1)
+        GLES32.glUniform1i(GLES20.glGetUniformLocation(program, "bodyType"), 0)
         GLES32.glUniformMatrix4fv(1, 1, false, viewMatrix, 0)
 
         Matrix.setIdentityM(modelMatrix, 0)
@@ -357,6 +563,15 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES32.glBindVertexArray(vao)
         GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
         GLES32.glBindVertexArray(0)
+
+        drawEarthAtmosphereHalo(
+            camX = camX,
+            camY = camY,
+            camZ = camZ,
+            lightX = lightX,
+            lightY = lightY,
+            lightZ = lightZ
+        )
 
         // Draw Moon
         // Use UTC time instead of local time
@@ -467,36 +682,6 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES32.glBindVertexArray(vao)
         GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
         GLES32.glBindVertexArray(0)
-
-        // Vẽ skybox
-        GLES32.glDepthFunc(GLES32.GL_LEQUAL)  // đổi depth function để skybox vẽ phía sau mọi thứ
-        GLES32.glDepthMask(false)
-        GLES32.glUseProgram(skyboxProgram)
-
-        // Lấy uniform location cho view và projection
-        val viewLoc = GLES20.glGetUniformLocation(skyboxProgram, "view")
-        val projLoc = GLES20.glGetUniformLocation(skyboxProgram, "projection")
-
-        // Loại bỏ thành phần dịch chuyển trong view matrix (chỉ lấy rotation để quay quanh camera)
-        val viewNoTranslation = FloatArray(16)
-        System.arraycopy(viewMatrix, 0, viewNoTranslation, 0, 16)
-        viewNoTranslation[12] = 0f
-        viewNoTranslation[13] = 0f
-        viewNoTranslation[14] = 0f
-
-        GLES32.glUniformMatrix4fv(viewLoc, 1, false, viewNoTranslation, 0)
-        GLES32.glUniformMatrix4fv(projLoc, 1, false, projectionMatrix, 0)
-
-        GLES32.glBindVertexArray(skyboxVAO)
-
-        GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
-        GLES32.glBindTexture(GLES32.GL_TEXTURE_CUBE_MAP, skyboxTexture)
-        GLES32.glUniform1i(GLES20.glGetUniformLocation(skyboxProgram, "skybox"), 0)
-
-        GLES32.glDrawArrays(GLES32.GL_TRIANGLES, 0, 36)
-        GLES32.glBindVertexArray(0)
-        GLES32.glDepthMask(true)
-        GLES32.glDepthFunc(GLES32.GL_LESS) // reset lại depth func mặc định
 
         // Draw Satellites
         GLES32.glUseProgram(satProgram)
@@ -623,6 +808,229 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES32.glBindVertexArray(0)
     }
 
+    private fun drawSkybox() {
+        GLES32.glDepthFunc(GLES32.GL_LEQUAL)
+        GLES32.glDepthMask(false)
+        GLES32.glUseProgram(skyboxProgram)
+
+        val viewLoc = GLES20.glGetUniformLocation(skyboxProgram, "view")
+        val projLoc = GLES20.glGetUniformLocation(skyboxProgram, "projection")
+
+        val viewNoTranslation = FloatArray(16)
+        System.arraycopy(viewMatrix, 0, viewNoTranslation, 0, 16)
+        viewNoTranslation[12] = 0f
+        viewNoTranslation[13] = 0f
+        viewNoTranslation[14] = 0f
+
+        GLES32.glUniformMatrix4fv(viewLoc, 1, false, viewNoTranslation, 0)
+        GLES32.glUniformMatrix4fv(projLoc, 1, false, projectionMatrix, 0)
+
+        GLES32.glBindVertexArray(skyboxVAO)
+        GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
+        GLES32.glBindTexture(GLES32.GL_TEXTURE_CUBE_MAP, skyboxTexture)
+        GLES32.glUniform1i(GLES20.glGetUniformLocation(skyboxProgram, "skybox"), 0)
+        GLES32.glDrawArrays(GLES32.GL_TRIANGLES, 0, 36)
+        GLES32.glBindVertexArray(0)
+
+        GLES32.glDepthMask(true)
+        GLES32.glDepthFunc(GLES32.GL_LESS)
+    }
+
+    private fun drawEarthAtmosphereHalo(
+        camX: Float,
+        camY: Float,
+        camZ: Float,
+        lightX: Float,
+        lightY: Float,
+        lightZ: Float
+    ) {
+        if (!hasAtmosphereBlurTargets()) {
+            setupAtmosphereBlurTargets(surfaceWidth, surfaceHeight)
+        }
+        if (!hasAtmosphereBlurTargets()) {
+            renderAtmosphereLayers(camX, camY, camZ, lightX, lightY, lightZ)
+            return
+        }
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, atmosphereFboA)
+        GLES20.glViewport(0, 0, atmosphereBlurWidth, atmosphereBlurHeight)
+        GLES20.glClearColor(0f, 0f, 0f, 0f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        renderAtmosphereLayers(camX, camY, camZ, lightX, lightY, lightZ)
+
+        repeat(ATMOSPHERE_BLUR_PASSES) {
+            renderBlurPass(
+                sourceTexture = atmosphereTextureA,
+                targetFbo = atmosphereFboB,
+                directionX = 1f,
+                directionY = 0f
+            )
+            renderBlurPass(
+                sourceTexture = atmosphereTextureB,
+                targetFbo = atmosphereFboA,
+                directionX = 0f,
+                directionY = 1f
+            )
+        }
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight)
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        compositeAtmosphereGlow()
+    }
+
+    private fun hasAtmosphereBlurTargets(): Boolean {
+        return atmosphereTextureA != 0 &&
+            atmosphereTextureB != 0 &&
+            atmosphereFboA != 0 &&
+            atmosphereFboB != 0 &&
+            atmosphereBlurWidth > 0 &&
+            atmosphereBlurHeight > 0
+    }
+
+    private fun renderAtmosphereLayers(
+        camX: Float,
+        camY: Float,
+        camZ: Float,
+        lightX: Float,
+        lightY: Float,
+        lightZ: Float
+    ) {
+        GLES32.glUseProgram(atmosphereProgram)
+
+        GLES32.glUniformMatrix4fv(
+            GLES20.glGetUniformLocation(atmosphereProgram, "projectionMatrix"),
+            1,
+            false,
+            projectionMatrix,
+            0
+        )
+        GLES32.glUniformMatrix4fv(
+            GLES20.glGetUniformLocation(atmosphereProgram, "viewMatrix"),
+            1,
+            false,
+            viewMatrix,
+            0
+        )
+        GLES20.glUniform3f(
+            GLES20.glGetUniformLocation(atmosphereProgram, "lightPos"),
+            lightX,
+            lightY,
+            lightZ
+        )
+        GLES20.glUniform3f(
+            GLES20.glGetUniformLocation(atmosphereProgram, "viewPos"),
+            camX,
+            camY,
+            camZ
+        )
+        GLES20.glUniform1f(
+            GLES20.glGetUniformLocation(atmosphereProgram, "haloStrength"),
+            ATMOSPHERE_HALO_STRENGTH
+        )
+        GLES20.glUniform1f(
+            GLES20.glGetUniformLocation(atmosphereProgram, "time"),
+            timeElapsed
+        )
+
+        GLES32.glEnable(GLES20.GL_BLEND)
+        GLES32.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
+        GLES32.glDepthMask(false)
+        GLES32.glDisable(GLES20.GL_DEPTH_TEST)
+        GLES32.glDisable(GLES20.GL_CULL_FACE)
+
+        GLES32.glBindVertexArray(vao)
+        for (index in ATMOSPHERE_LAYER_SCALES.indices) {
+            val scale = ATMOSPHERE_LAYER_SCALES[index]
+            val atmosphereModelMatrix = FloatArray(16)
+            Matrix.setIdentityM(atmosphereModelMatrix, 0)
+            Matrix.scaleM(atmosphereModelMatrix, 0, scale, scale, scale)
+
+            GLES32.glUniformMatrix4fv(
+                GLES20.glGetUniformLocation(atmosphereProgram, "modelMatrix"),
+                1,
+                false,
+                atmosphereModelMatrix,
+                0
+            )
+            GLES20.glUniform1f(
+                GLES20.glGetUniformLocation(atmosphereProgram, "layerStrength"),
+                ATMOSPHERE_LAYER_STRENGTHS[index]
+            )
+            GLES20.glUniform1f(
+                GLES20.glGetUniformLocation(atmosphereProgram, "layerIndex"),
+                index.toFloat()
+            )
+            GLES32.glDrawElements(GLES32.GL_TRIANGLES, sphereIndices.size, GLES32.GL_UNSIGNED_INT, 0)
+        }
+        GLES32.glBindVertexArray(0)
+
+        GLES32.glEnable(GLES20.GL_DEPTH_TEST)
+        GLES32.glDepthMask(true)
+        GLES32.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES32.glDisable(GLES20.GL_BLEND)
+    }
+
+    private fun renderBlurPass(
+        sourceTexture: Int,
+        targetFbo: Int,
+        directionX: Float,
+        directionY: Float
+    ) {
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, targetFbo)
+        GLES20.glViewport(0, 0, atmosphereBlurWidth, atmosphereBlurHeight)
+        GLES20.glClearColor(0f, 0f, 0f, 0f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+        GLES20.glDisable(GLES20.GL_BLEND)
+
+        GLES20.glUseProgram(blurProgram)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(blurProgram, "imageTexture"), 0)
+        GLES20.glUniform2f(
+            GLES20.glGetUniformLocation(blurProgram, "texelSize"),
+            1f / atmosphereBlurWidth,
+            1f / atmosphereBlurHeight
+        )
+        GLES20.glUniform2f(
+            GLES20.glGetUniformLocation(blurProgram, "direction"),
+            directionX,
+            directionY
+        )
+        drawScreenQuad()
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+    }
+
+    private fun compositeAtmosphereGlow() {
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+        GLES20.glDepthMask(false)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE)
+
+        GLES20.glUseProgram(compositeProgram)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, atmosphereTextureA)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(compositeProgram, "glowTexture"), 0)
+        GLES20.glUniform1f(
+            GLES20.glGetUniformLocation(compositeProgram, "intensity"),
+            ATMOSPHERE_BLOOM_INTENSITY
+        )
+        drawScreenQuad()
+
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glDepthMask(true)
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+    }
+
+    private fun drawScreenQuad() {
+        GLES32.glBindVertexArray(screenQuadVao)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES32.glBindVertexArray(0)
+    }
+
     fun updateUserLocation(lat: Double, lon: Double) {
         userLat = lat
         userLon = lon
@@ -738,5 +1146,15 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
             }
         }
         return closestSat
+    }
+
+    private companion object {
+        val ATMOSPHERE_LAYER_SCALES = floatArrayOf(1.012f, 1.028f, 1.052f, 1.086f, 1.14f, 1.23f)
+        val ATMOSPHERE_LAYER_STRENGTHS = floatArrayOf(0.92f, 0.70f, 0.48f, 0.28f, 0.15f, 0.065f)
+        const val ATMOSPHERE_HALO_STRENGTH = 1.12f
+        const val ATMOSPHERE_BLUR_DOWNSCALE = 3
+        const val ATMOSPHERE_BLUR_PASSES = 4
+        const val ATMOSPHERE_BLOOM_INTENSITY = 1.7f
+        const val TAG = "EarthRenderer"
     }
 }
