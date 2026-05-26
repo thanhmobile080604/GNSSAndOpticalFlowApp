@@ -1,10 +1,17 @@
 package com.example.gnssandopticalflowapp.gnss.renderer
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.Typeface
 import android.location.GnssStatus
 import android.opengl.GLES20
 import android.opengl.GLES32
 import android.opengl.GLSurfaceView
+import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.Log
 import com.example.gnssandopticalflowapp.R
@@ -47,6 +54,10 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var atmosphereProgram = 0
     private var blurProgram = 0
     private var compositeProgram = 0
+    private var countryLabelProgram = 0
+    private var countryLabelMvpHandle = 0
+    private var countryLabelTextureHandle = 0
+    private var countryLabelAlphaHandle = 0
     private var vbo = 0
     private var vao = 0
     private var ebo = 0
@@ -98,9 +109,23 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var renderSatellites = mutableMapOf<String, SatRenderState>()
     val satelliteCount: Int get() = satellites.size
     private val satLock = Any()
+    private val countryTextTextures = mutableMapOf<String, TextTexture>()
+    private val countryLabelQuadBuffer = ByteBuffer
+        .allocateDirect(COUNTRY_LABEL_QUAD_VERTICES.size * Float.SIZE_BYTES)
+        .order(ByteOrder.nativeOrder())
+        .asFloatBuffer()
+        .put(COUNTRY_LABEL_QUAD_VERTICES)
+        .apply { position(0) }
+    private val countryLabelTexCoordBuffer = ByteBuffer
+        .allocateDirect(COUNTRY_LABEL_TEX_COORDS.size * Float.SIZE_BYTES)
+        .order(ByteOrder.nativeOrder())
+        .asFloatBuffer()
+        .put(COUNTRY_LABEL_TEX_COORDS)
+        .apply { position(0) }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         resetAtmosphereBlurStateForNewContext()
+        countryTextTextures.clear()
 
         val sphere = createSphere(radius = 0.1f, stacks = 62, slices = 62)
         sphereVertices = sphere.vertices
@@ -177,6 +202,18 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
             additiveCompositeFragmentShaderSource
         )
         setupScreenQuad()
+
+        val countryLabelVertexShaderSource =
+            ShaderReader.readTextFileFromResource(context, R.raw.country_label_vertex_shader)
+        val countryLabelFragmentShaderSource =
+            ShaderReader.readTextFileFromResource(context, R.raw.country_label_fragment_shader)
+        countryLabelProgram = ShaderHelper.buildProgram(
+            countryLabelVertexShaderSource,
+            countryLabelFragmentShaderSource
+        )
+        countryLabelMvpHandle = GLES20.glGetUniformLocation(countryLabelProgram, "uMvpMatrix")
+        countryLabelTextureHandle = GLES20.glGetUniformLocation(countryLabelProgram, "uTextTexture")
+        countryLabelAlphaHandle = GLES20.glGetUniformLocation(countryLabelProgram, "uAlpha")
 
         val satVertexSrc = ShaderReader.readTextFileFromResource(context, R.raw.sat_vertex_shader)
         val satFragSrc = ShaderReader.readTextFileFromResource(context, R.raw.sat_fragment_shader)
@@ -572,6 +609,7 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
             lightY = lightY,
             lightZ = lightZ
         )
+        drawCountryLabels(camX, camY, camZ)
 
         // Draw Moon
         // Use UTC time instead of local time
@@ -834,6 +872,204 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         GLES32.glDepthMask(true)
         GLES32.glDepthFunc(GLES32.GL_LESS)
+    }
+
+    private fun drawCountryLabels(camX: Float, camY: Float, camZ: Float) {
+        if (countryLabelProgram == 0) return
+
+        val forward = normalizeVector(floatArrayOf(-camX, -camY, -camZ))
+        val rightCandidate = cross(forward, WORLD_UP)
+        val right = if (vectorLength(rightCandidate) < MIN_VECTOR_LENGTH) {
+            floatArrayOf(1f, 0f, 0f)
+        } else {
+            normalizeVector(rightCandidate)
+        }
+        val up = normalizeVector(cross(right, forward))
+        val cameraPos = floatArrayOf(camX, camY, camZ)
+        val labelWorldHeight = (COUNTRY_LABEL_WORLD_HEIGHT * scaleFactor)
+            .coerceIn(COUNTRY_LABEL_MIN_WORLD_HEIGHT, COUNTRY_LABEL_MAX_WORLD_HEIGHT)
+
+        val vpMatrix = FloatArray(16)
+        Matrix.multiplyMM(vpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
+
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glDepthMask(false)
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+        GLES20.glUseProgram(countryLabelProgram)
+
+        GLES20.glEnableVertexAttribArray(0)
+        countryLabelQuadBuffer.position(0)
+        GLES20.glVertexAttribPointer(0, 3, GLES20.GL_FLOAT, false, 0, countryLabelQuadBuffer)
+        GLES20.glEnableVertexAttribArray(1)
+        countryLabelTexCoordBuffer.position(0)
+        GLES20.glVertexAttribPointer(1, 2, GLES20.GL_FLOAT, false, 0, countryLabelTexCoordBuffer)
+
+        for (label in COUNTRY_LABELS) {
+            val normal = label.surfaceNormal()
+            val position = floatArrayOf(
+                normal[0] * COUNTRY_LABEL_RADIUS,
+                normal[1] * COUNTRY_LABEL_RADIUS,
+                normal[2] * COUNTRY_LABEL_RADIUS
+            )
+            val toCamera = normalizeVector(
+                floatArrayOf(
+                    cameraPos[0] - position[0],
+                    cameraPos[1] - position[1],
+                    cameraPos[2] - position[2]
+                )
+            )
+            val visibility = dot(normal, toCamera)
+            if (visibility < COUNTRY_LABEL_MIN_VISIBILITY) continue
+
+            val textTexture = getCountryTextTexture(label.name)
+            val labelWorldWidth = labelWorldHeight * textTexture.aspectRatio
+            val modelMatrix = buildCountryLabelModelMatrix(
+                position = position,
+                right = right,
+                up = up,
+                forward = forward,
+                width = labelWorldWidth,
+                height = labelWorldHeight
+            )
+            val mvpMatrix = FloatArray(16)
+            Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
+
+            GLES20.glUniformMatrix4fv(countryLabelMvpHandle, 1, false, mvpMatrix, 0)
+            GLES20.glUniform1f(
+                countryLabelAlphaHandle,
+                smoothStep(COUNTRY_LABEL_MIN_VISIBILITY, COUNTRY_LABEL_FULL_VISIBILITY, visibility)
+            )
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textTexture.textureId)
+            GLES20.glUniform1i(countryLabelTextureHandle, 0)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        }
+
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+        GLES20.glDisableVertexAttribArray(1)
+        GLES20.glDisableVertexAttribArray(0)
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+        GLES20.glDepthMask(true)
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    private fun buildCountryLabelModelMatrix(
+        position: FloatArray,
+        right: FloatArray,
+        up: FloatArray,
+        forward: FloatArray,
+        width: Float,
+        height: Float
+    ): FloatArray {
+        return FloatArray(16).apply {
+            this[0] = right[0] * width
+            this[1] = right[1] * width
+            this[2] = right[2] * width
+            this[3] = 0f
+
+            this[4] = up[0] * height
+            this[5] = up[1] * height
+            this[6] = up[2] * height
+            this[7] = 0f
+
+            this[8] = -forward[0]
+            this[9] = -forward[1]
+            this[10] = -forward[2]
+            this[11] = 0f
+
+            this[12] = position[0]
+            this[13] = position[1]
+            this[14] = position[2]
+            this[15] = 1f
+        }
+    }
+
+    private fun getCountryTextTexture(text: String): TextTexture {
+        countryTextTextures[text]?.let { return it }
+
+        val texture = createCountryTextTexture(text)
+        countryTextTextures[text] = texture
+        return texture
+    }
+
+    private fun createCountryTextTexture(text: String): TextTexture {
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(232, 248, 252, 255)
+            textSize = COUNTRY_LABEL_TEXT_SIZE_PX
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.LEFT
+        }
+        val strokePaint = Paint(fillPaint).apply {
+            color = Color.argb(210, 2, 8, 18)
+            style = Paint.Style.STROKE
+            strokeWidth = COUNTRY_LABEL_STROKE_WIDTH_PX
+        }
+
+        val bounds = Rect()
+        fillPaint.getTextBounds(text, 0, text.length, bounds)
+        val width = (fillPaint.measureText(text) + COUNTRY_LABEL_TEXTURE_PADDING_PX * 2f)
+            .toInt()
+            .coerceAtLeast(2)
+        val height = (bounds.height() + COUNTRY_LABEL_TEXTURE_PADDING_PX * 2f)
+            .toInt()
+            .coerceAtLeast(2)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val baseline = COUNTRY_LABEL_TEXTURE_PADDING_PX - bounds.top
+        canvas.drawText(text, COUNTRY_LABEL_TEXTURE_PADDING_PX.toFloat(), baseline.toFloat(), strokePaint)
+        canvas.drawText(text, COUNTRY_LABEL_TEXTURE_PADDING_PX.toFloat(), baseline.toFloat(), fillPaint)
+
+        val textures = IntArray(1)
+        GLES20.glGenTextures(1, textures, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[0])
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+
+        val aspectRatio = width.toFloat() / height.toFloat()
+        bitmap.recycle()
+        return TextTexture(textures[0], aspectRatio)
+    }
+
+    private fun CountryLabel.surfaceNormal(): FloatArray {
+        val latRad = Math.toRadians(latitude)
+        val lonRad = Math.toRadians(longitude)
+        return floatArrayOf(
+            (cos(latRad) * sin(lonRad)).toFloat(),
+            sin(latRad).toFloat(),
+            (cos(latRad) * cos(lonRad)).toFloat()
+        )
+    }
+
+    private fun cross(a: FloatArray, b: FloatArray): FloatArray {
+        return floatArrayOf(
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0]
+        )
+    }
+
+    private fun dot(a: FloatArray, b: FloatArray): Float {
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    }
+
+    private fun vectorLength(v: FloatArray): Float {
+        return sqrt((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).toDouble()).toFloat()
+    }
+
+    private fun normalizeVector(v: FloatArray): FloatArray {
+        val length = vectorLength(v)
+        if (length < MIN_VECTOR_LENGTH) return floatArrayOf(0f, 1f, 0f)
+        return floatArrayOf(v[0] / length, v[1] / length, v[2] / length)
+    }
+
+    private fun smoothStep(edge0: Float, edge1: Float, value: Float): Float {
+        val t = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
     }
 
     private fun drawEarthAtmosphereHalo(
@@ -1148,6 +1384,17 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         return closestSat
     }
 
+    private data class CountryLabel(
+        val name: String,
+        val latitude: Double,
+        val longitude: Double
+    )
+
+    private data class TextTexture(
+        val textureId: Int,
+        val aspectRatio: Float
+    )
+
     private companion object {
         val ATMOSPHERE_LAYER_SCALES = floatArrayOf(1.012f, 1.028f, 1.052f, 1.086f, 1.14f, 1.23f)
         val ATMOSPHERE_LAYER_STRENGTHS = floatArrayOf(0.92f, 0.70f, 0.48f, 0.28f, 0.15f, 0.065f)
@@ -1155,6 +1402,75 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         const val ATMOSPHERE_BLUR_DOWNSCALE = 3
         const val ATMOSPHERE_BLUR_PASSES = 4
         const val ATMOSPHERE_BLOOM_INTENSITY = 1.7f
+        val COUNTRY_LABEL_QUAD_VERTICES = floatArrayOf(
+            -0.5f, -0.5f, 0f,
+            -0.5f, 0.5f, 0f,
+            0.5f, -0.5f, 0f,
+            0.5f, 0.5f, 0f
+        )
+        val COUNTRY_LABEL_TEX_COORDS = floatArrayOf(
+            0f, 1f,
+            0f, 0f,
+            1f, 1f,
+            1f, 0f
+        )
+        val WORLD_UP = floatArrayOf(0f, 1f, 0f)
+        val COUNTRY_LABELS = listOf(
+            CountryLabel("Canada", 56.0, -106.0),
+            CountryLabel("United States", 39.0, -98.0),
+            CountryLabel("Mexico", 23.0, -102.0),
+            CountryLabel("Brazil", -10.0, -52.0),
+            CountryLabel("Argentina", -38.0, -63.0),
+            CountryLabel("Chile", -30.0, -71.0),
+            CountryLabel("Peru", -9.0, -75.0),
+            CountryLabel("Colombia", 4.0, -74.0),
+            CountryLabel("United Kingdom", 54.0, -2.0),
+            CountryLabel("France", 46.0, 2.0),
+            CountryLabel("Spain", 40.0, -4.0),
+            CountryLabel("Germany", 51.0, 10.0),
+            CountryLabel("Italy", 42.0, 12.0),
+            CountryLabel("Norway", 62.0, 10.0),
+            CountryLabel("Sweden", 62.0, 15.0),
+            CountryLabel("Finland", 64.0, 26.0),
+            CountryLabel("Poland", 52.0, 19.0),
+            CountryLabel("Ukraine", 49.0, 32.0),
+            CountryLabel("Russia", 61.0, 90.0),
+            CountryLabel("Turkey", 39.0, 35.0),
+            CountryLabel("Morocco", 31.0, -7.0),
+            CountryLabel("Algeria", 28.0, 3.0),
+            CountryLabel("Egypt", 27.0, 30.0),
+            CountryLabel("Nigeria", 9.0, 8.0),
+            CountryLabel("Ethiopia", 9.0, 40.0),
+            CountryLabel("Kenya", 0.0, 38.0),
+            CountryLabel("DR Congo", -3.0, 24.0),
+            CountryLabel("South Africa", -30.0, 25.0),
+            CountryLabel("Saudi Arabia", 24.0, 45.0),
+            CountryLabel("Iran", 32.0, 53.0),
+            CountryLabel("Kazakhstan", 48.0, 67.0),
+            CountryLabel("Mongolia", 46.0, 103.0),
+            CountryLabel("Pakistan", 30.0, 70.0),
+            CountryLabel("India", 22.0, 79.0),
+            CountryLabel("China", 35.0, 104.0),
+            CountryLabel("Japan", 37.0, 138.0),
+            CountryLabel("Korea", 36.0, 128.0),
+            CountryLabel("Thailand", 15.0, 101.0),
+            CountryLabel("Vietnam", 16.0, 108.0),
+            CountryLabel("Malaysia", 4.0, 102.0),
+            CountryLabel("Philippines", 13.0, 122.0),
+            CountryLabel("Indonesia", -2.0, 118.0),
+            CountryLabel("Australia", -25.0, 134.0),
+            CountryLabel("New Zealand", -41.0, 174.0)
+        )
+        const val COUNTRY_LABEL_RADIUS = 0.1035f
+        const val COUNTRY_LABEL_WORLD_HEIGHT = 0.0062f
+        const val COUNTRY_LABEL_MIN_WORLD_HEIGHT = 0.0045f
+        const val COUNTRY_LABEL_MAX_WORLD_HEIGHT = 0.012f
+        const val COUNTRY_LABEL_MIN_VISIBILITY = 0.16f
+        const val COUNTRY_LABEL_FULL_VISIBILITY = 0.40f
+        const val COUNTRY_LABEL_TEXT_SIZE_PX = 42f
+        const val COUNTRY_LABEL_STROKE_WIDTH_PX = 5f
+        const val COUNTRY_LABEL_TEXTURE_PADDING_PX = 10
+        const val MIN_VECTOR_LENGTH = 0.000001f
         const val TAG = "EarthRenderer"
     }
 }
