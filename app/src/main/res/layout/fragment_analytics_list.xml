@@ -13,7 +13,6 @@
         android:layout_marginStart="16dp"
         android:layout_marginTop="38dp"
         android:background="@drawable/bg_glass_icon_button"
-        android:foreground="?attr/selectableItemBackgroundBorderless"
         android:padding="12dp"
         android:scaleX="-1"
         android:src="@drawable/ic_arrow_right"

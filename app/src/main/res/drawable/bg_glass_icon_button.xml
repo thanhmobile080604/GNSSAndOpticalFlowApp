@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="#33FFFFFF">
+    android:color="@color/ripple_color_main">
     <item>
         <shape android:shape="oval">
             <gradient
@@ -10,6 +10,11 @@
             <stroke
                 android:width="1dp"
                 android:color="#40FFFFFF" />
+        </shape>
+    </item>
+    <item android:id="@android:id/mask">
+        <shape android:shape="oval">
+            <solid android:color="@android:color/white" />
         </shape>
     </item>
 </ripple>
