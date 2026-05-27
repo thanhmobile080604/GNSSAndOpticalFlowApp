@@ -54,6 +54,7 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import androidx.core.graphics.createBitmap
+import com.example.gnssandopticalflowapp.common.show
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -623,6 +624,7 @@ class CameraOpticalFlowFragment :
 
         timerJob = lifecycleScope.launch {
             while (isActive) {
+                binding.tvTimer.show()
                 val elapsedMillis = cameraViewModel.currentTimerElapsed()
                 binding.tvTimer.text = formatElapsedTime(elapsedMillis)
                 delay(1000L)
