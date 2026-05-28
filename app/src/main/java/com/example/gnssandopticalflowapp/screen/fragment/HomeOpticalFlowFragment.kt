@@ -3,7 +3,6 @@ package com.example.gnssandopticalflowapp.screen.fragment
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.safeContext
@@ -12,8 +11,8 @@ import com.example.gnssandopticalflowapp.databinding.FragmentHomeOpticalFlowBind
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
 import com.example.gnssandopticalflowapp.screen.dialog.VideoProcessOptionsDialog
 import com.example.gnssandopticalflowapp.video.VideoProcessingBus
-import com.example.gnssandopticalflowapp.video.VideoProcessingForegroundService
 import com.example.gnssandopticalflowapp.video.VideoProcessingProgressText
+import com.example.gnssandopticalflowapp.video.VideoProcessingWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -85,21 +84,20 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
                 VideoProcessingBus.postProcessing(
                     VideoProcessingProgressText.format(VideoProcessingProgressText.DEFAULT_PERCENT)
                 )
-                ContextCompat.startForegroundService(
-                    appContext,
-                    VideoProcessingForegroundService.processIntent(
-                        context = appContext,
-                        sourcePath = sourceFile.absolutePath,
-                        options = options
-                    )
+                VideoProcessingWorker.enqueue(
+                    context = appContext,
+                    sourcePath = sourceFile.absolutePath,
+                    options = options
                 )
                 
             } catch (_: CancellationException) {
+                VideoProcessingBus.postIdle()
                 withContext(Dispatchers.Main) {
                     dismissUploadLoading()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                VideoProcessingBus.postIdle()
                 withContext(Dispatchers.Main) {
                     dismissUploadLoading()
                 }

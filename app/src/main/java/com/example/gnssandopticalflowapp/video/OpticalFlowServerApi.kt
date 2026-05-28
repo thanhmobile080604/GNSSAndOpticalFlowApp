@@ -26,6 +26,11 @@ interface OpticalFlowServerApi {
         @Path("jobId") jobId: String
     ): Response<ServerVideoJobResponse>
 
+    @POST("process-video/jobs/{jobId}/cancel")
+    suspend fun cancelProcessVideoJob(
+        @Path("jobId") jobId: String
+    ): Response<ServerVideoJobResponse>
+
     @Streaming
     @GET("process-video/jobs/{jobId}/result")
     suspend fun downloadProcessVideoJobResult(

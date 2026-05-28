@@ -28,6 +28,7 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.DialogVideoProcessOptionsBinding
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
 import com.example.gnssandopticalflowapp.screen.viewmodel.VideoProcessOptionsViewModel
+import com.example.gnssandopticalflowapp.util.VideoPlaybackSupport
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -41,6 +42,7 @@ class VideoProcessOptionsDialog :
     private var player: ExoPlayer? = null
     private var previewSurface: Surface? = null
     private var previewPrepared = false
+    private var previewUnsupportedShown = false
     private var videoUri: Uri? = null
     private var videoAspectRatio = 0f
 
@@ -145,7 +147,7 @@ class VideoProcessOptionsDialog :
     override fun onResume() {
         super.onResume()
 
-        if (previewPrepared) {
+        if (previewPrepared && !previewUnsupportedShown) {
             player?.play()
         }
     }
@@ -289,6 +291,10 @@ class VideoProcessOptionsDialog :
                         }
                     }
                 }
+
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    disableUnsupportedPreview()
+                }
             })
         }
     }
@@ -366,17 +372,40 @@ class VideoProcessOptionsDialog :
 
     private fun startLoopPreview() {
         if (previewPrepared) {
-            player?.play()
+            if (!previewUnsupportedShown) {
+                player?.play()
+            }
             return
         }
 
         val uri = videoUri ?: return
+        val context = context ?: return
+        if (!VideoPlaybackSupport.canDecode(context, uri)) {
+            previewPrepared = true
+            disableUnsupportedPreview()
+            return
+        }
 
+        binding.videoPreview.isVisible = true
+        previewUnsupportedShown = false
         player?.setMediaItem(MediaItem.fromUri(uri))
         player?.prepare()
         player?.play()
 
         previewPrepared = true
+    }
+
+    private fun disableUnsupportedPreview() {
+        if (!isAdded || view == null) return
+        player?.stop()
+        binding.videoPreview.isVisible = false
+        if (previewUnsupportedShown) return
+        previewUnsupportedShown = true
+        Toast.makeText(
+            requireContext(),
+            "This device cannot preview this video",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun setSegmentSelected(view: TextView, selected: Boolean) {

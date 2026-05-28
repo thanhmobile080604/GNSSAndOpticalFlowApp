@@ -11,7 +11,16 @@ object VideoProcessingProgressText {
     }
 
     fun normalize(message: String?, fallbackPercent: Int = DEFAULT_PERCENT): String {
-        return format(extractPercent(message) ?: fallbackPercent)
+        val percent = extractPercent(message) ?: fallbackPercent
+        val trimmedMessage = message.orEmpty().trim()
+        if (trimmedMessage.isBlank() || trimmedMessage == format(percent)) {
+            return format(percent)
+        }
+        return if (extractPercent(trimmedMessage) != null) {
+            trimmedMessage
+        } else {
+            "$trimmedMessage (${percent.coerceIn(DEFAULT_PERCENT, COMPLETE_PERCENT)}%)"
+        }
     }
 
     fun extractPercent(message: String?): Int? {

@@ -74,6 +74,7 @@ dependencies {
     implementation("org.opencv:opencv:4.12.0")
     implementation("androidx.navigation:navigation-fragment-ktx:2.7.7")
     implementation("androidx.navigation:navigation-ui-ktx:2.7.7")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")

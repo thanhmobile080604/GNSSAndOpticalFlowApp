@@ -30,6 +30,7 @@ object VideoProcessingBus {
     fun postFinished(path: String) {
         isProcessing = false
         currentProcessingPercent = VideoProcessingProgressText.COMPLETE_PERCENT
+        processingMessage.postValue(null)
         videoLibraryUpdated.postValue(System.currentTimeMillis())
         processedVideoPathToOpen.postValue(path)
     }

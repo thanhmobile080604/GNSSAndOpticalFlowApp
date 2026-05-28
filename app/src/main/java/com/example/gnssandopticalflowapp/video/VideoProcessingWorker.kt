@@ -4,19 +4,26 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
 import android.os.Build
-import android.os.IBinder
-import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.example.gnssandopticalflowapp.MainActivity
 import com.example.gnssandopticalflowapp.R
+import com.example.gnssandopticalflowapp.common.AndroidConnectivityObserver
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
 import com.example.gnssandopticalflowapp.model.VideoProgressMetadata
 import com.example.gnssandopticalflowapp.optical_flow.classes.AIRaftOpticalFlow
@@ -29,19 +36,18 @@ import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.util.MediaStorageUtil
 import com.example.gnssandopticalflowapp.util.VideoEncoder
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -54,82 +60,72 @@ import org.opencv.imgproc.Imgproc
 import org.opencv.videoio.VideoCapture
 import org.opencv.videoio.Videoio
 import java.io.File
-import java.io.Serializable
+import java.io.IOException
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
-class VideoProcessingForegroundService : Service() {
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var processingJob: Job? = null
-    private var wakeLock: PowerManager.WakeLock? = null
+class VideoProcessingWorker(
+    appContext: Context,
+    workerParams: WorkerParameters
+) : CoroutineWorker(appContext, workerParams) {
     private var currentProgressPercent = VideoProcessingProgressText.DEFAULT_PERCENT
+    private val connectivityObserver = AndroidConnectivityObserver(appContext.applicationContext)
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    @Volatile
+    private var currentServerJobId: String? = null
 
-    override fun onCreate() {
-        super.onCreate()
+    override suspend fun getForegroundInfo(): ForegroundInfo {
         createNotificationChannel()
+        return createForegroundInfo(currentProgressMessage(), ongoing = true)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_CANCEL -> {
-                cancelProcessing()
-                return START_NOT_STICKY
-            }
-            ACTION_PROCESS -> startProcessing(intent)
-        }
-        return START_NOT_STICKY
-    }
+    override suspend fun doWork(): Result {
+        createNotificationChannel()
 
-    override fun onDestroy() {
-        cancelProcessing()
-        serviceScope.cancel()
-        super.onDestroy()
-    }
-
-    private fun startProcessing(intent: Intent) {
-        if (processingJob?.isActive == true) return
-
-        val sourcePath = intent.getStringExtra(EXTRA_SOURCE_PATH)
-        val options = intent.serializableExtra<VideoProcessOptions>(EXTRA_OPTIONS)
+        val sourcePath = inputData.getString(EXTRA_SOURCE_PATH)
+        val optionsPath = inputData.getString(EXTRA_OPTIONS_PATH)
+        val optionsFile = optionsPath?.takeIf { it.isNotBlank() }?.let(::File)
+        val options = optionsFile
+            ?.takeIf { it.isFile }
+            ?.readText()
+            ?.toVideoProcessOptions()
         if (sourcePath.isNullOrBlank() || options == null) {
             Log.e(TAG, "Missing source path or process options")
-            stopSelf()
-            return
+            sourcePath?.takeIf { it.isNotBlank() }?.let { File(it).delete() }
+            optionsFile?.delete()
+            VideoProcessingBus.postIdle()
+            return Result.failure()
         }
 
         currentProgressPercent = VideoProcessingProgressText.DEFAULT_PERCENT
-        startForeground(NOTIFICATION_ID, buildNotification(currentProgressMessage(), ongoing = true))
-        acquireWakeLock()
+        setForeground(createForegroundInfo(currentProgressMessage(), ongoing = true))
         VideoProcessingBus.postProcessing(currentProgressMessage())
 
-        processingJob = serviceScope.launch {
-            val sourceFile = File(sourcePath)
-            try {
-                val outputFile = processVideo(sourceFile, options)
-                MediaScannerConnection.scanFile(
-                    applicationContext,
-                    arrayOf(outputFile.absolutePath),
-                    null
-                ) { _, _ -> }
-                MediaStorageUtil.addVideo(applicationContext, outputFile.absolutePath)
-                VideoProcessingBus.postFinished(outputFile.absolutePath)
-                showCompletedNotification("Processing done", outputFile.absolutePath)
-            } catch (_: CancellationException) {
-                Log.d(TAG, "Processing cancelled")
-                VideoProcessingBus.postIdle()
-            } catch (e: Exception) {
-                Log.e(TAG, "Processing failed: ${e.message}", e)
-                VideoProcessingBus.postIdle()
-                showCompletedNotification("Processing failed", null)
-            } finally {
-                sourceFile.delete()
-                releaseWakeLock()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
+        val sourceFile = File(sourcePath)
+        return try {
+            val outputFile = processVideo(sourceFile, options)
+            MediaScannerConnection.scanFile(
+                applicationContext,
+                arrayOf(outputFile.absolutePath),
+                null
+            ) { _, _ -> }
+            MediaStorageUtil.addVideo(applicationContext, outputFile.absolutePath)
+            VideoProcessingBus.postFinished(outputFile.absolutePath)
+            showCompletedNotification("Processing done", outputFile.absolutePath)
+            Result.success(workDataOf(OUTPUT_VIDEO_PATH to outputFile.absolutePath))
+        } catch (e: CancellationException) {
+            Log.d(TAG, "Processing cancelled")
+            VideoProcessingBus.postIdle()
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Processing failed: ${e.message}", e)
+            VideoProcessingBus.postIdle()
+            showCompletedNotification("Processing failed", null)
+            Result.failure()
+        } finally {
+            sourceFile.delete()
+            optionsFile.delete()
         }
     }
 
@@ -204,11 +200,17 @@ class VideoProcessingForegroundService : Service() {
         try {
             postCurrentProgress("Uploading to server...")
             val jobId = createServerVideoJob(sourceFile, options) ?: return@withContext false
+            currentServerJobId = jobId
             postCurrentProgress("Processing on server...")
             return@withContext waitForServerVideoJob(jobId, outputFile)
+        } catch (e: CancellationException) {
+            cancelCurrentServerJob()
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Server connection failed: ${e.message}", e)
             return@withContext false
+        } finally {
+            currentServerJobId = null
         }
     }
 
@@ -216,18 +218,27 @@ class VideoProcessingForegroundService : Service() {
         sourceFile: File,
         options: VideoProcessOptions
     ): String? {
-        val videoBody = sourceFile.asRequestBody("video/mp4".toMediaType())
-        val videoPart = MultipartBody.Part.createFormData("file", sourceFile.name, videoBody)
-        val response = OpticalFlowServerClient.api.createProcessVideoJob(
-            file = videoPart,
-            fields = serverMultipartFields(options)
-        )
+        return runServerNetworkRequest("Server job upload") {
+            Log.d(
+                TAG,
+                "Creating server video job mode=${if (options.useFarnebackHeatmap) "HEATMAP" else "VECTORS"} " +
+                    "algorithm=${serverAlgorithmName(options)} isMoving=${options.isMoving}"
+            )
+            val videoBody = sourceFile.asRequestBody("video/mp4".toMediaType())
+            val videoPart = MultipartBody.Part.createFormData("file", sourceFile.name, videoBody)
+            val response = OpticalFlowServerClient.api.createProcessVideoJob(
+                file = videoPart,
+                fields = serverMultipartFields(options)
+            )
 
-        return if (response.isSuccessful) {
-            response.body()?.jobId?.takeIf { it.isNotBlank() }
-        } else {
-            Log.e(TAG, "Server job create error: ${response.code()} ${response.errorBodyText()}")
-            null
+            if (response.isSuccessful) {
+                response.body()?.jobId?.takeIf { it.isNotBlank() }?.also { jobId ->
+                    currentServerJobId = jobId
+                }
+            } else {
+                Log.e(TAG, "Server job create error: ${response.code()} ${response.errorBodyText()}")
+                null
+            }
         }
     }
 
@@ -241,6 +252,13 @@ class VideoProcessingForegroundService : Service() {
                 }
                 "processing" -> {
                     delay(SERVER_POLL_INTERVAL_MS)
+                }
+                "cancelling" -> {
+                    delay(SERVER_POLL_INTERVAL_MS)
+                }
+                "cancelled" -> {
+                    Log.d(TAG, "Server job cancelled: $jobId")
+                    return false
                 }
                 "completed" -> {
                     postCurrentProgress("Downloading processed video...")
@@ -260,27 +278,100 @@ class VideoProcessingForegroundService : Service() {
     }
 
     private suspend fun fetchServerVideoJob(jobId: String): ServerVideoJobResponse? {
-        val response = OpticalFlowServerClient.api.getProcessVideoJob(jobId)
-        return if (response.isSuccessful) {
-            response.body()
-        } else {
-            Log.e(TAG, "Server job status error: ${response.code()} ${response.errorBodyText()}")
-            null
+        return runServerNetworkRequest("Server job status") {
+            val response = OpticalFlowServerClient.api.getProcessVideoJob(jobId)
+            if (response.isSuccessful) {
+                response.body()
+            } else {
+                Log.e(TAG, "Server job status error: ${response.code()} ${response.errorBodyText()}")
+                null
+            }
+        }
+    }
+
+    private suspend fun cancelCurrentServerJob() {
+        val jobId = currentServerJobId?.takeIf { it.isNotBlank() } ?: return
+        kotlinx.coroutines.withContext(NonCancellable + Dispatchers.IO) {
+            runCatching {
+                withTimeout(SERVER_CANCEL_TIMEOUT_MS) {
+                    val response = OpticalFlowServerClient.api.cancelProcessVideoJob(jobId)
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Server job cancel requested: $jobId")
+                    } else {
+                        Log.w(TAG, "Server job cancel failed: $jobId ${response.code()} ${response.errorBodyText()}")
+                    }
+                }
+            }.onFailure { error ->
+                Log.w(TAG, "Server job cancel request failed: $jobId ${error.message}")
+            }
         }
     }
 
     private suspend fun downloadServerVideoJobResult(jobId: String, outputFile: File): Boolean {
-        val response = OpticalFlowServerClient.api.downloadProcessVideoJobResult(jobId)
-        val body = response.body()
-        return if (response.isSuccessful && body != null) {
-            java.io.FileOutputStream(outputFile).use { fos ->
-                body.byteStream().use { it.copyTo(fos) }
+        return runServerNetworkRequest("Server result download") {
+            outputFile.delete()
+            val response = OpticalFlowServerClient.api.downloadProcessVideoJobResult(jobId)
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                java.io.FileOutputStream(outputFile).use { fos ->
+                    body.byteStream().use { it.copyTo(fos) }
+                }
+                outputFile.length() > 100
+            } else {
+                Log.e(TAG, "Server result download error: ${response.code()} ${response.errorBodyText()}")
+                false
             }
-            outputFile.length() > 100
-        } else {
-            Log.e(TAG, "Server result download error: ${response.code()} ${response.errorBodyText()}")
-            false
         }
+    }
+
+    private suspend fun <T> runServerNetworkRequest(
+        operationName: String,
+        block: suspend () -> T
+    ): T {
+        var retryDelayMs = NETWORK_RETRY_DELAY_MS
+        while (isProcessingActive()) {
+            waitForInternetConnection()
+            try {
+                return block()
+            } catch (e: IOException) {
+                if (!isProcessingActive()) {
+                    throw CancellationException("Video processing stopped")
+                }
+
+                val internetAvailable = isInternetConnected()
+                Log.w(
+                    TAG,
+                    "$operationName interrupted by network error: ${e.message}; " +
+                        "internetAvailable=$internetAvailable"
+                )
+
+                if (internetAvailable) {
+                    postCurrentProgress("$operationName interrupted; retrying...")
+                    delay(retryDelayMs)
+                    retryDelayMs = (retryDelayMs * 2).coerceAtMost(MAX_NETWORK_RETRY_DELAY_MS)
+                } else {
+                    retryDelayMs = NETWORK_RETRY_DELAY_MS
+                    waitForInternetConnection()
+                }
+            }
+        }
+        throw CancellationException("Video processing stopped")
+    }
+
+    private suspend fun waitForInternetConnection() {
+        if (isInternetConnected()) return
+        postCurrentProgress("Waiting for internet connection...")
+        connectivityObserver.isConnected.first { isConnected ->
+            !isProcessingActive() || isConnected
+        }
+        if (!isProcessingActive()) {
+            throw CancellationException("Video processing stopped")
+        }
+        postCurrentProgress("Network restored. Resuming...")
+    }
+
+    private suspend fun isInternetConnected(): Boolean {
+        return connectivityObserver.isConnected.first()
     }
 
     private fun serverMultipartFields(options: VideoProcessOptions): Map<String, RequestBody> {
@@ -290,6 +381,7 @@ class VideoProcessingForegroundService : Service() {
         fields["algorithm"] = textPart(serverAlgorithmName(options))
         fields["sensitivity"] = textPart(options.sensitivity.toString())
         fields["is_moving"] = textPart(options.isMoving.toString())
+        fields["isMoving"] = textPart(options.isMoving.toString())
         fields["roi_enabled"] = textPart((options.roi != null).toString())
 
         options.roi?.let { roi ->
@@ -327,7 +419,7 @@ class VideoProcessingForegroundService : Service() {
         }
     }
 
-    private suspend fun processVideoWithOpenCv(
+    private fun processVideoWithOpenCv(
         sourceFile: File,
         outputFile: File,
         options: VideoProcessOptions
@@ -377,7 +469,7 @@ class VideoProcessingForegroundService : Service() {
                 }
 
                 val frameForProcessing = rotateFrameForDisplay(rgbaMat, orientedMat, rotationDegrees)
-                val activeEncoder = encoder ?: continue
+                val activeEncoder = encoder
                 showFrameProcessingStageIfNeeded(opticalFlow, options, framesProcessed + 1L, totalFrames)
                 encodeProcessedFrame(
                     opticalFlow = opticalFlow,
@@ -404,7 +496,7 @@ class VideoProcessingForegroundService : Service() {
         return framesProcessed > 0 && outputFile.length() > 100
     }
 
-    private suspend fun processVideoWithFrameBatch(
+    private fun processVideoWithFrameBatch(
         sourceFile: File,
         outputFile: File,
         options: VideoProcessOptions
@@ -444,7 +536,7 @@ class VideoProcessingForegroundService : Service() {
                 while (isProcessingActive() && framesProcessed < frameCount) {
                     val requestCount = minOf(BATCH_FRAME_SIZE.toLong(), frameCount - framesProcessed).toInt()
                     val bitmaps = safeGetFramesAtIndex(retriever, framesProcessed.toInt(), requestCount)
-                    if (bitmaps.isNullOrEmpty()) break
+                    if (bitmaps.isEmpty()) break
 
                     for (bitmap in bitmaps) {
                         try {
@@ -481,7 +573,7 @@ class VideoProcessingForegroundService : Service() {
         }
     }
 
-    private suspend fun processVideoWithTimeSeek(
+    private fun processVideoWithTimeSeek(
         sourceFile: File,
         outputFile: File,
         options: VideoProcessOptions
@@ -497,8 +589,7 @@ class VideoProcessingForegroundService : Service() {
                 fallback = metadata.fps
             )
             val frameDurationUs = frameDurationUs(fps)
-            val durationUs = (durationMs.takeIf { it > 0L } ?: metadata.durationMs)
-                .let { it * 1000L }
+            val durationUs = ((durationMs.takeIf { it > 0L } ?: metadata.durationMs) * 1000L)
                 .takeIf { it > 0L }
                 ?: (metadata.frameCount.takeIf { it > 0L }?.times(frameDurationUs) ?: frameDurationUs)
             val firstFrame = findFirstReadableFrame(retriever, durationUs) ?: return false
@@ -632,7 +723,7 @@ class VideoProcessingForegroundService : Service() {
 
             val outFrame = if (activeRoi != null) rgbaMat else output?.ofFrame ?: rgbaMat
             encoder.encodeFrame(outFrame, presentationTimeUs)
-            if (outFrame !== rgbaMat && outFrame !== processingFrame) outFrame.release()
+            if (outFrame !== rgbaMat) outFrame.release()
         } finally {
             if (processingFrame !== rgbaMat) processingFrame.release()
             originalRoiFrame?.release()
@@ -721,7 +812,7 @@ class VideoProcessingForegroundService : Service() {
         postProgressPercent(progressPercent(frameNumber, totalFrames))
     }
 
-    private suspend fun updateProgressIfNeeded(framesProcessed: Long, totalFrames: Long) {
+    private fun updateProgressIfNeeded(framesProcessed: Long, totalFrames: Long) {
         if (totalFrames <= 0L) return
         val shouldUpdate = framesProcessed <= 3L || framesProcessed % PROGRESS_UPDATE_INTERVAL_FRAMES == 0L
         if (!shouldUpdate) return
@@ -731,7 +822,7 @@ class VideoProcessingForegroundService : Service() {
 
     private fun postCurrentProgress(status: String) {
         Log.d(TAG, status)
-        postProgressPercent(currentProgressPercent)
+        postProgress(VideoProcessingProgressText.normalize(status, currentProgressPercent))
     }
 
     private fun postProgressPercent(percent: Int) {
@@ -765,27 +856,36 @@ class VideoProcessingForegroundService : Service() {
     }
 
     private fun updateNotification(message: String, ongoing: Boolean) {
-        val manager = getSystemService(NotificationManager::class.java)
+        setProgressAsync(workDataOf(PROGRESS_PERCENT to currentProgressPercent))
+        val manager = applicationContext.getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, buildNotification(message, ongoing))
+    }
+
+    private fun createForegroundInfo(message: String, ongoing: Boolean): ForegroundInfo {
+        val notification = buildNotification(message, ongoing)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun buildNotification(message: String, ongoing: Boolean): Notification {
         val openIntent = PendingIntent.getActivity(
-            this,
+            applicationContext,
             0,
-            Intent(this, MainActivity::class.java).apply {
+            Intent(applicationContext, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val cancelIntent = PendingIntent.getService(
-            this,
-            1,
-            Intent(this, VideoProcessingForegroundService::class.java).setAction(ACTION_CANCEL),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val cancelIntent = WorkManager.getInstance(applicationContext).createCancelPendingIntent(id)
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_process)
             .setContentTitle("Video processing")
             .setContentText(message)
@@ -797,20 +897,20 @@ class VideoProcessingForegroundService : Service() {
     }
 
     private fun showCompletedNotification(message: String, videoPath: String?) {
-        val manager = getSystemService(NotificationManager::class.java)
-        val intent = Intent(this, MainActivity::class.java).apply {
+        val manager = applicationContext.getSystemService(NotificationManager::class.java)
+        val intent = Intent(applicationContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             if (videoPath != null) {
                 putExtra("processed_video_path", videoPath)
             }
         }
         val openIntent = PendingIntent.getActivity(
-            this,
+            applicationContext,
             0,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = NotificationCompat.Builder(this, COMPLETED_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(applicationContext, COMPLETED_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_process)
             .setContentTitle("Video processing")
             .setContentText(message)
@@ -822,7 +922,7 @@ class VideoProcessingForegroundService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(NotificationManager::class.java)
+        val manager = applicationContext.getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Video processing",
@@ -837,34 +937,8 @@ class VideoProcessingForegroundService : Service() {
         manager.createNotificationChannel(completedChannel)
     }
 
-    private fun acquireWakeLock() {
-        if (wakeLock?.isHeld == true) return
-        val powerManager = getSystemService(PowerManager::class.java)
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "$packageName:VideoProcessing"
-        ).apply {
-            setReferenceCounted(false)
-            acquire(WAKE_LOCK_TIMEOUT_MS)
-        }
-    }
-
-    private fun releaseWakeLock() {
-        wakeLock?.takeIf { it.isHeld }?.release()
-        wakeLock = null
-    }
-
-    private fun cancelProcessing() {
-        processingJob?.cancel()
-        processingJob = null
-        VideoProcessingBus.postIdle()
-        releaseWakeLock()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-    }
-
     private fun isProcessingActive(): Boolean {
-        return processingJob?.isActive == true && serviceScope.isActive
+        return !isStopped
     }
 
     private fun convertCaptureFrameToRgba(sourceMat: Mat, rgbaMat: Mat) {
@@ -937,7 +1011,7 @@ class VideoProcessingForegroundService : Service() {
         frameCount: Int
     ): List<Bitmap> {
         return try {
-            retriever.getFramesAtIndex(startIndex, frameCount).orEmpty()
+            retriever.getFramesAtIndex(startIndex, frameCount)
         } catch (e: Exception) {
             Log.w(TAG, "Frame batch unavailable at index $startIndex: ${e.message}")
             emptyList()
@@ -1008,51 +1082,143 @@ class VideoProcessingForegroundService : Service() {
     private fun displayHeight(width: Int, height: Int, rotationDegrees: Int) =
         if (normalizeRotationDegrees(rotationDegrees) in setOf(90, 270)) width else height
     private fun normalizeRotationDegrees(rotationDegrees: Int): Int {
-        val normalized = ((rotationDegrees % 360) + 360) % 360
-        return when (normalized) {
+        return when (val normalized = ((rotationDegrees % 360) + 360) % 360) {
             90, 180, 270 -> normalized
             else -> 0
-        }
-    }
-
-    private inline fun <reified T : Serializable> Intent.serializableExtra(key: String): T? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            getSerializableExtra(key, T::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            getSerializableExtra(key) as? T
         }
     }
 
     private data class ActiveRoi(val rect: Rect, val mask: Mat?)
 
     companion object {
-        private const val TAG = "VIDEO-SERVICE"
+        private const val TAG = "VIDEO-WORKER"
         private const val CHANNEL_ID = "video_processing"
         private const val COMPLETED_CHANNEL_ID = "video_processing_completed"
         private const val NOTIFICATION_ID = 3001
         private const val COMPLETED_NOTIFICATION_ID = 3002
-        private const val ACTION_PROCESS = "com.example.gnssandopticalflowapp.video.PROCESS"
-        private const val ACTION_CANCEL = "com.example.gnssandopticalflowapp.video.CANCEL"
+        private const val UNIQUE_WORK_NAME = "video_processing_work"
         private const val EXTRA_SOURCE_PATH = "source_path"
-        private const val EXTRA_OPTIONS = "options"
+        private const val EXTRA_OPTIONS_PATH = "options_path"
+        private const val OUTPUT_VIDEO_PATH = "output_video_path"
+        private const val PROGRESS_PERCENT = "progress_percent"
         private const val BATCH_FRAME_SIZE = 8
         private const val PROGRESS_UPDATE_INTERVAL_FRAMES = 30L
         private const val MIN_ROI_FRAME_SIZE = 32
         private const val AI_FRAME_STRIDE = 1
-        private const val WAKE_LOCK_TIMEOUT_MS = 6L * 60L * 60L * 1000L
         private const val SERVER_POLL_INTERVAL_MS = 2_000L
+        private const val SERVER_CANCEL_TIMEOUT_MS = 5_000L
+        private const val NETWORK_RETRY_DELAY_MS = 3_000L
+        private const val MAX_NETWORK_RETRY_DELAY_MS = 30_000L
 
-        fun processIntent(context: Context, sourcePath: String, options: VideoProcessOptions): Intent {
-            return Intent(context, VideoProcessingForegroundService::class.java).apply {
-                action = ACTION_PROCESS
-                putExtra(EXTRA_SOURCE_PATH, sourcePath)
-                putExtra(EXTRA_OPTIONS, options)
-            }
+        fun enqueue(context: Context, sourcePath: String, options: VideoProcessOptions) {
+            val sourceFile = File(sourcePath)
+            val optionsFile = File(
+                sourceFile.parentFile ?: context.applicationContext.cacheDir,
+                "${sourceFile.nameWithoutExtension}_options.json"
+            )
+            optionsFile.writeText(options.toJsonString())
+
+            val requestBuilder = OneTimeWorkRequestBuilder<VideoProcessingWorker>()
+                .setInputData(
+                    workDataOf(
+                        EXTRA_SOURCE_PATH to sourcePath,
+                        EXTRA_OPTIONS_PATH to optionsFile.absolutePath
+                    )
+                )
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+
+            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                UNIQUE_WORK_NAME,
+                ExistingWorkPolicy.KEEP,
+                requestBuilder.build()
+            )
         }
 
-        fun cancelIntent(context: Context): Intent {
-            return Intent(context, VideoProcessingForegroundService::class.java).setAction(ACTION_CANCEL)
+        fun cancel(context: Context) {
+            WorkManager.getInstance(context.applicationContext).cancelUniqueWork(UNIQUE_WORK_NAME)
+            VideoProcessingBus.postIdle()
+        }
+
+        private fun VideoProcessOptions.toJsonString(): String {
+            val root = JSONObject()
+                .put("isMoving", isMoving)
+                .put("useFarneback", useFarneback)
+                .put("sensitivity", sensitivity)
+                .put("useFarnebackHeatmap", useFarnebackHeatmap)
+                .put("useAi", useAi)
+                .put("processingMode", processingMode.name)
+
+            roi?.let { normalizedRoi ->
+                val pathPoints = JSONArray()
+                normalizedRoi.pathPoints.forEach { point ->
+                    pathPoints.put(
+                        JSONObject()
+                            .put("x", point.x.toDouble())
+                            .put("y", point.y.toDouble())
+                    )
+                }
+
+                root.put(
+                    "roi",
+                    JSONObject()
+                        .put("left", normalizedRoi.left.toDouble())
+                        .put("top", normalizedRoi.top.toDouble())
+                        .put("right", normalizedRoi.right.toDouble())
+                        .put("bottom", normalizedRoi.bottom.toDouble())
+                        .put("viewAspectRatio", normalizedRoi.viewAspectRatio.toDouble())
+                        .put("pathPoints", pathPoints)
+                )
+            }
+
+            return root.toString()
+        }
+
+        private fun String.toVideoProcessOptions(): VideoProcessOptions? {
+            return runCatching {
+                val root = JSONObject(this)
+                val roi = root.optJSONObject("roi")?.let { roiJson ->
+                    val pathPointsJson = roiJson.optJSONArray("pathPoints")
+                    val pathPoints = if (pathPointsJson == null) {
+                        emptyList()
+                    } else {
+                        List(pathPointsJson.length()) { index ->
+                            val pointJson = pathPointsJson.getJSONObject(index)
+                            VideoProcessOptions.NormalizedPoint(
+                                x = pointJson.getDouble("x").toFloat(),
+                                y = pointJson.getDouble("y").toFloat()
+                            )
+                        }
+                    }
+
+                    VideoProcessOptions.NormalizedRoi(
+                        left = roiJson.getDouble("left").toFloat(),
+                        top = roiJson.getDouble("top").toFloat(),
+                        right = roiJson.getDouble("right").toFloat(),
+                        bottom = roiJson.getDouble("bottom").toFloat(),
+                        viewAspectRatio = roiJson.getDouble("viewAspectRatio").toFloat(),
+                        pathPoints = pathPoints
+                    )
+                }
+
+                val processingMode = runCatching {
+                    VideoProcessOptions.ProcessingMode.valueOf(
+                        root.optString(
+                            "processingMode",
+                            VideoProcessOptions.ProcessingMode.OFFLINE.name
+                        )
+                    )
+                }.getOrDefault(VideoProcessOptions.ProcessingMode.OFFLINE)
+
+                VideoProcessOptions(
+                    isMoving = root.getBoolean("isMoving"),
+                    useFarneback = root.getBoolean("useFarneback"),
+                    sensitivity = root.getInt("sensitivity"),
+                    useFarnebackHeatmap = root.optBoolean("useFarnebackHeatmap", false),
+                    useAi = root.optBoolean("useAi", false),
+                    roi = roi,
+                    processingMode = processingMode
+                )
+            }.getOrNull()
         }
     }
 }

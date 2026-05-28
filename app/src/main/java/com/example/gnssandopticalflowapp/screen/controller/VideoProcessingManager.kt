@@ -22,8 +22,8 @@ import com.example.gnssandopticalflowapp.MainViewModel
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
 import com.example.gnssandopticalflowapp.video.VideoProcessingBus
-import com.example.gnssandopticalflowapp.video.VideoProcessingForegroundService
 import com.example.gnssandopticalflowapp.video.VideoProcessingProgressText
+import com.example.gnssandopticalflowapp.video.VideoProcessingWorker
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -153,6 +153,7 @@ class VideoProcessingManager(
                                 hide()
                             }
                         } else {
+                            if (hasPendingProcessedVideo()) return@observe
                             clearPendingProcessedVideo()
                             showProcessing(message)
                         }
@@ -168,6 +169,7 @@ class VideoProcessingManager(
                                 hide()
                             }
                         } else {
+                            if (hasPendingProcessedVideo()) return@observe
                             clearPendingProcessedVideo()
                             showProcessing(message)
                         }
@@ -210,6 +212,10 @@ class VideoProcessingManager(
     }
 
     private fun showProcessing(message: String) {
+        if (hasPendingProcessedVideo()) {
+            return
+        }
+
         val fallbackPercent = if (isVideoProcessingVisible) {
             currentProgressPercent()
         } else {
@@ -555,7 +561,7 @@ class VideoProcessingManager(
     private fun cancelVideoProcessing() {
         viewModel.videoUploadJob?.cancel()
         viewModel.videoProcessingMessage.value = null
-        activity.startService(VideoProcessingForegroundService.cancelIntent(activity))
+        VideoProcessingWorker.cancel(activity)
     }
 
     private fun watchProcessedVideo(path: String) {
@@ -599,6 +605,13 @@ class VideoProcessingManager(
         if (VideoProcessingBus.processedVideoPathToOpen.value != null) {
             VideoProcessingBus.processedVideoPathToOpen.value = null
         }
+    }
+
+    private fun hasPendingProcessedVideo(): Boolean {
+        return isProcessedVideoReady ||
+            !pendingProcessedVideoPath.isNullOrBlank() ||
+            !viewModel.processedVideoPathToOpen.value.isNullOrBlank() ||
+            !VideoProcessingBus.processedVideoPathToOpen.value.isNullOrBlank()
     }
 
     private fun clearVideoProcessingOverlayState() {

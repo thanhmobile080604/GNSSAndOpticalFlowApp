@@ -26,6 +26,7 @@ import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentVideoOpticalFlowBinding
+import com.example.gnssandopticalflowapp.util.VideoPlaybackSupport
 import kotlinx.coroutines.Runnable
 import java.io.File
 import java.text.SimpleDateFormat
@@ -41,6 +42,7 @@ class VideoOpticalFlowFragment :
     private var videoWidth = 0
     private var videoHeight = 0
     private var isRotated = false
+    private var playbackUnsupportedShown = false
 
     private val handler = Handler(Looper.getMainLooper())
     private val updateProgressAction = object : Runnable {
@@ -149,13 +151,9 @@ class VideoOpticalFlowFragment :
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                Log.e("VIDEO-PLAYER", "ExoPlayer Error: ${error.message}", error)
+                Log.w("VIDEO-PLAYER", "Playback unsupported: ${error.message}")
                 checkIfFragmentAttached {
-                    Toast.makeText(
-                        safeContext(),
-                        "Playback Error: ${error.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    showPlaybackUnsupportedMessage()
                 }
             }
         })
@@ -284,6 +282,12 @@ class VideoOpticalFlowFragment :
         try {
             val file = File(url)
             val uri = file.toUri()
+            if (!VideoPlaybackSupport.canDecode(safeContext(), uri)) {
+                showPlaybackUnsupportedMessage()
+                return
+            }
+            playbackUnsupportedShown = false
+            binding.videoView.show()
             val mediaItem = MediaItem.fromUri(uri)
             player?.setMediaItem(mediaItem)
             player?.prepare()
@@ -292,6 +296,21 @@ class VideoOpticalFlowFragment :
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun showPlaybackUnsupportedMessage() {
+        player?.stop()
+        handler.removeCallbacks(updateProgressAction)
+        binding.videoView.hide()
+        binding.ivVideoControl.setImageResource(R.drawable.ic_play_video)
+        isPlaying = false
+        if (playbackUnsupportedShown) return
+        playbackUnsupportedShown = true
+        Toast.makeText(
+            safeContext(),
+            "This device cannot play this video's codec or resolution",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     override fun onPause() {

@@ -24,8 +24,6 @@ import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
 import com.example.gnssandopticalflowapp.screen.controller.VideoProcessingManager
 import com.example.gnssandopticalflowapp.screen.dialog.NoGPSDialog
 import com.example.gnssandopticalflowapp.screen.dialog.NoLocationDialog
-import com.example.gnssandopticalflowapp.video.VideoProcessingBus
-import com.example.gnssandopticalflowapp.video.VideoProcessingForegroundService
 import kotlinx.coroutines.launch
 import org.opencv.android.OpenCVLoader
 import org.orekit.data.DataContext
