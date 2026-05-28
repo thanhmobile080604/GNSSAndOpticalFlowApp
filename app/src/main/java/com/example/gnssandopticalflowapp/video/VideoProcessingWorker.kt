@@ -14,7 +14,6 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
@@ -61,6 +60,7 @@ import org.opencv.videoio.VideoCapture
 import org.opencv.videoio.Videoio
 import java.io.File
 import java.io.IOException
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -70,7 +70,11 @@ class VideoProcessingWorker(
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
     private var currentProgressPercent = VideoProcessingProgressText.DEFAULT_PERCENT
+    private var currentProcessingMode: VideoProcessOptions.ProcessingMode? = null
     private val connectivityObserver = AndroidConnectivityObserver(appContext.applicationContext)
+    private val localJobId: String = workerParams.inputData.getString(EXTRA_JOB_ID)
+        ?.takeIf { it.isNotBlank() }
+        ?: workerParams.id.toString().replace("-", "").take(8).uppercase(Locale.US)
 
     @Volatile
     private var currentServerJobId: String? = null
@@ -94,13 +98,14 @@ class VideoProcessingWorker(
             Log.e(TAG, "Missing source path or process options")
             sourcePath?.takeIf { it.isNotBlank() }?.let { File(it).delete() }
             optionsFile?.delete()
-            VideoProcessingBus.postIdle()
+            VideoProcessingBus.postFailed(localJobId, "Processing failed")
             return Result.failure()
         }
+        currentProcessingMode = options.processingMode
 
         currentProgressPercent = VideoProcessingProgressText.DEFAULT_PERCENT
         setForeground(createForegroundInfo(currentProgressMessage(), ongoing = true))
-        VideoProcessingBus.postProcessing(currentProgressMessage())
+        VideoProcessingBus.postProcessing(localJobId, options.processingMode, currentProgressMessage())
 
         val sourceFile = File(sourcePath)
         return try {
@@ -111,16 +116,16 @@ class VideoProcessingWorker(
                 null
             ) { _, _ -> }
             MediaStorageUtil.addVideo(applicationContext, outputFile.absolutePath)
-            VideoProcessingBus.postFinished(outputFile.absolutePath)
+            VideoProcessingBus.postFinished(localJobId, outputFile.absolutePath)
             showCompletedNotification("Processing done", outputFile.absolutePath)
             Result.success(workDataOf(OUTPUT_VIDEO_PATH to outputFile.absolutePath))
         } catch (e: CancellationException) {
             Log.d(TAG, "Processing cancelled")
-            VideoProcessingBus.postIdle()
+            VideoProcessingBus.postCancelled(localJobId)
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Processing failed: ${e.message}", e)
-            VideoProcessingBus.postIdle()
+            VideoProcessingBus.postFailed(localJobId, "Processing failed")
             showCompletedNotification("Processing failed", null)
             Result.failure()
         } finally {
@@ -218,28 +223,39 @@ class VideoProcessingWorker(
         sourceFile: File,
         options: VideoProcessOptions
     ): String? {
-        return runServerNetworkRequest("Server job upload") {
+        while (isProcessingActive()) {
             Log.d(
                 TAG,
                 "Creating server video job mode=${if (options.useFarnebackHeatmap) "HEATMAP" else "VECTORS"} " +
                     "algorithm=${serverAlgorithmName(options)} isMoving=${options.isMoving}"
             )
-            val videoBody = sourceFile.asRequestBody("video/mp4".toMediaType())
-            val videoPart = MultipartBody.Part.createFormData("file", sourceFile.name, videoBody)
-            val response = OpticalFlowServerClient.api.createProcessVideoJob(
-                file = videoPart,
-                fields = serverMultipartFields(options)
-            )
+            val response = runServerNetworkRequest("Server job upload") {
+                val videoBody = sourceFile.asRequestBody("video/mp4".toMediaType())
+                val videoPart = MultipartBody.Part.createFormData("file", sourceFile.name, videoBody)
+                OpticalFlowServerClient.api.createProcessVideoJob(
+                    file = videoPart,
+                    fields = serverMultipartFields(options)
+                )
+            }
 
             if (response.isSuccessful) {
-                response.body()?.jobId?.takeIf { it.isNotBlank() }?.also { jobId ->
+                return response.body()?.jobId?.takeIf { it.isNotBlank() }?.also { jobId ->
                     currentServerJobId = jobId
+                    VideoProcessingBus.postServerJobId(localJobId, jobId)
                 }
-            } else {
-                Log.e(TAG, "Server job create error: ${response.code()} ${response.errorBodyText()}")
-                null
             }
+
+            if (response.code() == HTTP_TOO_MANY_REQUESTS) {
+                Log.w(TAG, "Server queue is full; waiting before retrying job upload")
+                postCurrentProgress("Server queue is full; waiting...")
+                delay(SERVER_QUEUE_RETRY_DELAY_MS)
+                continue
+            }
+
+            Log.e(TAG, "Server job create error: ${response.code()} ${response.errorBodyText()}")
+            return null
         }
+        throw CancellationException("Video processing stopped")
     }
 
     private suspend fun waitForServerVideoJob(jobId: String, outputFile: File): Boolean {
@@ -248,12 +264,14 @@ class VideoProcessingWorker(
             statusPayload.progress?.let { postProgressPercent(it) }
             when (val status = statusPayload.status) {
                 "queued" -> {
+                    postCurrentProgress("Queued on server...")
                     delay(SERVER_POLL_INTERVAL_MS)
                 }
                 "processing" -> {
                     delay(SERVER_POLL_INTERVAL_MS)
                 }
                 "cancelling" -> {
+                    postCurrentProgress("Cancelling server job...")
                     delay(SERVER_POLL_INTERVAL_MS)
                 }
                 "cancelled" -> {
@@ -835,7 +853,7 @@ class VideoProcessingWorker(
 
     private fun postProgress(message: String) {
         Log.d(TAG, message)
-        VideoProcessingBus.postProcessing(message)
+        VideoProcessingBus.postProcessing(localJobId, currentProcessingMode, message)
         updateNotification(message, ongoing = true)
     }
 
@@ -858,26 +876,27 @@ class VideoProcessingWorker(
     private fun updateNotification(message: String, ongoing: Boolean) {
         setProgressAsync(workDataOf(PROGRESS_PERCENT to currentProgressPercent))
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(message, ongoing))
+        manager.notify(notificationId(localJobId), buildNotification(message, ongoing))
     }
 
     private fun createForegroundInfo(message: String, ongoing: Boolean): ForegroundInfo {
         val notification = buildNotification(message, ongoing)
+        val notificationId = notificationId(localJobId)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(
-                NOTIFICATION_ID,
+                notificationId,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             )
         } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
+            ForegroundInfo(notificationId, notification)
         }
     }
 
     private fun buildNotification(message: String, ongoing: Boolean): Notification {
         val openIntent = PendingIntent.getActivity(
             applicationContext,
-            0,
+            notificationId(localJobId),
             Intent(applicationContext, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             },
@@ -887,7 +906,7 @@ class VideoProcessingWorker(
 
         return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_process)
-            .setContentTitle("Video processing")
+            .setContentTitle("Video processing #$localJobId")
             .setContentText(message)
             .setOngoing(ongoing)
             .setOnlyAlertOnce(true)
@@ -906,18 +925,18 @@ class VideoProcessingWorker(
         }
         val openIntent = PendingIntent.getActivity(
             applicationContext,
-            0,
+            completedNotificationId(localJobId),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(applicationContext, COMPLETED_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_process)
-            .setContentTitle("Video processing")
+            .setContentTitle("Video processing #$localJobId")
             .setContentText(message)
             .setAutoCancel(true)
             .setContentIntent(openIntent)
             .build()
-        manager.notify(COMPLETED_NOTIFICATION_ID, notification)
+        manager.notify(completedNotificationId(localJobId), notification)
     }
 
     private fun createNotificationChannel() {
@@ -1094,11 +1113,14 @@ class VideoProcessingWorker(
         private const val TAG = "VIDEO-WORKER"
         private const val CHANNEL_ID = "video_processing"
         private const val COMPLETED_CHANNEL_ID = "video_processing_completed"
-        private const val NOTIFICATION_ID = 3001
-        private const val COMPLETED_NOTIFICATION_ID = 3002
-        private const val UNIQUE_WORK_NAME = "video_processing_work"
+        private const val NOTIFICATION_ID_BASE = 3001
+        private const val COMPLETED_NOTIFICATION_ID_BASE = 13001
+        private const val WORK_TAG = "video_processing_work"
+        private const val JOB_TAG_PREFIX = "video_processing_job_"
+        private const val NOTIFICATION_ID_RANGE = 9000
         private const val EXTRA_SOURCE_PATH = "source_path"
         private const val EXTRA_OPTIONS_PATH = "options_path"
+        private const val EXTRA_JOB_ID = "job_id"
         private const val OUTPUT_VIDEO_PATH = "output_video_path"
         private const val PROGRESS_PERCENT = "progress_percent"
         private const val BATCH_FRAME_SIZE = 8
@@ -1107,36 +1129,67 @@ class VideoProcessingWorker(
         private const val AI_FRAME_STRIDE = 1
         private const val SERVER_POLL_INTERVAL_MS = 2_000L
         private const val SERVER_CANCEL_TIMEOUT_MS = 5_000L
+        private const val SERVER_QUEUE_RETRY_DELAY_MS = 5_000L
         private const val NETWORK_RETRY_DELAY_MS = 3_000L
         private const val MAX_NETWORK_RETRY_DELAY_MS = 30_000L
+        private const val HTTP_TOO_MANY_REQUESTS = 429
 
-        fun enqueue(context: Context, sourcePath: String, options: VideoProcessOptions) {
+        fun newJobId(): String = VideoProcessingBus.createJobId()
+
+        fun enqueue(
+            context: Context,
+            sourcePath: String,
+            options: VideoProcessOptions,
+            jobId: String = newJobId()
+        ): String {
             val sourceFile = File(sourcePath)
             val optionsFile = File(
                 sourceFile.parentFile ?: context.applicationContext.cacheDir,
-                "${sourceFile.nameWithoutExtension}_options.json"
+                "${sourceFile.nameWithoutExtension}_${jobId}_options.json"
             )
             optionsFile.writeText(options.toJsonString())
 
-            val requestBuilder = OneTimeWorkRequestBuilder<VideoProcessingWorker>()
+            val request = OneTimeWorkRequestBuilder<VideoProcessingWorker>()
                 .setInputData(
                     workDataOf(
+                        EXTRA_JOB_ID to jobId,
                         EXTRA_SOURCE_PATH to sourcePath,
                         EXTRA_OPTIONS_PATH to optionsFile.absolutePath
                     )
                 )
+                .addTag(WORK_TAG)
+                .addTag(jobTag(jobId))
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .build()
 
-            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-                UNIQUE_WORK_NAME,
-                ExistingWorkPolicy.KEEP,
-                requestBuilder.build()
-            )
+            WorkManager.getInstance(context.applicationContext).enqueue(request)
+            return jobId
         }
 
-        fun cancel(context: Context) {
-            WorkManager.getInstance(context.applicationContext).cancelUniqueWork(UNIQUE_WORK_NAME)
-            VideoProcessingBus.postIdle()
+        fun cancel(context: Context, jobId: String? = null) {
+            val workManager = WorkManager.getInstance(context.applicationContext)
+            if (jobId.isNullOrBlank()) {
+                workManager.cancelAllWorkByTag(WORK_TAG)
+                VideoProcessingBus.jobsSnapshot()
+                    .filter { it.isActive }
+                    .forEach { VideoProcessingBus.postCancelled(it.jobId) }
+                return
+            }
+
+            workManager.cancelAllWorkByTag(jobTag(jobId))
+            VideoProcessingBus.postCancelled(jobId)
+        }
+
+        private fun jobTag(jobId: String): String {
+            return JOB_TAG_PREFIX + jobId
+        }
+
+        private fun notificationId(jobId: String): Int {
+            return NOTIFICATION_ID_BASE + ((jobId.hashCode() and Int.MAX_VALUE) % NOTIFICATION_ID_RANGE)
+        }
+
+        private fun completedNotificationId(jobId: String): Int {
+            return COMPLETED_NOTIFICATION_ID_BASE + ((jobId.hashCode() and Int.MAX_VALUE) % NOTIFICATION_ID_RANGE)
         }
 
         private fun VideoProcessOptions.toJsonString(): String {

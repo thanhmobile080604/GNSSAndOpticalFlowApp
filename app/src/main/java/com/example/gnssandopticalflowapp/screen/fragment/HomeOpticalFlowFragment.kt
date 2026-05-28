@@ -3,6 +3,7 @@ package com.example.gnssandopticalflowapp.screen.fragment
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.safeContext
@@ -15,10 +16,12 @@ import com.example.gnssandopticalflowapp.video.VideoProcessingProgressText
 import com.example.gnssandopticalflowapp.video.VideoProcessingWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 
 class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(FragmentHomeOpticalFlowBinding::inflate) {
 
@@ -37,10 +40,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         }
 
         btnFunc2.setSingleClick {
-            if (isProcessingVideo()) {
-                showProcessingToast()
-                return@setSingleClick
-            }
             videoPickerLauncher.launch("video/*")
         }
 
@@ -60,59 +59,127 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     }
 
     private fun handleVideoSelection(uri: Uri, options: VideoProcessOptions) {
-        if (isProcessingVideo()) {
-            showProcessingToast()
+        val loadDecision = evaluateProcessingLoad(options.processingMode)
+        if (loadDecision.isBlocked) {
+            showProcessingLimitToast(loadDecision)
             return
         }
 
+        if (loadDecision.shouldWarn) {
+            showHeavyLoadWarning(loadDecision) {
+                startVideoProcessing(uri, options)
+            }
+            return
+        }
+
+        startVideoProcessing(uri, options)
+    }
+
+    private fun startVideoProcessing(uri: Uri, options: VideoProcessOptions) {
         val appContext = safeContext().applicationContext
-        showUploadLoading()
+        val localJobId = VideoProcessingWorker.newJobId()
+        VideoProcessingBus.postQueued(localJobId, options.processingMode)
 
         val uploadJob = mainViewModel.videoProcessingScope.launch(Dispatchers.IO) {
+            var sourceFile: File? = null
             try {
                 val cacheDir = appContext.cacheDir
                 val videosDir = File(cacheDir, "videos")
                 if (!videosDir.exists()) videosDir.mkdirs()
                 
-                val sourceFile = File(videosDir, "temp_source_${System.currentTimeMillis()}.mp4")
-                appContext.contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(sourceFile).use { output ->
+                val selectedSourceFile = File(videosDir, "temp_source_${localJobId}_${System.currentTimeMillis()}.mp4")
+                sourceFile = selectedSourceFile
+                val inputStream = appContext.contentResolver.openInputStream(uri)
+                    ?: throw IOException("Cannot open selected video")
+                inputStream.use { input ->
+                    FileOutputStream(selectedSourceFile).use { output ->
                         input.copyTo(output)
                     }
                 }
-                
+                if (!isActive) throw CancellationException()
+
                 VideoProcessingBus.postProcessing(
+                    localJobId,
+                    options.processingMode,
                     VideoProcessingProgressText.format(VideoProcessingProgressText.DEFAULT_PERCENT)
                 )
                 VideoProcessingWorker.enqueue(
                     context = appContext,
-                    sourcePath = sourceFile.absolutePath,
-                    options = options
+                    sourcePath = selectedSourceFile.absolutePath,
+                    options = options,
+                    jobId = localJobId
                 )
                 
             } catch (_: CancellationException) {
-                VideoProcessingBus.postIdle()
+                sourceFile?.delete()
+                VideoProcessingBus.postCancelled(localJobId)
                 withContext(Dispatchers.Main) {
                     dismissUploadLoading()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                VideoProcessingBus.postIdle()
+                sourceFile?.delete()
+                VideoProcessingBus.postFailed(localJobId, "Processing failed")
                 withContext(Dispatchers.Main) {
                     dismissUploadLoading()
                 }
             }
         }
-        mainViewModel.videoUploadJob = uploadJob
-        uploadJob.invokeOnCompletion {
-            if (mainViewModel.videoUploadJob === uploadJob) {
-                mainViewModel.videoUploadJob = null
-            }
-        }
+        mainViewModel.trackVideoUploadJob(localJobId, uploadJob)
     }
 
-    private fun isProcessingVideo(): Boolean {
-        return mainViewModel.videoUploadJob?.isActive == true || VideoProcessingBus.isProcessing
+    private fun evaluateProcessingLoad(mode: VideoProcessOptions.ProcessingMode): ProcessingLoadDecision {
+        val modeCount = VideoProcessingBus.activeJobCount(mode)
+        val totalCount = VideoProcessingBus.activeJobCount()
+        val hardLimit = when (mode) {
+            VideoProcessOptions.ProcessingMode.OFFLINE -> ON_DEVICE_HARD_LIMIT
+            VideoProcessOptions.ProcessingMode.ONLINE -> ONLINE_HARD_LIMIT
+        }
+        val warnAt = when (mode) {
+            VideoProcessOptions.ProcessingMode.OFFLINE -> ON_DEVICE_WARN_AT
+            VideoProcessOptions.ProcessingMode.ONLINE -> ONLINE_WARN_AT
+        }
+
+        return ProcessingLoadDecision(
+            mode = mode,
+            modeCount = modeCount,
+            totalCount = totalCount,
+            modeHardLimit = hardLimit,
+            globalHardLimit = GLOBAL_HARD_LIMIT,
+            shouldWarn = modeCount >= warnAt || totalCount >= GLOBAL_WARN_AT,
+            isBlocked = modeCount >= hardLimit || totalCount >= GLOBAL_HARD_LIMIT
+        )
+    }
+
+    private fun showProcessingLimitToast(loadDecision: ProcessingLoadDecision) {
+        val modeLabel = when (loadDecision.mode) {
+            VideoProcessOptions.ProcessingMode.OFFLINE -> "on-device"
+            VideoProcessOptions.ProcessingMode.ONLINE -> "server"
+        }
+        Toast.makeText(
+            safeContext(),
+            "Too many $modeLabel jobs (${loadDecision.modeCount}/${loadDecision.modeHardLimit}) or total jobs (${loadDecision.totalCount}/${loadDecision.globalHardLimit}).",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun showHeavyLoadWarning(
+        loadDecision: ProcessingLoadDecision,
+        onContinue: () -> Unit
+    ) {
+        val modeLabel = when (loadDecision.mode) {
+            VideoProcessOptions.ProcessingMode.OFFLINE -> "on-device"
+            VideoProcessOptions.ProcessingMode.ONLINE -> "server"
+        }
+        AlertDialog.Builder(safeContext())
+            .setTitle("Heavy processing load")
+            .setMessage(
+                "There are ${loadDecision.modeCount} $modeLabel job(s) and " +
+                    "${loadDecision.totalCount} total job(s) already running. Continue anyway?"
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Continue") { _, _ -> onContinue() }
+            .show()
     }
 
     private fun showProcessingToast() {
@@ -121,11 +188,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
             "Đang loading, chờ xử lý xong rồi thử lại",
             Toast.LENGTH_SHORT
         ).show()
-    }
-
-    private fun showUploadLoading() {
-        mainViewModel.videoProcessingMessage.value =
-            VideoProcessingProgressText.format(VideoProcessingProgressText.DEFAULT_PERCENT)
     }
 
     private fun dismissUploadLoading() {
@@ -138,5 +200,24 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     }
 
     override fun initObserver() {
+    }
+
+    private data class ProcessingLoadDecision(
+        val mode: VideoProcessOptions.ProcessingMode,
+        val modeCount: Int,
+        val totalCount: Int,
+        val modeHardLimit: Int,
+        val globalHardLimit: Int,
+        val shouldWarn: Boolean,
+        val isBlocked: Boolean
+    )
+
+    private companion object {
+        const val ON_DEVICE_WARN_AT = 1
+        const val ON_DEVICE_HARD_LIMIT = 2
+        const val ONLINE_WARN_AT = 3
+        const val ONLINE_HARD_LIMIT = 5
+        const val GLOBAL_WARN_AT = 4
+        const val GLOBAL_HARD_LIMIT = 6
     }
 }

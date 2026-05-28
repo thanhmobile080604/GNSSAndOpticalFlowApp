@@ -17,6 +17,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 
 class MainViewModel :
@@ -34,6 +35,7 @@ class MainViewModel :
     val processedVideoPathToOpen = MutableLiveData<String?>()
     val videoProcessingScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var videoUploadJob: Job? = null
+    private val videoUploadJobs = ConcurrentHashMap<String, Job>()
     
     private val _currentLocation = MutableLiveData<Location?>()
     val currentLocation: LiveData<Location?> = _currentLocation
@@ -96,6 +98,24 @@ class MainViewModel :
             bearing = Constants.FAKE_LOCATION_BEARING_DEGREES
             time = System.currentTimeMillis()
             elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+        }
+    }
+
+    fun trackVideoUploadJob(jobId: String, job: Job) {
+        videoUploadJobs[jobId] = job
+        videoUploadJob = job
+        job.invokeOnCompletion {
+            videoUploadJobs.remove(jobId)
+            if (videoUploadJob === job) {
+                videoUploadJob = null
+            }
+        }
+    }
+
+    fun cancelVideoUploadJob(jobId: String) {
+        videoUploadJobs.remove(jobId)?.cancel()
+        if (videoUploadJob?.isActive != true) {
+            videoUploadJob = null
         }
     }
 

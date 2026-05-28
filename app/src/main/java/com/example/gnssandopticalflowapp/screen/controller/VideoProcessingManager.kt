@@ -5,12 +5,10 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
-import android.view.WindowInsets
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import androidx.appcompat.app.AppCompatActivity
@@ -21,6 +19,7 @@ import androidx.navigation.fragment.NavHostFragment
 import com.example.gnssandopticalflowapp.MainViewModel
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
+import com.example.gnssandopticalflowapp.video.VideoProcessingJobState
 import com.example.gnssandopticalflowapp.video.VideoProcessingBus
 import com.example.gnssandopticalflowapp.video.VideoProcessingProgressText
 import com.example.gnssandopticalflowapp.video.VideoProcessingWorker
@@ -43,6 +42,8 @@ class VideoProcessingManager(
     private var isProcessedVideoReady = false
     private var pendingProcessedVideoPath: String? = null
     private var currentVideoProcessingMessage = DEFAULT_PROCESSING_MESSAGE
+    private var processingJobs: List<VideoProcessingJobState> = emptyList()
+    private var activeJobId: String? = null
     private var activeVideoProcessingAnimation: AnimatorSet? = null
     private var bubblePositionInitialized = false
     private var bubbleDownRawX = 0f
@@ -51,6 +52,9 @@ class VideoProcessingManager(
     private var bubbleStartY = 0f
     private var bubbleMoved = false
     private var bubbleTouchSlop = 0
+    private var topBarDownRawX = 0f
+    private var topBarDownRawY = 0f
+    private var topBarSwipeHandled = false
     private var isAttached = false
 
     private val layoutChangeListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -67,6 +71,16 @@ class VideoProcessingManager(
 
         // Setup UI handlers
         binding.btnCancel.setSingleClick {
+            val activeJob = activeJobState()
+            if (activeJob?.isReady == true && !activeJob.outputPath.isNullOrBlank()) {
+                watchProcessedVideo(activeJob.outputPath)
+                return@setSingleClick
+            }
+            if (activeJob?.isTerminal == true) {
+                dismissActiveJob()
+                return@setSingleClick
+            }
+
             val processedVideoPath = pendingProcessedVideoPath
             if (isProcessedVideoReady && !processedVideoPath.isNullOrBlank()) {
                 watchProcessedVideo(processedVideoPath)
@@ -82,6 +96,8 @@ class VideoProcessingManager(
         binding.ivClose.setSingleClick {
             collapseVideoProcessingOverlay()
         }
+
+        setupTopBarCarouselTouch()
 
         binding.processingBubble.setOnClickListener {
             if (isVideoProcessingCollapsed) {
@@ -162,6 +178,9 @@ class VideoProcessingManager(
 
                 launch {
                     VideoProcessingBus.processingMessage.observe(activity) { message ->
+                        if (!VideoProcessingBus.processingJobs.value.orEmpty().isEmpty()) {
+                            return@observe
+                        }
                         if (message.isNullOrBlank()) {
                             if (viewModel.processedVideoPathToOpen.value.isNullOrBlank() &&
                                 VideoProcessingBus.processedVideoPathToOpen.value.isNullOrBlank()
@@ -183,7 +202,14 @@ class VideoProcessingManager(
             showProcessedVideoReady(path)
         }
 
+        VideoProcessingBus.processingJobs.observe(activity) { jobs ->
+            renderProcessingJobs(jobs.orEmpty())
+        }
+
         VideoProcessingBus.processedVideoPathToOpen.observe(activity) { path ->
+            if (!VideoProcessingBus.processingJobs.value.orEmpty().isEmpty()) {
+                return@observe
+            }
             if (path.isNullOrBlank()) return@observe
             showProcessedVideoReady(path)
         }
@@ -207,8 +233,197 @@ class VideoProcessingManager(
         binding.processingBubble.animate().cancel()
         binding.processingBubble.setOnTouchListener(null)
         binding.processingBubble.setOnClickListener(null)
+        carouselTouchViews().forEach { it.setOnTouchListener(null) }
         binding.main.removeOnLayoutChangeListener(layoutChangeListener)
         isAttached = false
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupTopBarCarouselTouch() {
+        carouselTouchViews().forEach { view ->
+            view.setOnTouchListener { touchedView, event ->
+                if (!isVideoProcessingVisible || isVideoProcessingCollapsed || processingJobs.size <= 1) {
+                    return@setOnTouchListener false
+                }
+
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        touchedView.parent.requestDisallowInterceptTouchEvent(true)
+                        topBarDownRawX = event.rawX
+                        topBarDownRawY = event.rawY
+                        topBarSwipeHandled = false
+                        true
+                    }
+
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX - topBarDownRawX
+                        val dy = event.rawY - topBarDownRawY
+                        if (!topBarSwipeHandled &&
+                            dy > bubbleTouchSlop * TOP_BAR_SWIPE_SLOP_MULTIPLIER &&
+                            abs(dy) > abs(dx)
+                        ) {
+                            topBarSwipeHandled = true
+                            showNextProcessingJob()
+                        }
+                        true
+                    }
+
+                    MotionEvent.ACTION_UP -> {
+                        touchedView.parent.requestDisallowInterceptTouchEvent(false)
+                        if (!topBarSwipeHandled) {
+                            touchedView.performClick()
+                        }
+                        true
+                    }
+
+                    MotionEvent.ACTION_CANCEL -> {
+                        touchedView.parent.requestDisallowInterceptTouchEvent(false)
+                        true
+                    }
+
+                    else -> false
+                }
+            }
+        }
+    }
+
+    private fun carouselTouchViews(): List<View> {
+        return listOf(
+            binding.loadingCard,
+            binding.progressCircular,
+            binding.tvProcessingJobId,
+            binding.tvLoadingMessage,
+            binding.actionGroup,
+            binding.btnCancel,
+            binding.btnLater,
+            binding.ivClose
+        )
+    }
+
+    private fun renderProcessingJobs(jobs: List<VideoProcessingJobState>) {
+        processingJobs = jobs
+        if (jobs.isEmpty()) {
+            activeJobId = null
+            if (viewModel.videoProcessingMessage.value.isNullOrBlank() &&
+                viewModel.processedVideoPathToOpen.value.isNullOrBlank()
+            ) {
+                hide(clearProcessedVideo = true)
+            }
+            return
+        }
+
+        val selectedJobId = activeJobId?.takeIf { selectedId ->
+            jobs.any { it.jobId == selectedId }
+        } ?: jobs.firstOrNull { it.isActive }?.jobId
+            ?: jobs.last().jobId
+        activeJobId = selectedJobId
+
+        val activeJob = jobs.firstOrNull { it.jobId == selectedJobId } ?: return
+        showProcessingJob(activeJob)
+    }
+
+    private fun showProcessingJob(job: VideoProcessingJobState) {
+        currentVideoProcessingMessage = job.message
+        pendingProcessedVideoPath = job.outputPath
+        isProcessedVideoReady = job.isReady
+
+        if (!isVideoProcessingVisible) {
+            isVideoProcessingVisible = true
+            isVideoProcessingCollapsed = false
+            cancelActiveVideoProcessingAnimation()
+            binding.processingBubble.animate().cancel()
+            binding.processingBubble.visibility = View.INVISIBLE
+            showLoadingViews()
+            return
+        }
+
+        if (!isVideoProcessingCollapsed && !isVideoProcessingTransitioning) {
+            showLoadingViews()
+        } else {
+            binding.processingDoneDot.visibility =
+                if (processingJobs.any { it.isReady }) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun activeJobState(): VideoProcessingJobState? {
+        val selectedId = activeJobId ?: return null
+        return processingJobs.firstOrNull { it.jobId == selectedId }
+    }
+
+    private fun dismissActiveJob() {
+        val jobId = activeJobId ?: return
+        VideoProcessingBus.clearJob(jobId)
+    }
+
+    private fun showNextProcessingJob() {
+        if (processingJobs.size <= 1 || isVideoProcessingTransitioning) return
+        val currentIndex = processingJobs.indexOfFirst { it.jobId == activeJobId }
+            .takeIf { it >= 0 }
+            ?: 0
+        val nextIndex = (currentIndex + 1) % processingJobs.size
+        animateJobSwap(processingJobs[nextIndex])
+    }
+
+    private fun animateJobSwap(nextJob: VideoProcessingJobState) {
+        cancelActiveVideoProcessingAnimation()
+        isVideoProcessingTransitioning = true
+
+        val contentViews = listOf(
+            binding.tvProcessingJobId,
+            binding.tvLoadingMessage,
+            binding.progressCircular,
+            binding.actionGroup
+        )
+        val outAnimators = contentViews.flatMap { view ->
+            listOf(
+                ObjectAnimator.ofFloat(view, View.TRANSLATION_Y, 0f, dp(14)),
+                ObjectAnimator.ofFloat(view, View.SCALE_X, 1f, 0.92f),
+                ObjectAnimator.ofFloat(view, View.SCALE_Y, 1f, 0.92f),
+                ObjectAnimator.ofFloat(view, View.ALPHA, 1f, 0.35f)
+            )
+        } + ObjectAnimator.ofFloat(binding.loadingCard, View.TRANSLATION_Z, 0f, dp(8))
+
+        val inAnimators = contentViews.flatMap { view ->
+            listOf(
+                ObjectAnimator.ofFloat(view, View.TRANSLATION_Y, -dp(10), 0f),
+                ObjectAnimator.ofFloat(view, View.SCALE_X, 1.08f, 1f),
+                ObjectAnimator.ofFloat(view, View.SCALE_Y, 1.08f, 1f),
+                ObjectAnimator.ofFloat(view, View.ALPHA, 0.35f, 1f)
+            )
+        } + ObjectAnimator.ofFloat(binding.loadingCard, View.TRANSLATION_Z, dp(8), 0f)
+
+        val outSet = AnimatorSet().apply {
+            playTogether(outAnimators)
+            duration = JOB_SWAP_HALF_DURATION_MS
+            interpolator = AccelerateDecelerateInterpolator()
+        }
+        val inSet = AnimatorSet().apply {
+            playTogether(inAnimators)
+            duration = JOB_SWAP_HALF_DURATION_MS
+            interpolator = DecelerateInterpolator()
+        }
+
+        activeVideoProcessingAnimation = AnimatorSet().apply {
+            playSequentially(outSet, inSet)
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    contentViews.forEach(::resetAnimatedView)
+                    binding.loadingCard.translationZ = 0f
+                    isVideoProcessingTransitioning = false
+                    activeVideoProcessingAnimation = null
+                }
+            })
+            outSet.addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    activeJobId = nextJob.jobId
+                    currentVideoProcessingMessage = nextJob.message
+                    pendingProcessedVideoPath = nextJob.outputPath
+                    isProcessedVideoReady = nextJob.isReady
+                    applyCurrentOverlayMode()
+                }
+            })
+            start()
+        }
     }
 
     private fun showProcessing(message: String) {
@@ -427,6 +642,7 @@ class VideoProcessingManager(
         return listOf(
             binding.loadingCard,
             binding.progressCircular,
+            binding.tvProcessingJobId,
             binding.tvLoadingMessage,
             binding.actionGroup,
             binding.ivClose
@@ -434,10 +650,30 @@ class VideoProcessingManager(
     }
 
     private fun applyCurrentOverlayMode() {
+        val activeJob = activeJobState()
+        if (activeJob != null) {
+            applyJobUi(activeJob)
+            return
+        }
+
+        binding.tvProcessingJobId.visibility = View.GONE
         if (isProcessedVideoReady) {
             applyCompletedUi()
         } else {
             applyProcessingUi(currentVideoProcessingMessage)
+        }
+    }
+
+    private fun applyJobUi(job: VideoProcessingJobState) {
+        binding.tvProcessingJobId.text = jobTitle(job)
+        binding.tvProcessingJobId.visibility = View.VISIBLE
+
+        when (job.status) {
+            VideoProcessingJobState.Status.QUEUED,
+            VideoProcessingJobState.Status.PROCESSING -> applyProcessingUi(job.message)
+            VideoProcessingJobState.Status.COMPLETED -> applyCompletedUi()
+            VideoProcessingJobState.Status.FAILED -> applyTerminalUi("Failed", "Dismiss")
+            VideoProcessingJobState.Status.CANCELLED -> applyTerminalUi("Cancelled", "Dismiss")
         }
     }
 
@@ -457,6 +693,33 @@ class VideoProcessingManager(
         binding.btnLater.visibility = View.VISIBLE
         binding.progressCircular.visibility = View.INVISIBLE
         binding.processingDoneDot.visibility = View.VISIBLE
+    }
+
+    private fun applyTerminalUi(message: String, actionText: String) {
+        binding.tvLoadingMessage.text = message
+        binding.btnCancel.text = actionText
+        binding.btnCancel.visibility = View.VISIBLE
+        binding.btnLater.visibility = View.GONE
+        binding.progressCircular.visibility = View.INVISIBLE
+        binding.processingDoneDot.visibility =
+            if (processingJobs.any { it.isReady }) View.VISIBLE else View.GONE
+    }
+
+    private fun jobTitle(job: VideoProcessingJobState): String {
+        val index = processingJobs.indexOfFirst { it.jobId == job.jobId }
+            .takeIf { it >= 0 }
+            ?.plus(1)
+            ?: 1
+        val modeLabel = when (job.mode) {
+            com.example.gnssandopticalflowapp.model.VideoProcessOptions.ProcessingMode.ONLINE -> "ONLINE"
+            com.example.gnssandopticalflowapp.model.VideoProcessOptions.ProcessingMode.OFFLINE -> "DEVICE"
+            null -> "VIDEO"
+        }
+        val serverId = job.serverJobId
+            ?.take(8)
+            ?.let { "  S:$it" }
+            .orEmpty()
+        return "Job #${job.jobId}  $modeLabel  $index/${processingJobs.size}$serverId"
     }
 
     private fun currentProgressPercent(): Int {
@@ -559,6 +822,11 @@ class VideoProcessingManager(
     }
 
     private fun cancelVideoProcessing() {
+        activeJobId?.let { jobId ->
+            viewModel.cancelVideoUploadJob(jobId)
+            VideoProcessingWorker.cancel(activity, jobId)
+            return
+        }
         viewModel.videoUploadJob?.cancel()
         viewModel.videoProcessingMessage.value = null
         VideoProcessingWorker.cancel(activity)
@@ -570,7 +838,7 @@ class VideoProcessingManager(
             ?: return
 
         viewModel.selectedVideoPath.value = path
-        clearVideoProcessingOverlayState()
+        clearVideoProcessingOverlayState(activeJobId)
 
         val navigateToVideo = {
             if (navController.currentDestination?.id == com.example.gnssandopticalflowapp.R.id.videoOpticalFlowFragment) {
@@ -593,7 +861,7 @@ class VideoProcessingManager(
     }
 
     private fun dismissProcessedVideoReady() {
-        clearVideoProcessingOverlayState()
+        clearVideoProcessingOverlayState(activeJobId)
         viewModel.processedVideoPathToOpen.value = null
         VideoProcessingBus.processedVideoPathToOpen.value = null
     }
@@ -610,12 +878,17 @@ class VideoProcessingManager(
     private fun hasPendingProcessedVideo(): Boolean {
         return isProcessedVideoReady ||
             !pendingProcessedVideoPath.isNullOrBlank() ||
+            processingJobs.any { it.isReady } ||
             !viewModel.processedVideoPathToOpen.value.isNullOrBlank() ||
             !VideoProcessingBus.processedVideoPathToOpen.value.isNullOrBlank()
     }
 
-    private fun clearVideoProcessingOverlayState() {
-        hide(clearProcessedVideo = true)
+    private fun clearVideoProcessingOverlayState(jobId: String? = null) {
+        if (!jobId.isNullOrBlank()) {
+            VideoProcessingBus.clearJob(jobId)
+        } else {
+            hide(clearProcessedVideo = true)
+        }
         if (viewModel.videoProcessingMessage.value != null) {
             viewModel.videoProcessingMessage.value = null
         }
@@ -635,5 +908,7 @@ class VideoProcessingManager(
         const val OVERLAY_TRANSITION_DURATION_MS = 260L
         const val BUBBLE_FADE_DURATION_MS = 160L
         const val BUBBLE_SNAP_DURATION_MS = 180L
+        const val JOB_SWAP_HALF_DURATION_MS = 120L
+        const val TOP_BAR_SWIPE_SLOP_MULTIPLIER = 1.6f
     }
 }

@@ -50,6 +50,26 @@
         app:layout_constraintVertical_bias="0.52" />
 
     <TextView
+        android:id="@+id/tvProcessingJobId"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:elevation="25dp"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter_black"
+        android:maxLines="1"
+        android:text="Job #00000000"
+        android:textColor="#DCCBFF"
+        android:textSize="11sp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/tvLoadingMessage"
+        app:layout_constraintEnd_toStartOf="@id/actionGroup"
+        app:layout_constraintStart_toEndOf="@id/progress_circular"
+        app:layout_constraintTop_toTopOf="@id/progress_circular"
+        app:layout_constraintVertical_chainStyle="packed" />
+
+    <TextView
         android:id="@+id/tvLoadingMessage"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
@@ -67,7 +87,7 @@
         app:layout_constraintBottom_toBottomOf="@id/progress_circular"
         app:layout_constraintEnd_toStartOf="@id/actionGroup"
         app:layout_constraintStart_toEndOf="@id/progress_circular"
-        app:layout_constraintTop_toTopOf="@id/progress_circular" />
+        app:layout_constraintTop_toBottomOf="@id/tvProcessingJobId" />
 
     <LinearLayout
         android:id="@+id/actionGroup"
