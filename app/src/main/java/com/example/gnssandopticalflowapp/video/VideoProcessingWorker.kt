@@ -14,6 +14,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
@@ -61,6 +62,8 @@ import org.opencv.videoio.Videoio
 import java.io.File
 import java.io.IOException
 import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -75,9 +78,15 @@ class VideoProcessingWorker(
     private val localJobId: String = workerParams.inputData.getString(EXTRA_JOB_ID)
         ?.takeIf { it.isNotBlank() }
         ?: workerParams.id.toString().replace("-", "").take(8).uppercase(Locale.US)
+    private val localJobCreatedAtMs: Long = workerParams.inputData.getLong(
+        EXTRA_JOB_CREATED_AT_MS,
+        System.currentTimeMillis()
+    )
 
     @Volatile
     private var currentServerJobId: String? = null
+    @Volatile
+    private var acceptsJobUpdates = true
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
         createNotificationChannel()
@@ -102,6 +111,12 @@ class VideoProcessingWorker(
             return Result.failure()
         }
         currentProcessingMode = options.processingMode
+        if (VideoProcessingBus.isDismissed(localJobId)) {
+            sourcePath.takeIf { it.isNotBlank() }?.let { File(it).delete() }
+            optionsFile?.delete()
+            clearNotifications(applicationContext, localJobId)
+            return Result.failure()
+        }
 
         currentProgressPercent = VideoProcessingProgressText.DEFAULT_PERCENT
         setForeground(createForegroundInfo(currentProgressMessage(), ongoing = true))
@@ -110,6 +125,7 @@ class VideoProcessingWorker(
         val sourceFile = File(sourcePath)
         return try {
             val outputFile = processVideo(sourceFile, options)
+            acceptsJobUpdates = false
             MediaScannerConnection.scanFile(
                 applicationContext,
                 arrayOf(outputFile.absolutePath),
@@ -121,14 +137,19 @@ class VideoProcessingWorker(
             Result.success(workDataOf(OUTPUT_VIDEO_PATH to outputFile.absolutePath))
         } catch (e: CancellationException) {
             Log.d(TAG, "Processing cancelled")
+            acceptsJobUpdates = false
             VideoProcessingBus.postCancelled(localJobId)
+            clearNotifications(applicationContext, localJobId)
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Processing failed: ${e.message}", e)
+            acceptsJobUpdates = false
             VideoProcessingBus.postFailed(localJobId, "Processing failed")
             showCompletedNotification("Processing failed", null)
             Result.failure()
         } finally {
+            acceptsJobUpdates = false
+            activeWorkIds.remove(localJobId)
             sourceFile.delete()
             optionsFile.delete()
         }
@@ -839,6 +860,7 @@ class VideoProcessingWorker(
     }
 
     private fun postCurrentProgress(status: String) {
+        if (!canPostJobUpdates()) return
         Log.d(TAG, status)
         postProgress(VideoProcessingProgressText.normalize(status, currentProgressPercent))
     }
@@ -852,8 +874,10 @@ class VideoProcessingWorker(
     }
 
     private fun postProgress(message: String) {
+        if (!canPostJobUpdates()) return
         Log.d(TAG, message)
         VideoProcessingBus.postProcessing(localJobId, currentProcessingMode, message)
+        if (VideoProcessingBus.isDismissed(localJobId)) return
         updateNotification(message, ongoing = true)
     }
 
@@ -902,20 +926,24 @@ class VideoProcessingWorker(
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val cancelIntent = WorkManager.getInstance(applicationContext).createCancelPendingIntent(id)
+        val cancelIntent = jobActionPendingIntent(ACTION_CANCEL_JOB, localJobId)
 
         return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_process)
             .setContentTitle("Video processing #$localJobId")
             .setContentText(message)
+            .setWhen(localJobCreatedAtMs)
+            .setShowWhen(false)
             .setOngoing(ongoing)
             .setOnlyAlertOnce(true)
             .setContentIntent(openIntent)
+            .setDeleteIntent(cancelIntent)
             .addAction(R.drawable.ic_close, "Cancel", cancelIntent)
             .build()
     }
 
     private fun showCompletedNotification(message: String, videoPath: String?) {
+        if (VideoProcessingBus.isDismissed(localJobId)) return
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
         val intent = Intent(applicationContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -925,18 +953,38 @@ class VideoProcessingWorker(
         }
         val openIntent = PendingIntent.getActivity(
             applicationContext,
-            completedNotificationId(localJobId),
+            notificationId(localJobId),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val dismissIntent = jobActionPendingIntent(ACTION_DISMISS_JOB, localJobId)
         val notification = NotificationCompat.Builder(applicationContext, COMPLETED_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_process)
             .setContentTitle("Video processing #$localJobId")
             .setContentText(message)
-            .setAutoCancel(true)
+            .setWhen(localJobCreatedAtMs)
+            .setShowWhen(false)
+            .setAutoCancel(false)
+            .setOngoing(false)
             .setContentIntent(openIntent)
+            .setDeleteIntent(dismissIntent)
+            .addAction(R.drawable.ic_close, "Dismiss", dismissIntent)
             .build()
-        manager.notify(completedNotificationId(localJobId), notification)
+        manager.cancel(completedNotificationId(localJobId))
+        manager.notify(notificationId(localJobId), notification)
+    }
+
+    private fun jobActionPendingIntent(action: String, jobId: String): PendingIntent {
+        val intent = Intent(applicationContext, VideoProcessingNotificationReceiver::class.java).apply {
+            this.action = action
+            putExtra(EXTRA_JOB_ID, jobId)
+        }
+        return PendingIntent.getBroadcast(
+            applicationContext,
+            actionRequestCode(jobId, action),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
     private fun createNotificationChannel() {
@@ -958,6 +1006,10 @@ class VideoProcessingWorker(
 
     private fun isProcessingActive(): Boolean {
         return !isStopped
+    }
+
+    private fun canPostJobUpdates(): Boolean {
+        return acceptsJobUpdates && isProcessingActive() && !VideoProcessingBus.isDismissed(localJobId)
     }
 
     private fun convertCaptureFrameToRgba(sourceMat: Mat, rgbaMat: Mat) {
@@ -1111,6 +1163,9 @@ class VideoProcessingWorker(
 
     companion object {
         private const val TAG = "VIDEO-WORKER"
+        const val ACTION_CANCEL_JOB = "com.example.gnssandopticalflowapp.video.CANCEL_JOB"
+        const val ACTION_DISMISS_JOB = "com.example.gnssandopticalflowapp.video.DISMISS_JOB"
+        const val EXTRA_JOB_ID = "job_id"
         private const val CHANNEL_ID = "video_processing"
         private const val COMPLETED_CHANNEL_ID = "video_processing_completed"
         private const val NOTIFICATION_ID_BASE = 3001
@@ -1118,9 +1173,11 @@ class VideoProcessingWorker(
         private const val WORK_TAG = "video_processing_work"
         private const val JOB_TAG_PREFIX = "video_processing_job_"
         private const val NOTIFICATION_ID_RANGE = 9000
+        private const val UNIQUE_WORK_PREFIX = "video_processing_unique_job_"
+        private val activeWorkIds = ConcurrentHashMap<String, UUID>()
         private const val EXTRA_SOURCE_PATH = "source_path"
         private const val EXTRA_OPTIONS_PATH = "options_path"
-        private const val EXTRA_JOB_ID = "job_id"
+        private const val EXTRA_JOB_CREATED_AT_MS = "job_created_at_ms"
         private const val OUTPUT_VIDEO_PATH = "output_video_path"
         private const val PROGRESS_PERCENT = "progress_percent"
         private const val BATCH_FRAME_SIZE = 8
@@ -1153,6 +1210,7 @@ class VideoProcessingWorker(
                 .setInputData(
                     workDataOf(
                         EXTRA_JOB_ID to jobId,
+                        EXTRA_JOB_CREATED_AT_MS to System.currentTimeMillis(),
                         EXTRA_SOURCE_PATH to sourcePath,
                         EXTRA_OPTIONS_PATH to optionsFile.absolutePath
                     )
@@ -1162,34 +1220,75 @@ class VideoProcessingWorker(
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
 
-            WorkManager.getInstance(context.applicationContext).enqueue(request)
+            activeWorkIds[jobId] = request.id
+            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                uniqueWorkName(jobId),
+                ExistingWorkPolicy.KEEP,
+                request
+            )
             return jobId
         }
 
-        fun cancel(context: Context, jobId: String? = null) {
+        fun cancel(context: Context, jobId: String) {
+            if (jobId.isBlank()) return
             val workManager = WorkManager.getInstance(context.applicationContext)
-            if (jobId.isNullOrBlank()) {
-                workManager.cancelAllWorkByTag(WORK_TAG)
-                VideoProcessingBus.jobsSnapshot()
-                    .filter { it.isActive }
-                    .forEach { VideoProcessingBus.postCancelled(it.jobId) }
-                return
+            val workId = activeWorkIds.remove(jobId)
+            if (workId != null) {
+                workManager.cancelWorkById(workId)
+            } else {
+                workManager.cancelUniqueWork(uniqueWorkName(jobId))
             }
+            clearJob(context, jobId)
+        }
 
-            workManager.cancelAllWorkByTag(jobTag(jobId))
-            VideoProcessingBus.postCancelled(jobId)
+        fun dismiss(context: Context, jobId: String) {
+            if (jobId.isBlank()) return
+            clearJob(context, jobId)
+        }
+
+        fun clearJob(context: Context, jobId: String) {
+            activeWorkIds.remove(jobId)
+            clearNotifications(context, jobId)
+            VideoProcessingBus.clearJob(jobId)
+            VideoProcessingBus.processedVideoPathToOpen.postValue(null)
+        }
+
+        fun clearNotifications(context: Context, jobId: String) {
+            val manager = context.applicationContext.getSystemService(NotificationManager::class.java)
+            manager.cancel(notificationId(jobId))
+            manager.cancel(completedNotificationId(jobId))
+            manager.cancel(legacyNotificationId(jobId))
+            manager.cancel(legacyCompletedNotificationId(jobId))
         }
 
         private fun jobTag(jobId: String): String {
             return JOB_TAG_PREFIX + jobId
         }
 
+        private fun uniqueWorkName(jobId: String): String {
+            return UNIQUE_WORK_PREFIX + jobId
+        }
+
         private fun notificationId(jobId: String): Int {
-            return NOTIFICATION_ID_BASE + ((jobId.hashCode() and Int.MAX_VALUE) % NOTIFICATION_ID_RANGE)
+            val rawId = jobId.toLongOrNull(radix = 16)?.toInt() ?: jobId.hashCode()
+            val positiveId = rawId and Int.MAX_VALUE
+            return positiveId.takeIf { it != 0 } ?: NOTIFICATION_ID_BASE
         }
 
         private fun completedNotificationId(jobId: String): Int {
+            return notificationId(jobId) xor 0x40000000
+        }
+
+        private fun legacyNotificationId(jobId: String): Int {
+            return NOTIFICATION_ID_BASE + ((jobId.hashCode() and Int.MAX_VALUE) % NOTIFICATION_ID_RANGE)
+        }
+
+        private fun legacyCompletedNotificationId(jobId: String): Int {
             return COMPLETED_NOTIFICATION_ID_BASE + ((jobId.hashCode() and Int.MAX_VALUE) % NOTIFICATION_ID_RANGE)
+        }
+
+        private fun actionRequestCode(jobId: String, action: String): Int {
+            return (31 * notificationId(jobId)) + action.hashCode()
         }
 
         private fun VideoProcessOptions.toJsonString(): String {

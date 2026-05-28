@@ -6,6 +6,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/black"
+    android:clipChildren="false"
+    android:clipToPadding="false"
     tools:context=".MainActivity">
 
     <androidx.fragment.app.FragmentContainerView
@@ -20,132 +22,20 @@
         app:layout_constraintTop_toTopOf="parent"
         app:navGraph="@navigation/nav_graph" />
 
-    <View
-        android:id="@+id/loadingCard"
+
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/topBarViewPager"
         android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginTop="40dp"
-        android:background="@drawable/bg_modal_glass"
-        android:elevation="24dp"
+        android:layout_height="136dp"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:elevation="28dp"
+        android:overScrollMode="never"
         android:visibility="gone"
-        app:layout_constraintDimensionRatio="2:0.5"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintWidth_percent="0.92" />
-
-    <ProgressBar
-        android:id="@+id/progress_circular"
-        style="@style/Widget.AppCompat.ProgressBar"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginStart="20dp"
-        android:elevation="25dp"
-        android:indeterminate="true"
-        android:indeterminateTint="#DCCBFF"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="@id/loadingCard"
-        app:layout_constraintStart_toStartOf="@id/loadingCard"
-        app:layout_constraintTop_toTopOf="@id/loadingCard"
-        app:layout_constraintVertical_bias="0.52" />
-
-    <TextView
-        android:id="@+id/tvProcessingJobId"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="12dp"
-        android:elevation="25dp"
-        android:ellipsize="end"
-        android:fontFamily="@font/inter_black"
-        android:maxLines="1"
-        android:text="Job #00000000"
-        android:textColor="#DCCBFF"
-        android:textSize="11sp"
-        android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/tvLoadingMessage"
-        app:layout_constraintEnd_toStartOf="@id/actionGroup"
-        app:layout_constraintStart_toEndOf="@id/progress_circular"
-        app:layout_constraintTop_toTopOf="@id/progress_circular"
-        app:layout_constraintVertical_chainStyle="packed" />
-
-    <TextView
-        android:id="@+id/tvLoadingMessage"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="12dp"
-        android:elevation="25dp"
-        android:ellipsize="end"
-        android:fontFamily="@font/inter_black"
-        android:gravity="center_vertical"
-        android:maxLines="1"
-        android:text="Processing: 0%"
-        android:textColor="@color/white"
-        android:textSize="14sp"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="@id/progress_circular"
-        app:layout_constraintEnd_toStartOf="@id/actionGroup"
-        app:layout_constraintStart_toEndOf="@id/progress_circular"
-        app:layout_constraintTop_toBottomOf="@id/tvProcessingJobId" />
-
-    <LinearLayout
-        android:id="@+id/actionGroup"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginEnd="20dp"
-        android:elevation="25dp"
-        android:gravity="center"
-        android:orientation="vertical"
-        app:layout_constraintBottom_toBottomOf="@id/loadingCard"
-        app:layout_constraintEnd_toEndOf="@id/loadingCard"
-        app:layout_constraintTop_toTopOf="@id/loadingCard">
-
-        <TextView
-            android:id="@+id/btnCancel"
-            android:layout_width="wrap_content"
-            android:layout_height="30dp"
-            android:background="@drawable/bg_glass_chip"
-            android:fontFamily="@font/inter_black"
-            android:gravity="center"
-            android:minWidth="86dp"
-            android:paddingHorizontal="2dp"
-            android:text="Cancel"
-            android:textAllCaps="false"
-            android:textColor="@color/white"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/btnLater"
-            android:layout_width="wrap_content"
-            android:layout_height="22dp"
-            android:layout_marginTop="2dp"
-            android:fontFamily="@font/inter_black"
-            android:gravity="center"
-            android:minWidth="86dp"
-            android:text="Later"
-            android:textAllCaps="false"
-            android:textColor="@color/white"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-    </LinearLayout>
-
-    <ImageView
-        android:id="@+id/ivClose"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
-        android:background="@drawable/bg_glass_icon_button"
-        android:contentDescription="Collapse"
-        android:elevation="26dp"
-        android:padding="6dp"
-        android:src="@drawable/ic_close"
-        android:visibility="gone"
-        app:layout_constraintEnd_toEndOf="@id/loadingCard"
-        app:layout_constraintTop_toTopOf="@id/loadingCard"
-        app:tint="@color/white" />
+        tools:visibility="visible" />
 
     <FrameLayout
         android:id="@+id/processingBubble"

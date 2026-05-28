@@ -14,6 +14,7 @@ data class VideoProcessingJobState(
     val status: Status,
     val outputPath: String? = null,
     val serverJobId: String? = null,
+    val createdAtMs: Long = System.currentTimeMillis(),
     val updatedAtMs: Long = System.currentTimeMillis()
 ) {
     enum class Status {
@@ -49,6 +50,7 @@ object VideoProcessingBus {
 
     private val lock = Any()
     private val jobsById = LinkedHashMap<String, VideoProcessingJobState>()
+    private val dismissedJobIds = mutableSetOf<String>()
 
     fun createJobId(): String {
         return UUID.randomUUID().toString()
@@ -66,7 +68,11 @@ object VideoProcessingBus {
     }
 
     fun jobsSnapshot(): List<VideoProcessingJobState> {
-        return synchronized(lock) { jobsById.values.toList() }
+        return synchronized(lock) { jobsById.values.sortedBy { it.createdAtMs } }
+    }
+
+    fun isDismissed(jobId: String): Boolean {
+        return synchronized(lock) { jobId in dismissedJobIds }
     }
 
     fun postQueued(
@@ -74,6 +80,9 @@ object VideoProcessingBus {
         mode: VideoProcessOptions.ProcessingMode?,
         message: String = "Preparing video..."
     ) {
+        synchronized(lock) {
+            dismissedJobIds.remove(jobId)
+        }
         val normalizedMessage = VideoProcessingProgressText.normalize(
             message,
             VideoProcessingProgressText.DEFAULT_PERCENT
@@ -127,6 +136,7 @@ object VideoProcessingBus {
     }
 
     fun postFinished(jobId: String, path: String) {
+        if (isDismissed(jobId)) return
         upsertJob(
             jobId = jobId,
             mode = synchronized(lock) { jobsById[jobId]?.mode },
@@ -148,6 +158,7 @@ object VideoProcessingBus {
     }
 
     fun postFailed(jobId: String, message: String = "Processing failed") {
+        if (isDismissed(jobId)) return
         upsertJob(
             jobId = jobId,
             mode = synchronized(lock) { jobsById[jobId]?.mode },
@@ -157,12 +168,7 @@ object VideoProcessingBus {
     }
 
     fun postCancelled(jobId: String) {
-        upsertJob(
-            jobId = jobId,
-            mode = synchronized(lock) { jobsById[jobId]?.mode },
-            message = "Cancelled",
-            status = VideoProcessingJobState.Status.CANCELLED
-        )
+        clearJob(jobId)
     }
 
     fun postIdle(jobId: String) {
@@ -181,6 +187,15 @@ object VideoProcessingBus {
     fun clearJob(jobId: String) {
         synchronized(lock) {
             jobsById.remove(jobId)
+            dismissedJobIds.add(jobId)
+        }
+        publishJobs()
+    }
+
+    fun clearAllJobs() {
+        synchronized(lock) {
+            dismissedJobIds.addAll(jobsById.keys)
+            jobsById.clear()
         }
         publishJobs()
     }
@@ -203,7 +218,10 @@ object VideoProcessingBus {
         val percent = forcedPercent
             ?: VideoProcessingProgressText.extractPercent(normalizedMessage)
             ?: VideoProcessingProgressText.DEFAULT_PERCENT
-        synchronized(lock) {
+        val didUpdate = synchronized(lock) {
+            if (jobId in dismissedJobIds) {
+                return@synchronized false
+            }
             val previous = jobsById[jobId]
             jobsById[jobId] = VideoProcessingJobState(
                 jobId = jobId,
@@ -212,10 +230,14 @@ object VideoProcessingBus {
                 percent = percent,
                 status = status,
                 outputPath = outputPath ?: previous?.outputPath,
-                serverJobId = previous?.serverJobId
+                serverJobId = previous?.serverJobId,
+                createdAtMs = previous?.createdAtMs ?: System.currentTimeMillis()
             )
+            true
         }
-        publishJobs()
+        if (didUpdate) {
+            publishJobs()
+        }
     }
 
     private fun updateJob(jobId: String, transform: (VideoProcessingJobState) -> VideoProcessingJobState) {
@@ -227,7 +249,7 @@ object VideoProcessingBus {
     }
 
     private fun publishJobs() {
-        val snapshot = synchronized(lock) { jobsById.values.toList() }
+        val snapshot = synchronized(lock) { jobsById.values.sortedBy { it.createdAtMs } }
         isProcessing = snapshot.any { it.isActive }
         currentProcessingPercent = snapshot.lastOrNull { it.isActive }?.percent
             ?: VideoProcessingProgressText.DEFAULT_PERCENT
