@@ -41,6 +41,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
+import okio.BufferedSink
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
@@ -61,6 +62,7 @@ import org.opencv.videoio.VideoCapture
 import org.opencv.videoio.Videoio
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -85,6 +87,8 @@ class VideoProcessingWorker(
 
     @Volatile
     private var currentServerJobId: String? = null
+    @Volatile
+    private var currentServerUploadId: String? = null
     @Volatile
     private var acceptsJobUpdates = true
 
@@ -230,12 +234,14 @@ class VideoProcessingWorker(
             postCurrentProgress("Processing on server...")
             return@withContext waitForServerVideoJob(jobId, outputFile)
         } catch (e: CancellationException) {
+            cancelCurrentServerUpload()
             cancelCurrentServerJob()
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Server connection failed: ${e.message}", e)
             return@withContext false
         } finally {
+            currentServerUploadId = null
             currentServerJobId = null
         }
     }
@@ -244,6 +250,10 @@ class VideoProcessingWorker(
         sourceFile: File,
         options: VideoProcessOptions
     ): String? {
+        if (sourceFile.length() > SERVER_CHUNK_UPLOAD_THRESHOLD_BYTES) {
+            return createChunkedServerVideoJob(sourceFile, options)
+        }
+
         while (isProcessingActive()) {
             Log.d(
                 TAG,
@@ -279,16 +289,144 @@ class VideoProcessingWorker(
         throw CancellationException("Video processing stopped")
     }
 
+    private suspend fun createChunkedServerVideoJob(
+        sourceFile: File,
+        options: VideoProcessOptions
+    ): String? {
+        val fileSize = sourceFile.length()
+        if (fileSize <= 0L) return null
+        val chunkSize = SERVER_UPLOAD_CHUNK_BYTES.coerceAtMost(fileSize)
+        val totalChunks = ((fileSize + chunkSize - 1L) / chunkSize).toInt()
+        postCurrentProgress("Preparing chunk upload...")
+
+        while (isProcessingActive()) {
+            val createResponse = runServerNetworkRequest("Server chunk upload session") {
+                OpticalFlowServerClient.api.createProcessVideoUpload(
+                    fileName = sourceFile.name,
+                    fileSize = fileSize,
+                    chunkSize = chunkSize,
+                    totalChunks = totalChunks
+                )
+            }
+
+            if (!createResponse.isSuccessful) {
+                if (createResponse.code() == HTTP_TOO_MANY_REQUESTS) {
+                    Log.w(TAG, "Server upload slots are full; waiting before retrying chunk upload")
+                    postCurrentProgress("Server upload slots are full; waiting...")
+                    delay(SERVER_QUEUE_RETRY_DELAY_MS)
+                    continue
+                }
+                Log.e(TAG, "Server upload create error: ${createResponse.code()} ${createResponse.errorBodyText()}")
+                return null
+            }
+
+            val uploadId = createResponse.body()?.uploadId?.takeIf { it.isNotBlank() }
+            if (uploadId == null) {
+                Log.e(TAG, "Server upload create response missing upload_id")
+                return null
+            }
+            currentServerUploadId = uploadId
+
+            try {
+                uploadVideoChunks(uploadId, sourceFile, chunkSize, totalChunks)
+                val jobId = completeChunkedServerVideoUpload(uploadId, options) ?: return null
+                currentServerUploadId = null
+                return jobId
+            } catch (e: CancellationException) {
+                cancelCurrentServerUpload()
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Chunked server upload failed: ${e.message}", e)
+                cancelCurrentServerUpload()
+                return null
+            }
+        }
+        throw CancellationException("Video processing stopped")
+    }
+
+    private suspend fun uploadVideoChunks(
+        uploadId: String,
+        sourceFile: File,
+        chunkSize: Long,
+        totalChunks: Int
+    ) {
+        for (chunkIndex in 0 until totalChunks) {
+            if (!isProcessingActive()) {
+                throw CancellationException("Video processing stopped")
+            }
+
+            val offset = chunkIndex * chunkSize
+            val byteCount = minOf(chunkSize, sourceFile.length() - offset)
+            postCurrentProgress("Uploading chunk ${chunkIndex + 1}/$totalChunks...")
+            val response = runServerNetworkRequest("Server chunk upload") {
+                val chunkBody = FileChunkRequestBody(sourceFile, offset, byteCount)
+                val chunkPart = MultipartBody.Part.createFormData(
+                    "chunk",
+                    "${sourceFile.name}.part${chunkIndex + 1}",
+                    chunkBody
+                )
+                OpticalFlowServerClient.api.uploadProcessVideoChunk(
+                    uploadId = uploadId,
+                    chunk = chunkPart,
+                    fields = mapOf(
+                        "chunk_index" to textPart(chunkIndex.toString()),
+                        "total_chunks" to textPart(totalChunks.toString())
+                    )
+                )
+            }
+
+            if (!response.isSuccessful) {
+                throw IOException("Server chunk upload error: ${response.code()} ${response.errorBodyText()}")
+            }
+            val uploadedPercent = ((chunkIndex + 1) * SERVER_UPLOAD_PROGRESS_PERCENT / totalChunks)
+                .coerceIn(1, SERVER_UPLOAD_PROGRESS_PERCENT)
+            postProgressPercent(uploadedPercent)
+        }
+    }
+
+    private suspend fun completeChunkedServerVideoUpload(
+        uploadId: String,
+        options: VideoProcessOptions
+    ): String? {
+        while (isProcessingActive()) {
+            postCurrentProgress("Finalizing upload...")
+            val response = runServerNetworkRequest("Server chunk upload complete") {
+                OpticalFlowServerClient.api.completeProcessVideoUpload(
+                    uploadId = uploadId,
+                    fields = serverFormFields(options)
+                )
+            }
+
+            if (response.isSuccessful) {
+                return response.body()?.jobId?.takeIf { it.isNotBlank() }?.also { jobId ->
+                    currentServerJobId = jobId
+                    VideoProcessingBus.postServerJobId(localJobId, jobId)
+                }
+            }
+
+            if (response.code() == HTTP_TOO_MANY_REQUESTS) {
+                Log.w(TAG, "Server queue is full; waiting before finalizing upload")
+                postCurrentProgress("Server queue is full; waiting...")
+                delay(SERVER_QUEUE_RETRY_DELAY_MS)
+                continue
+            }
+
+            Log.e(TAG, "Server upload complete error: ${response.code()} ${response.errorBodyText()}")
+            return null
+        }
+        throw CancellationException("Video processing stopped")
+    }
+
     private suspend fun waitForServerVideoJob(jobId: String, outputFile: File): Boolean {
         while (isProcessingActive()) {
             val statusPayload = fetchServerVideoJob(jobId) ?: return false
-            statusPayload.progress?.let { postProgressPercent(it) }
             when (val status = statusPayload.status) {
                 "queued" -> {
                     postCurrentProgress("Queued on server...")
                     delay(SERVER_POLL_INTERVAL_MS)
                 }
                 "processing" -> {
+                    statusPayload.progress?.let { postProgressPercent(it) }
                     delay(SERVER_POLL_INTERVAL_MS)
                 }
                 "cancelling" -> {
@@ -346,7 +484,30 @@ class VideoProcessingWorker(
         }
     }
 
+    private suspend fun cancelCurrentServerUpload() {
+        val uploadId = currentServerUploadId?.takeIf { it.isNotBlank() } ?: return
+        kotlinx.coroutines.withContext(NonCancellable + Dispatchers.IO) {
+            runCatching {
+                withTimeout(SERVER_CANCEL_TIMEOUT_MS) {
+                    val response = OpticalFlowServerClient.api.cancelProcessVideoUpload(uploadId)
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Server upload cancelled: $uploadId")
+                    } else {
+                        Log.w(TAG, "Server upload cancel failed: $uploadId ${response.code()} ${response.errorBodyText()}")
+                    }
+                }
+            }.onFailure { error ->
+                Log.w(TAG, "Server upload cancel request failed: $uploadId ${error.message}")
+            }
+        }
+    }
+
     private suspend fun downloadServerVideoJobResult(jobId: String, outputFile: File): Boolean {
+        val resultInfo = fetchServerVideoResultInfo(jobId)
+        if (resultInfo?.fileSize != null && resultInfo.totalChunks != null && resultInfo.totalChunks > 0) {
+            return downloadServerVideoJobResultChunks(jobId, outputFile, resultInfo)
+        }
+
         return runServerNetworkRequest("Server result download") {
             outputFile.delete()
             val response = OpticalFlowServerClient.api.downloadProcessVideoJobResult(jobId)
@@ -359,6 +520,91 @@ class VideoProcessingWorker(
             } else {
                 Log.e(TAG, "Server result download error: ${response.code()} ${response.errorBodyText()}")
                 false
+            }
+        }
+    }
+
+    private suspend fun fetchServerVideoResultInfo(jobId: String): ServerVideoResultInfoResponse? {
+        return runServerNetworkRequest("Server result info") {
+            val response = OpticalFlowServerClient.api.getProcessVideoJobResultInfo(jobId)
+            if (response.isSuccessful) {
+                response.body()
+            } else {
+                Log.w(TAG, "Server result info unavailable: ${response.code()} ${response.errorBodyText()}")
+                null
+            }
+        }
+    }
+
+    private suspend fun downloadServerVideoJobResultChunks(
+        jobId: String,
+        outputFile: File,
+        resultInfo: ServerVideoResultInfoResponse
+    ): Boolean {
+        val expectedSize = resultInfo.fileSize?.takeIf { it > 0L } ?: return false
+        val totalChunks = resultInfo.totalChunks?.takeIf { it > 0 } ?: return false
+        outputFile.delete()
+
+        return try {
+            java.io.FileOutputStream(outputFile).use { output ->
+                for (chunkIndex in 0 until totalChunks) {
+                    if (!isProcessingActive()) {
+                        throw CancellationException("Video processing stopped")
+                    }
+
+                    postCurrentProgress("Downloading chunk ${chunkIndex + 1}/$totalChunks...")
+                    val response = runServerNetworkRequest("Server result chunk download") {
+                        OpticalFlowServerClient.api.downloadProcessVideoJobResultChunk(jobId, chunkIndex)
+                    }
+                    val body = response.body()
+                    if (!response.isSuccessful || body == null) {
+                        Log.e(TAG, "Server result chunk error: ${response.code()} ${response.errorBodyText()}")
+                        outputFile.delete()
+                        return false
+                    }
+                    body.byteStream().use { input ->
+                        input.copyTo(output)
+                    }
+                    val downloadPercent = SERVER_DOWNLOAD_PROGRESS_START_PERCENT +
+                        ((chunkIndex + 1) * SERVER_DOWNLOAD_PROGRESS_RANGE_PERCENT / totalChunks)
+                    postProgressPercent(downloadPercent.coerceIn(
+                        SERVER_DOWNLOAD_PROGRESS_START_PERCENT,
+                        VideoProcessingProgressText.COMPLETE_PERCENT
+                    ))
+                }
+            }
+
+            val valid = outputFile.length() == expectedSize && outputFile.length() > 100
+            if (valid) {
+                cleanupServerVideoResult(jobId)
+            } else {
+                Log.e(TAG, "Server result size mismatch: ${outputFile.length()} != $expectedSize")
+                outputFile.delete()
+            }
+            valid
+        } catch (e: CancellationException) {
+            outputFile.delete()
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Server result chunk download failed: ${e.message}", e)
+            outputFile.delete()
+            false
+        }
+    }
+
+    private suspend fun cleanupServerVideoResult(jobId: String) {
+        kotlinx.coroutines.withContext(NonCancellable + Dispatchers.IO) {
+            runCatching {
+                withTimeout(SERVER_CANCEL_TIMEOUT_MS) {
+                    val response = OpticalFlowServerClient.api.cleanupProcessVideoJobResult(jobId)
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Server result cleanup requested: $jobId")
+                    } else {
+                        Log.w(TAG, "Server result cleanup failed: $jobId ${response.code()} ${response.errorBodyText()}")
+                    }
+                }
+            }.onFailure { error ->
+                Log.w(TAG, "Server result cleanup request failed: $jobId ${error.message}")
             }
         }
     }
@@ -414,26 +660,29 @@ class VideoProcessingWorker(
     }
 
     private fun serverMultipartFields(options: VideoProcessOptions): Map<String, RequestBody> {
-        val fields = mutableMapOf<String, RequestBody>()
-        fields["mode"] = textPart(if (options.useFarnebackHeatmap) "HEATMAP" else "VECTORS")
-        fields["processing_mode"] = textPart(options.processingMode.name)
-        fields["algorithm"] = textPart(serverAlgorithmName(options))
-        fields["sensitivity"] = textPart(options.sensitivity.toString())
-        fields["is_moving"] = textPart(options.isMoving.toString())
-        fields["isMoving"] = textPart(options.isMoving.toString())
-        fields["roi_enabled"] = textPart((options.roi != null).toString())
+        return serverFormFields(options).mapValues { (_, value) -> textPart(value) }
+    }
+
+    private fun serverFormFields(options: VideoProcessOptions): Map<String, String> {
+        val fields = mutableMapOf<String, String>()
+        fields["mode"] = if (options.useFarnebackHeatmap) "HEATMAP" else "VECTORS"
+        fields["processing_mode"] = options.processingMode.name
+        fields["algorithm"] = serverAlgorithmName(options)
+        fields["sensitivity"] = options.sensitivity.toString()
+        fields["is_moving"] = options.isMoving.toString()
+        fields["isMoving"] = options.isMoving.toString()
+        fields["roi_enabled"] = (options.roi != null).toString()
 
         options.roi?.let { roi ->
-            fields["roi_left"] = textPart(roi.left.toString())
-            fields["roi_top"] = textPart(roi.top.toString())
-            fields["roi_right"] = textPart(roi.right.toString())
-            fields["roi_bottom"] = textPart(roi.bottom.toString())
-            fields["roi_view_aspect_ratio"] = textPart(roi.viewAspectRatio.toString())
-            fields["roi_path_points"] = textPart(
+            fields["roi_left"] = roi.left.toString()
+            fields["roi_top"] = roi.top.toString()
+            fields["roi_right"] = roi.right.toString()
+            fields["roi_bottom"] = roi.bottom.toString()
+            fields["roi_view_aspect_ratio"] = roi.viewAspectRatio.toString()
+            fields["roi_path_points"] =
                 roi.pathPoints.joinToString(separator = ";") { point ->
                     "${point.x},${point.y}"
                 }
-            )
         }
         return fields
     }
@@ -1161,6 +1410,30 @@ class VideoProcessingWorker(
 
     private data class ActiveRoi(val rect: Rect, val mask: Mat?)
 
+    private class FileChunkRequestBody(
+        private val file: File,
+        private val offset: Long,
+        private val byteCount: Long
+    ) : RequestBody() {
+        override fun contentType() = "application/octet-stream".toMediaType()
+
+        override fun contentLength() = byteCount
+
+        override fun writeTo(sink: BufferedSink) {
+            RandomAccessFile(file, "r").use { input ->
+                input.seek(offset)
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var remaining = byteCount
+                while (remaining > 0L) {
+                    val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (read == -1) break
+                    sink.write(buffer, 0, read)
+                    remaining -= read.toLong()
+                }
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "VIDEO-WORKER"
         const val ACTION_CANCEL_JOB = "com.example.gnssandopticalflowapp.video.CANCEL_JOB"
@@ -1189,6 +1462,11 @@ class VideoProcessingWorker(
         private const val SERVER_QUEUE_RETRY_DELAY_MS = 5_000L
         private const val NETWORK_RETRY_DELAY_MS = 3_000L
         private const val MAX_NETWORK_RETRY_DELAY_MS = 30_000L
+        private const val SERVER_CHUNK_UPLOAD_THRESHOLD_BYTES = 80L * 1024L * 1024L
+        private const val SERVER_UPLOAD_CHUNK_BYTES = 32L * 1024L * 1024L
+        private const val SERVER_UPLOAD_PROGRESS_PERCENT = 20
+        private const val SERVER_DOWNLOAD_PROGRESS_START_PERCENT = 90
+        private const val SERVER_DOWNLOAD_PROGRESS_RANGE_PERCENT = 10
         private const val HTTP_TOO_MANY_REQUESTS = 429
 
         fun newJobId(): String = VideoProcessingBus.createJobId()

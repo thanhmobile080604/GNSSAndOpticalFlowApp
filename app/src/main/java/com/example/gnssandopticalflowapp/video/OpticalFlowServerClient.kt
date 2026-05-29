@@ -27,12 +27,12 @@ object OpticalFlowServerClient {
     private fun okHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+            .writeTimeout(WRITE_TIMEOUT_MINUTES, TimeUnit.MINUTES)
             .build()
     }
 
     private const val CONNECT_TIMEOUT_SECONDS = 30L
-    private const val READ_TIMEOUT_SECONDS = 120L
-    private const val WRITE_TIMEOUT_SECONDS = 120L
+    private const val READ_TIMEOUT_MINUTES = 30L
+    private const val WRITE_TIMEOUT_MINUTES = 10L
 }
