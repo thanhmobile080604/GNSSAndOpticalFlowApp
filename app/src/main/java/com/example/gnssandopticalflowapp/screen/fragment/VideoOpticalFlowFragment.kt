@@ -1,17 +1,25 @@
 package com.example.gnssandopticalflowapp.screen.fragment
 
+import android.Manifest
+import android.content.ContentValues
 import android.graphics.SurfaceTexture
+import android.media.MediaScannerConnection
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.util.Log
 import android.view.Surface
 import android.view.TextureView
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.annotation.OptIn
+import androidx.appcompat.app.AlertDialog
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.net.toUri
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -27,8 +35,12 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentVideoOpticalFlowBinding
 import com.example.gnssandopticalflowapp.util.VideoPlaybackSupport
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Runnable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -193,6 +205,10 @@ class VideoOpticalFlowFragment :
         }
         ivBack.setOnClickListener { onBack() }
 
+        ivDownload.setSingleClick {
+            saveVideo()
+        }
+
         ivVideoControl.setOnClickListener {
             if (isPlaying) {
                 player?.pause()
@@ -213,6 +229,134 @@ class VideoOpticalFlowFragment :
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+    }
+
+    private fun saveVideo() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            saveVideoToPhotos()
+        } else {
+            requestStoragePermission()
+        }
+    }
+
+    private fun requestStoragePermission() {
+        doRequestPermission(
+            arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+            object : IPermissionListener {
+                override fun onAllow() {
+                    saveVideoToPhotosBelowAndroid10()
+                }
+
+                override fun onDenied() {
+                    showDownloadResult(success = false)
+                }
+
+                override fun onNeverAskAgain(permission: String) {
+                    showDialogRequestStoragePermission()
+                }
+            }
+        )
+    }
+
+    private fun saveVideoToPhotosBelowAndroid10() {
+        val sourceFile = currentVideoFile()
+        if (sourceFile == null) {
+            showDownloadResult(success = false)
+            return
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val dcimDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
+                    val cameraDir = File(dcimDir, "Camera")
+                    if (!cameraDir.exists() && !cameraDir.mkdirs()) {
+                        throw IOException("Cannot create Camera directory")
+                    }
+
+                    val outputFile = File(cameraDir, downloadFileName())
+                    sourceFile.copyTo(outputFile, overwrite = true)
+                    MediaScannerConnection.scanFile(
+                        safeContext(),
+                        arrayOf(outputFile.absolutePath),
+                        arrayOf("video/mp4"),
+                        null
+                    )
+                }.isSuccess
+            }
+            showDownloadResult(saved)
+        }
+    }
+
+    private fun saveVideoToPhotos() {
+        val context = context ?: return
+        val sourceFile = currentVideoFile()
+        if (sourceFile == null) {
+            showDownloadResult(success = false)
+            return
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                val resolver = context.contentResolver
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, downloadFileName())
+                    put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Camera")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+
+                val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues)
+                    ?: return@withContext false
+
+                runCatching {
+                    resolver.openOutputStream(uri)?.use { output ->
+                        sourceFile.inputStream().use { input ->
+                            input.copyTo(output)
+                        }
+                    } ?: throw IOException("Cannot open output stream")
+
+                    val completeValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    }
+                    resolver.update(uri, completeValues, null, null)
+                    true
+                }.getOrElse { error ->
+                    Log.e("VIDEO-PLAYER", "Save video failed: ${error.message}", error)
+                    resolver.delete(uri, null, null)
+                    false
+                }
+            }
+            showDownloadResult(saved)
+        }
+    }
+
+    private fun currentVideoFile(): File? {
+        val path = mainViewModel.selectedVideoPath.value?.takeIf { it.isNotBlank() } ?: return null
+        return File(path).takeIf { it.isFile && it.length() > 0L }
+    }
+
+    private fun downloadFileName(): String {
+        return "optical_flow_${System.currentTimeMillis()}.mp4"
+    }
+
+    private fun showDownloadResult(success: Boolean) {
+        if (!isAdded) return
+        Toast.makeText(
+            safeContext(),
+            if (success) "Video saved to Photos" else "Cannot save video",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun showDialogRequestStoragePermission() {
+        if (!isAdded) return
+        AlertDialog.Builder(safeContext())
+            .setTitle("Storage permission required")
+            .setMessage("Enable storage permission in Settings to save this video.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Settings") { _, _ -> openAppSettings() }
+            .show()
     }
 
     private fun updateProgress() {
