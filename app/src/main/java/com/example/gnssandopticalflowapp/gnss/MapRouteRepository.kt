@@ -6,7 +6,7 @@ import org.osmdroid.util.GeoPoint
 import java.net.HttpURLConnection
 import java.net.URL
 
-class GNSSRouteRepository {
+class MapRouteRepository {
     fun fetchRoute(origin: GeoPoint, destination: GeoPoint): RouteInfo? {
         val url = URL(
             "https://router.project-osrm.org/route/v1/driving/" +

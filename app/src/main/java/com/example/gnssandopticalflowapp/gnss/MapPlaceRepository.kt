@@ -9,7 +9,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-class GNSSPlaceRepository(context: Context) {
+class MapPlaceRepository(context: Context) {
     private val appContext = context.applicationContext
 
     fun searchPlaces(query: String): List<SearchPlace> {
