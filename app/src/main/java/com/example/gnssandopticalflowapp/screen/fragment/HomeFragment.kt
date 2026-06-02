@@ -6,12 +6,21 @@ import androidx.viewpager2.widget.ViewPager2
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.adapter.HomePagerAdapter
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.hide
 import com.example.gnssandopticalflowapp.common.setSingleClick
+import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentHomeBinding
 
 class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::inflate) {
 
     private lateinit var pagerAdapter: HomePagerAdapter
+
+
+    enum class MODE {
+        MAP_2D, MAP_3D, HOME_OPTICAL
+    }
+
+    private var currentMode: MODE? = null
 
     @SuppressLint("ClickableViewAccessibility")
     override fun FragmentHomeBinding.initView() {
@@ -20,9 +29,21 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
         viewPager.isUserInputEnabled = false
         viewPager.offscreenPageLimit = pagerAdapter.itemCount
         viewPager.registerOnPageChangeCallback(pageChangeCallback)
-        updateTabState()
         view.bind(viewPager)
         view.setElasticEnabled(true)
+
+        liquidPurpleLeft.bind(viewPager)
+        liquidPurpleRight.bind(viewPager)
+        liquidPurpleLeft.setElasticEnabled(true)
+        liquidPurpleRight.setElasticEnabled(true)
+        liquidPurpleLeft.setTintColorRed(0.482f)
+        liquidPurpleLeft.setTintColorGreen(0.361f)
+        liquidPurpleLeft.setTintColorBlue(1f)
+        liquidPurpleLeft.setTintAlpha(0.45f)
+        liquidPurpleRight.setTintColorRed(0.482f)
+        liquidPurpleRight.setTintColorGreen(0.361f)
+        liquidPurpleRight.setTintColorBlue(1f)
+        liquidPurpleRight.setTintAlpha(0.45f)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -36,46 +57,69 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::infl
     }
 
     override fun initObserver() {
-        mainViewModel.currentTab.observe(viewLifecycleOwner) {
-            updateNavVisibility()
+        mainViewModel.isGnss3DMode.observe(viewLifecycleOwner) {
+            syncMode()
+        }
+    }
+
+    private fun setMode(mode: MODE) {
+        if (currentMode == mode) return
+
+        currentMode = mode
+        binding.applyMode(mode)
+    }
+
+    private fun syncMode() {
+        val mode = when (binding.viewPager.currentItem) {
+            0 -> {
+                if (mainViewModel.isGnss3DMode.value == true) {
+                    MODE.MAP_3D
+                } else {
+                    MODE.MAP_2D
+                }
+            }
+
+            1 -> MODE.HOME_OPTICAL
+
+            else -> MODE.MAP_2D
+        }
+
+        setMode(mode)
+    }
+
+    private fun FragmentHomeBinding.applyMode(mode: MODE) {
+        when (mode) {
+            MODE.MAP_2D -> {
+                liquidPurpleLeft.show()
+                liquidPurpleRight.hide()
+                earthButton.setColorFilter(Color.BLACK)
+                opticalFlowButton.setColorFilter(Color.BLACK)
+            }
+
+            MODE.MAP_3D -> {
+                liquidPurpleLeft.hide()
+                liquidPurpleRight.hide()
+                earthButton.setColorFilter(Color.WHITE)
+                opticalFlowButton.setColorFilter(Color.WHITE)
+                view.setBackgroundResource(R.drawable.bg_blue_gradient_40_left)
+            }
+
+            MODE.HOME_OPTICAL -> {
+                liquidPurpleLeft.hide()
+                liquidPurpleRight.show()
+                earthButton.setColorFilter(Color.WHITE)
+                opticalFlowButton.setColorFilter(Color.WHITE)
+            }
         }
     }
 
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
             super.onPageSelected(position)
+
             mainViewModel.currentTab.value = position
-            updateTabState()
+            syncMode()
         }
-    }
-
-    private fun updateTabState() = with(binding) {
-        val selectedTab = mainViewModel.currentTab.value ?: 0
-        view.setBackgroundResource(
-            if (selectedTab == 0) R.drawable.bg_blue_gradient_40_left else R.drawable.bg_blue_gradient_40_right
-        )
-        updateTabIcons(selectedTab)
-        updateNavVisibility()
-    }
-
-    private fun updateTabIcons(selectedTab: Int) = with(binding) {
-        val selectedColor = Color.BLACK
-        val idleColor = Color.rgb(173, 154, 223)
-
-        earthButton.setColorFilter(if (selectedTab == 0) selectedColor else idleColor)
-        opticalFlowButton.setColorFilter(if (selectedTab == 1) selectedColor else idleColor)
-        earthButton.alpha = if (selectedTab == 0) 1f else 0.58f
-        opticalFlowButton.alpha = if (selectedTab == 1) 1f else 0.58f
-        earthButton.scaleX = if (selectedTab == 0) 1.06f else 0.94f
-        earthButton.scaleY = if (selectedTab == 0) 1.06f else 0.94f
-        opticalFlowButton.scaleX = if (selectedTab == 1) 1.06f else 0.94f
-        opticalFlowButton.scaleY = if (selectedTab == 1) 1.06f else 0.94f
-    }
-
-    private fun updateNavVisibility() = with(binding) {
-        view.visibility = android.view.View.VISIBLE
-        earthButton.visibility = android.view.View.VISIBLE
-        opticalFlowButton.visibility = android.view.View.VISIBLE
     }
 
     override fun onBack() = Unit

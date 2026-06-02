@@ -1,0 +1,1 @@
+ok tôi muốn chuyển logic ở home fragment như sau, khi ở page 1 thì 2 icon tint đen, khi page 2 2 icon trắng, đặc biệt là background liquiview ở home fragment đó khi là page 1 cần tạo được màu tím đậm hơn nghiêng về bên trái, còn khi chuyển page2  thì màu tím liquid chuyển sang bên phải
