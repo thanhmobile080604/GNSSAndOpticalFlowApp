@@ -85,7 +85,7 @@ class VideoProcessingWorker(
         currentProcessingMode = options.processingMode
         if (VideoProcessingBus.isDismissed(localJobId)) {
             File(sourcePath).delete()
-            optionsFile?.delete()
+            optionsFile.delete()
             VideoProcessingJobs.clearNotifications(applicationContext, localJobId)
             return Result.failure()
         }
@@ -127,7 +127,7 @@ class VideoProcessingWorker(
             activeServerProcessor = null
             VideoProcessingJobs.untrack(localJobId)
             sourceFile.delete()
-            optionsFile?.delete()
+            optionsFile.delete()
         }
     }
 

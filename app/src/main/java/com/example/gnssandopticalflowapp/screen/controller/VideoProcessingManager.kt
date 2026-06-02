@@ -493,7 +493,7 @@ class VideoProcessingManager(
             ?.take(8)
             ?.let { "  S:$it" }
             .orEmpty()
-        return "Job #${job.jobId}  $modeLabel  $index/${jobs.size}$serverId"
+        return "#${job.jobId}  $modeLabel  $index/${jobs.size}$serverId"
     }
 
     private class CenterOnlyVerticalCarouselTransformer : ViewPager2.PageTransformer {
