@@ -1,0 +1,12 @@
+package com.example.gnssandopticalflowapp.function.optical_flow.interfaces
+
+import com.example.gnssandopticalflowapp.model.OFOutput
+import org.opencv.core.Mat
+
+interface OpticalFlow {
+    fun run(newFrame: Mat): OFOutput?
+    fun resetMotionVector()
+    fun updateFeatures()
+    fun setSensitivity(value: Int)
+    fun setMovingMode(isMoving: Boolean)
+}

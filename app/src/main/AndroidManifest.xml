@@ -58,7 +58,7 @@
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
         <receiver
-            android:name=".video.VideoProcessingNotificationReceiver"
+            android:name=".function.video.notification.VideoProcessingNotificationReceiver"
             android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"

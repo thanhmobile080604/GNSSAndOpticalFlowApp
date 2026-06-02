@@ -33,8 +33,8 @@ import com.example.gnssandopticalflowapp.common.checkIfFragmentAttached
 import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssArBinding
-import com.example.gnssandopticalflowapp.gnss.GnssSatelliteTracker
-import com.example.gnssandopticalflowapp.gnss.renderer.GNSSARRenderer
+import com.example.gnssandopticalflowapp.function.gnss.GnssSatelliteTracker
+import com.example.gnssandopticalflowapp.function.gnss.renderer.GNSSARRenderer
 import com.example.gnssandopticalflowapp.screen.dialog.ErrorGNSSDialog
 import com.example.gnssandopticalflowapp.util.VideoEncoder
 import com.example.gnssandopticalflowapp.util.MediaStorageUtil

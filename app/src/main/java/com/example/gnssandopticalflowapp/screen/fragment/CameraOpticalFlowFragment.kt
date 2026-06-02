@@ -27,11 +27,11 @@ import com.example.gnssandopticalflowapp.databinding.FragmentCameraOpticalFlowBi
 import com.example.gnssandopticalflowapp.model.AnalyticsSession
 import com.example.gnssandopticalflowapp.model.OFOutput
 import com.example.gnssandopticalflowapp.model.OpticalFlowMetrics
-import com.example.gnssandopticalflowapp.optical_flow.classes.Farneback
-import com.example.gnssandopticalflowapp.optical_flow.classes.IMUEstimator
-import com.example.gnssandopticalflowapp.optical_flow.classes.KLT
-import com.example.gnssandopticalflowapp.optical_flow.classes.MotionVectorViz
-import com.example.gnssandopticalflowapp.optical_flow.interfaces.OpticalFlow
+import com.example.gnssandopticalflowapp.function.optical_flow.classes.Farneback
+import com.example.gnssandopticalflowapp.function.optical_flow.classes.IMUEstimator
+import com.example.gnssandopticalflowapp.function.optical_flow.classes.KLT
+import com.example.gnssandopticalflowapp.function.optical_flow.classes.MotionVectorViz
+import com.example.gnssandopticalflowapp.function.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.screen.viewmodel.CameraOpticalFlowViewModel.MotionControlMode
 import com.example.gnssandopticalflowapp.screen.viewmodel.CameraOpticalFlowViewModel
 import com.example.gnssandopticalflowapp.util.AnalyticsStorageUtil

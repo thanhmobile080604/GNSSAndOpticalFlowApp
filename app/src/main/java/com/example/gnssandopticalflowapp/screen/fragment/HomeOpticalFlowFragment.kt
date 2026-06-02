@@ -11,9 +11,9 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentHomeOpticalFlowBinding
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
 import com.example.gnssandopticalflowapp.screen.dialog.VideoProcessOptionsDialog
-import com.example.gnssandopticalflowapp.video.VideoProcessingBus
-import com.example.gnssandopticalflowapp.video.VideoProcessingProgressText
-import com.example.gnssandopticalflowapp.video.VideoProcessingWorker
+import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingBus
+import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingProgressText
+import com.example.gnssandopticalflowapp.function.video.worker.VideoProcessingWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive

@@ -15,9 +15,9 @@ import com.example.gnssandopticalflowapp.adapter.TopBarNotificationAdapter
 import com.example.gnssandopticalflowapp.adapter.TopBarNotificationAdapter.NotificationItem
 import com.example.gnssandopticalflowapp.databinding.ActivityMainBinding
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
-import com.example.gnssandopticalflowapp.video.VideoProcessingBus
-import com.example.gnssandopticalflowapp.video.VideoProcessingJobState
-import com.example.gnssandopticalflowapp.video.VideoProcessingWorker
+import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingBus
+import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingJobState
+import com.example.gnssandopticalflowapp.function.video.worker.VideoProcessingWorker
 import kotlin.math.abs
 
 class VideoProcessingManager(

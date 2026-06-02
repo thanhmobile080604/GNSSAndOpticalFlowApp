@@ -4,9 +4,9 @@ import android.app.Application
 import android.location.GnssStatus
 import android.location.Location
 import androidx.lifecycle.AndroidViewModel
-import com.example.gnssandopticalflowapp.gnss.MapPlaceRepository
-import com.example.gnssandopticalflowapp.gnss.MapRouteRepository
-import com.example.gnssandopticalflowapp.gnss.GnssSatelliteTracker
+import com.example.gnssandopticalflowapp.function.gnss.MapPlaceRepository
+import com.example.gnssandopticalflowapp.function.gnss.MapRouteRepository
+import com.example.gnssandopticalflowapp.function.gnss.GnssSatelliteTracker
 import com.example.gnssandopticalflowapp.model.RouteInfo
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.model.SearchPlace

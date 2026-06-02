@@ -6,8 +6,8 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.ItemTopBarNotificationBinding
-import com.example.gnssandopticalflowapp.video.VideoProcessingJobState
-import com.example.gnssandopticalflowapp.video.VideoProcessingProgressText
+import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingJobState
+import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingProgressText
 import kotlin.math.abs
 
 class TopBarNotificationAdapter(
