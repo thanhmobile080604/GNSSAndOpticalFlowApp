@@ -75,7 +75,7 @@ class VideoProcessOptionsDialog :
             optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.OFFLINE)
         }
 
-        btnProcessingOnline.setSingleClick {
+        btnProcessingMyServer.setSingleClick {
             optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.ONLINE)
         }
 
@@ -220,7 +220,7 @@ class VideoProcessOptionsDialog :
         )
 
         setSegmentSelected(
-            btnProcessingOnline,
+            btnProcessingMyServer,
             state.processingMode == VideoProcessOptions.ProcessingMode.ONLINE
         )
 

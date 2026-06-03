@@ -19,6 +19,7 @@ import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingBus
 import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingJobState
 import com.example.gnssandopticalflowapp.function.video.worker.VideoProcessingWorker
 import kotlin.math.abs
+import androidx.core.view.isVisible
 
 class VideoProcessingManager(
     private val activity: AppCompatActivity,
@@ -76,7 +77,9 @@ class VideoProcessingManager(
         setupBubble()
         binding.main.addOnLayoutChangeListener(layoutChangeListener)
 
-        VideoProcessingBus.processingJobs.observe(activity) { renderJobs(it.orEmpty()) }
+        VideoProcessingBus.processingJobs.observe(activity) {
+            renderJobs(it.orEmpty())
+        }
         VideoProcessingBus.videoLibraryUpdated.observe(activity) {
             viewModel.videoLibraryUpdated.value = it
         }
@@ -203,7 +206,7 @@ class VideoProcessingManager(
         val newItems = jobs.map(::toNotificationItem)
         val canRefreshVisibleItems = pagerScrollState == ViewPager2.SCROLL_STATE_IDLE &&
             !isCollapsed &&
-            binding.topBarViewPager.visibility == View.VISIBLE
+                binding.topBarViewPager.isVisible
         val keysChanged = topBarAdapter.submitItems(
             newItems = newItems,
             currentPosition = binding.topBarViewPager.currentItem,
