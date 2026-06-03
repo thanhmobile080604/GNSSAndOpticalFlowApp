@@ -15,11 +15,35 @@ fun String.toBuildConfigString(): String {
     return "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 }
 
+fun localProperty(name: String, defaultValue: String): String {
+    return (localProperties.getProperty(name) ?: defaultValue).trim()
+}
+
 val opticalFlowServerBaseUrl = (
     localProperties.getProperty("opticalFlowServerBaseUrl")
         ?: providers.gradleProperty("opticalFlowServerBaseUrl").orNull
         ?: "https://optical-flow.example.com"
     ).trim().trimEnd('/')
+
+val mqttDeviceId = localProperty("mqttDeviceId", "")
+val mqttTopicPrefix = "gnss/$mqttDeviceId"
+val mqttUsername = localProperty("mqttUsername", "device:$mqttDeviceId")
+val mqttPassword = localProperty("mqttPassword", "")
+val mqttHost = localProperty("mqttHost", "")
+val mqttPort = localProperty("mqttPort", "1883").toInt()
+val mqttProtocol = localProperty("mqttProtocol", "mqtt")
+val mqttTopicCoordinates = localProperty("mqttTopicCoordinates", "$mqttTopicPrefix/coordinates")
+val mqttTopicStatus = localProperty("mqttTopicStatus", "$mqttTopicPrefix/status")
+val mqttTopicAlert = localProperty("mqttTopicAlert", "$mqttTopicPrefix/alert")
+val mqttTopicImage = localProperty("mqttTopicImage", "$mqttTopicPrefix/image")
+val mqttTopicVideo = localProperty("mqttTopicVideo", "$mqttTopicPrefix/video")
+val mqttTopicStreamStatus = localProperty("mqttTopicStreamStatus", "$mqttTopicPrefix/stream/status")
+val mqttTopicCommands = localProperty("mqttTopicCommands", "$mqttTopicPrefix/command/#")
+val gnssApiBaseUrl = localProperty(
+    "gnssApiBaseUrl",
+    if (mqttHost.isNotBlank()) "https://$mqttHost" else ""
+)
+val gnssDeviceId = localProperty("gnssDeviceId", mqttDeviceId)
 
 android {
     namespace = "com.example.gnssandopticalflowapp"
@@ -38,6 +62,29 @@ android {
             "OPTICAL_FLOW_SERVER_BASE_URL",
             opticalFlowServerBaseUrl.toBuildConfigString()
         )
+        buildConfigField("String", "GNSS_API_BASE_URL", gnssApiBaseUrl.toBuildConfigString())
+        buildConfigField("String", "GNSS_DEVICE_ID", gnssDeviceId.toBuildConfigString())
+        buildConfigField("String", "MQTT_DEVICE_ID", mqttDeviceId.toBuildConfigString())
+        buildConfigField("String", "MQTT_USERNAME", mqttUsername.toBuildConfigString())
+        buildConfigField("String", "MQTT_PASSWORD", mqttPassword.toBuildConfigString())
+        buildConfigField("String", "MQTT_HOST", mqttHost.toBuildConfigString())
+        buildConfigField("int", "MQTT_PORT", mqttPort.toString())
+        buildConfigField("String", "MQTT_PROTOCOL", mqttProtocol.toBuildConfigString())
+        buildConfigField(
+            "String",
+            "MQTT_TOPIC_COORDINATES",
+            mqttTopicCoordinates.toBuildConfigString()
+        )
+        buildConfigField("String", "MQTT_TOPIC_STATUS", mqttTopicStatus.toBuildConfigString())
+        buildConfigField("String", "MQTT_TOPIC_ALERT", mqttTopicAlert.toBuildConfigString())
+        buildConfigField("String", "MQTT_TOPIC_IMAGE", mqttTopicImage.toBuildConfigString())
+        buildConfigField("String", "MQTT_TOPIC_VIDEO", mqttTopicVideo.toBuildConfigString())
+        buildConfigField(
+            "String",
+            "MQTT_TOPIC_STREAM_STATUS",
+            mqttTopicStreamStatus.toBuildConfigString()
+        )
+        buildConfigField("String", "MQTT_TOPIC_COMMANDS", mqttTopicCommands.toBuildConfigString())
     }
 
     buildTypes {
@@ -96,6 +143,8 @@ dependencies {
 
     // Google Play Services Location for one-click GPS activation
     implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 
 
 }

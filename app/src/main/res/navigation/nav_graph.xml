@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/nav_graph"
-    app:startDestination="@id/introFragment">
+    app:startDestination="@id/blankFragment">
 
 
     <fragment
@@ -64,5 +64,9 @@
         android:name="com.example.gnssandopticalflowapp.screen.fragment.ImageDetailFragment"
         android:label="fragment_image_detail"
         tools:layout="@layout/fragment_image_detail" />
+    <fragment
+        android:id="@+id/blankFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.BlankFragment"
+        android:label="BlankFragment" />
 
 </navigation>
