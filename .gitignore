@@ -1,5 +1,6 @@
 *.iml
-.ai/
+.ai/global/*.md
+.ai/tasks/prompt.md
 .gradle
 /local.properties
 /.idea/caches
