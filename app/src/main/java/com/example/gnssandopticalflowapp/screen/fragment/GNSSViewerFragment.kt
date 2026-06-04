@@ -23,10 +23,10 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -36,6 +36,7 @@ import androidx.appcompat.content.res.AppCompatResources.getDrawable
 import androidx.core.app.ActivityCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toDrawable
+import androidx.core.view.isVisible
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
@@ -55,20 +56,17 @@ import com.example.gnssandopticalflowapp.model.SearchPlace
 import com.example.gnssandopticalflowapp.screen.dialog.ErrorGNSSDialog
 import com.example.gnssandopticalflowapp.screen.dialog.Map2DInformationDialog
 import com.example.gnssandopticalflowapp.screen.dialog.Map3DInformationDialog
+import com.example.gnssandopticalflowapp.screen.viewmodel.GNSSViewerViewModel
 import com.google.android.gms.common.api.ResolvableApiException
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.LocationSettingsRequest
 import com.google.android.gms.location.Priority
-import com.example.gnssandopticalflowapp.screen.viewmodel.GNSSViewerViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
-import org.osmdroid.events.MapListener
-import org.osmdroid.events.ScrollEvent
-import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
@@ -77,7 +75,6 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Overlay
 import org.osmdroid.views.overlay.Polyline
 import java.util.Locale
-import androidx.core.view.isVisible
 
 @RequiresApi(Build.VERSION_CODES.R)
 class GNSSViewerFragment :
@@ -98,6 +95,7 @@ class GNSSViewerFragment :
     private var routeJob: Job? = null
     private var externalOrbitRefreshJob: Job? = null
     private var gnssErrorDialogJob: Job? = null
+    private var lastMap2DDialogShownAt = 0L
     private val useTestLocation: Boolean = Constants.USE_FAKE_LOCATION
     private val externalOrbitRetryDelayMs = 30_000L
     private val externalOrbitRefreshAttempts = 3
@@ -213,17 +211,26 @@ class GNSSViewerFragment :
 
         initOpenGLES()
         applyVisibilityState() // Restore UI state from is3DMode
+        setupMapModeSwitchOverlay()
         startResolutionSequence()
 
         listOf(
             searchBubble,
             currentLocationBubble,
+            startNavigationBubble,
             resultBubble,
             cancelBubble,
             navigationBubble
         ).forEach { bubble ->
             bubble.bind(mapView)
             bubble.setElasticEnabled(true)
+
+            if (bubble == startNavigationBubble) {
+                startNavigationBubble.setTintColorRed(0.482f)
+                startNavigationBubble.setTintColorGreen( 0.361f)
+                startNavigationBubble.setTintColorBlue(1f)
+                startNavigationBubble.setTintAlpha(0.45f)
+            }
         }
     }
 
@@ -509,6 +516,7 @@ class GNSSViewerFragment :
         val point = GeoPoint(loc.latitude, loc.longitude)
         if (userMarker == null) {
             userMarker = Marker(binding.mapView).apply {
+                position = point
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 // Resize icon to a fixed size
                 val iconSize = 40.dp
@@ -559,8 +567,13 @@ class GNSSViewerFragment :
     }
 
     private fun showLocationDetailsDialog(loc: Location) {
+        val now = System.currentTimeMillis()
+        if (now - lastMap2DDialogShownAt < MAP2D_DIALOG_DEBOUNCE_MS) return
+        lastMap2DDialogShownAt = now
+
         val localTime = mainViewModel.formatDisplayTime(loc.time)
         checkIfFragmentAttached {
+            if (this@GNSSViewerFragment.parentFragmentManager.isStateSaved) return@checkIfFragmentAttached
             Map2DInformationDialog.showDialog(
                 fragmentManager = parentFragmentManager,
                 loc = loc,
@@ -1161,7 +1174,17 @@ class GNSSViewerFragment :
     override fun FragmentGnssViewerBinding.initListener() {
         setupSearchInteractions()
 
+        val mapTapDetector =
+            GestureDetector(safeContext(), object : GestureDetector.SimpleOnGestureListener() {
+                override fun onDown(e: MotionEvent): Boolean = true
+
+                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                    return handleUserMarkerTap(e)
+                }
+            })
+
         binding.mapView.setOnTouchListener { _, event ->
+            mapTapDetector.onTouchEvent(event)
             if (event.action == MotionEvent.ACTION_DOWN) {
                 if (binding.etSearchLocation.hasFocus() || binding.searchResultsPanel.isVisible) {
                     hideKeyboard()
@@ -1169,27 +1192,6 @@ class GNSSViewerFragment :
             }
             false
         }
-
-        // Overlay for double tap on MapView
-        val mapOverlay = object : Overlay() {
-            override fun onDoubleTap(e: MotionEvent, mapView: MapView): Boolean {
-                toggle3DMode()
-                return true
-            }
-        }
-        binding.mapView.overlays.add(mapOverlay)
-
-        // MapListener for zoom out to 3D
-        binding.mapView.addMapListener(object : MapListener {
-            override fun onScroll(event: ScrollEvent): Boolean = false
-            override fun onZoom(event: ZoomEvent): Boolean {
-                if (event.zoomLevel <= 3.0 && !is3DMode) {
-                    toggle3DMode()
-                    return true
-                }
-                return false
-            }
-        })
 
         // GestureDetector for 3D GLSurfaceView
         gestureDetector =
@@ -1308,6 +1310,43 @@ class GNSSViewerFragment :
         icAr.setSingleClick {
             navigateTo(R.id.gnssARFragment)
         }
+    }
+
+    private fun setupMapModeSwitchOverlay() {
+        val mapOverlay = object : Overlay() {
+            override fun onDoubleTap(e: MotionEvent, mapView: MapView): Boolean {
+                toggle3DMode()
+                return true
+            }
+        }
+        binding.mapView.overlays.add(mapOverlay)
+    }
+
+    private fun handleUserMarkerTap(event: MotionEvent): Boolean {
+        val loc = currentLocation ?: return false
+        if (!isTapInsideUserMarker(event)) return false
+
+        showLocationDetailsDialog(loc)
+        return true
+    }
+
+    private fun isTapInsideUserMarker(event: MotionEvent): Boolean {
+        val marker = userMarker ?: return false
+        val markerPosition = marker.position ?: return false
+        val markerPoint = android.graphics.Point()
+        binding.mapView.projection.toPixels(markerPosition, markerPoint)
+
+        val iconWidth = marker.icon?.intrinsicWidth?.takeIf { it > 0 } ?: 40.dp
+        val iconHeight = marker.icon?.intrinsicHeight?.takeIf { it > 0 } ?: 40.dp
+        val horizontalLimit = (iconWidth / 2f).coerceAtLeast(24.dp.toFloat())
+        val topLimit = iconHeight.toFloat().coerceAtLeast(48.dp.toFloat())
+        val bottomLimit = 16.dp.toFloat()
+
+        val horizontalDistance = kotlin.math.abs(event.x - markerPoint.x)
+        val distanceAboveAnchor = markerPoint.y - event.y
+        return horizontalDistance <= horizontalLimit &&
+            distanceAboveAnchor <= topLimit &&
+            distanceAboveAnchor >= -bottomLimit
     }
 
     private fun dumpLatestSatelliteSources() {
@@ -1483,6 +1522,7 @@ class GNSSViewerFragment :
 
     private companion object {
         const val GNSS_ERROR_DIALOG_DELAY_MS = 10_000L
+        const val MAP2D_DIALOG_DEBOUNCE_MS = 500L
         var hasGnssErrorDialogShownThisSession = false
     }
 }

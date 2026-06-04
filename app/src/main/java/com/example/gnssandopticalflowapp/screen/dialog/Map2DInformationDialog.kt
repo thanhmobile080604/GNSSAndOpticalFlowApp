@@ -1,7 +1,10 @@
 package com.example.gnssandopticalflowapp.screen.dialog
 
 import android.annotation.SuppressLint
+import android.graphics.Color
 import android.location.Location
+import android.view.Window
+import androidx.core.graphics.drawable.toDrawable
 import androidx.fragment.app.FragmentManager
 import com.example.gnssandopticalflowapp.base.BaseDialogFragment
 import com.example.gnssandopticalflowapp.common.setSingleClick

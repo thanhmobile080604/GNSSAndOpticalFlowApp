@@ -30,22 +30,25 @@
 
     <style name="DialogFullScreen" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="android:windowIsFloating">false</item>
-        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowFullscreen">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="windowNoTitle">true</item>
         <item name="windowActionBar">false</item>
 
-        <!-- Background dialog -->
         <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
 
-        <!-- System bars transparent -->
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
 
-        <!-- Android 10+ hay tự thêm lớp trắng/mờ cho navigation bar -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+
         <item name="android:enforceStatusBarContrast">false</item>
         <item name="android:enforceNavigationBarContrast">false</item>
+
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowCloseOnTouchOutside">false</item>
     </style>
 
     <style name="DialogModal" parent="Theme.AppCompat.DayNight.Dialog">
