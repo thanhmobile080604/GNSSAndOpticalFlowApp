@@ -134,10 +134,12 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val hardLimit = when (mode) {
             VideoProcessOptions.ProcessingMode.OFFLINE -> ON_DEVICE_HARD_LIMIT
             VideoProcessOptions.ProcessingMode.ONLINE -> ONLINE_HARD_LIMIT
+            VideoProcessOptions.ProcessingMode.OUTER_SERVER -> ONLINE_HARD_LIMIT
         }
         val warnAt = when (mode) {
             VideoProcessOptions.ProcessingMode.OFFLINE -> ON_DEVICE_WARN_AT
             VideoProcessOptions.ProcessingMode.ONLINE -> ONLINE_WARN_AT
+            VideoProcessOptions.ProcessingMode.OUTER_SERVER -> ONLINE_WARN_AT
         }
 
         return ProcessingLoadDecision(
@@ -155,6 +157,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val modeLabel = when (loadDecision.mode) {
             VideoProcessOptions.ProcessingMode.OFFLINE -> "on-device"
             VideoProcessOptions.ProcessingMode.ONLINE -> "server"
+            VideoProcessOptions.ProcessingMode.OUTER_SERVER -> "outer server"
         }
         Toast.makeText(
             safeContext(),
@@ -170,6 +173,7 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val modeLabel = when (loadDecision.mode) {
             VideoProcessOptions.ProcessingMode.OFFLINE -> "on-device"
             VideoProcessOptions.ProcessingMode.ONLINE -> "server"
+            VideoProcessOptions.ProcessingMode.OUTER_SERVER -> "outer server"
         }
         AlertDialog.Builder(safeContext())
             .setTitle("Heavy processing load")

@@ -13,7 +13,8 @@ data class VideoProcessOptions(
 ) : Serializable {
     enum class ProcessingMode : Serializable {
         OFFLINE,
-        ONLINE
+        ONLINE,
+        OUTER_SERVER
     }
 
     data class NormalizedRoi(

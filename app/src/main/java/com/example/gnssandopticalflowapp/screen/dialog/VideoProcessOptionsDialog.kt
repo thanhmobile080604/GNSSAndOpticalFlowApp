@@ -79,6 +79,10 @@ class VideoProcessOptionsDialog :
             optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.ONLINE)
         }
 
+        btnProcessingOuterServer.setSingleClick {
+            optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.OUTER_SERVER)
+        }
+
         btnFarnebackVectors.setSingleClick {
             optionsViewModel.selectDisplayMode(useHeatmap = false)
         }
@@ -222,6 +226,11 @@ class VideoProcessOptionsDialog :
         setSegmentSelected(
             btnProcessingMyServer,
             state.processingMode == VideoProcessOptions.ProcessingMode.ONLINE
+        )
+
+        setSegmentSelected(
+            btnProcessingOuterServer,
+            state.processingMode == VideoProcessOptions.ProcessingMode.OUTER_SERVER
         )
 
         setSegmentSelected(

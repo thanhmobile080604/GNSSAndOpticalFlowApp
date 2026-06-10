@@ -12,6 +12,7 @@ import com.example.gnssandopticalflowapp.function.video.jobs.VideoProcessingJobs
 import com.example.gnssandopticalflowapp.function.video.local.LocalVideoProcessor
 import com.example.gnssandopticalflowapp.function.video.notification.VideoProcessingNotifier
 import com.example.gnssandopticalflowapp.function.video.options.VideoProcessOptionsCodec
+import com.example.gnssandopticalflowapp.function.video.server.GnssBackendVideoProcessor
 import com.example.gnssandopticalflowapp.function.video.server.ServerVideoProcessor
 import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingBus
 import com.example.gnssandopticalflowapp.function.video.state.VideoProcessingProgressText
@@ -28,6 +29,7 @@ class VideoProcessingWorker(
     private var currentProcessingMode: VideoProcessOptions.ProcessingMode? = null
     private var acceptsJobUpdates = true
     private var activeServerProcessor: ServerVideoProcessor? = null
+    private var activeGnssBackendProcessor: GnssBackendVideoProcessor? = null
 
     private val localJobId: String = workerParams.inputData
         .getString(VideoProcessingJobContract.EXTRA_JOB_ID)
@@ -113,6 +115,7 @@ class VideoProcessingWorker(
             Log.d(TAG, "Processing cancelled")
             acceptsJobUpdates = false
             activeServerProcessor?.cancelCurrentWork()
+            activeGnssBackendProcessor?.cancelCurrentWork()
             VideoProcessingBus.postCancelled(localJobId)
             VideoProcessingJobs.clearNotifications(applicationContext, localJobId)
             throw e
@@ -125,6 +128,7 @@ class VideoProcessingWorker(
         } finally {
             acceptsJobUpdates = false
             activeServerProcessor = null
+            activeGnssBackendProcessor = null
             VideoProcessingJobs.untrack(localJobId)
             sourceFile.delete()
             optionsFile.delete()
@@ -146,6 +150,9 @@ class VideoProcessingWorker(
                 }
                 VideoProcessOptions.ProcessingMode.ONLINE -> {
                     serverProcessor().process(sourceFile, outputFile, options)
+                }
+                VideoProcessOptions.ProcessingMode.OUTER_SERVER -> {
+                    gnssBackendProcessor().process(sourceFile, outputFile, options)
                 }
             }
         } catch (e: CancellationException) {
@@ -179,6 +186,21 @@ class VideoProcessingWorker(
                 }
             }
         ).also { activeServerProcessor = it }
+    }
+
+    private fun gnssBackendProcessor(): GnssBackendVideoProcessor {
+        activeGnssBackendProcessor?.let { return it }
+        return GnssBackendVideoProcessor(
+            context = applicationContext,
+            callbacks = object : GnssBackendVideoProcessor.Callbacks {
+                override fun isActive() = isProcessingActive()
+                override fun postStatus(status: String) = postCurrentProgress(status)
+                override fun postPercent(percent: Int) = postProgressPercent(percent)
+                override fun postServerJobId(serverJobId: String) {
+                    VideoProcessingBus.postServerJobId(localJobId, serverJobId)
+                }
+            }
+        ).also { activeGnssBackendProcessor = it }
     }
 
     private fun postCurrentProgress(status: String) {
