@@ -485,6 +485,7 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         val cameraPosition = SceneVector(camX, camY, camZ)
         val sunPosition = calculateSunPosition()
+        val moonPosition = calculateMoonPosition()
 
         drawSkybox()
         drawEarth(cameraPosition, sunPosition)
@@ -499,7 +500,7 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         )
         drawCountryLabels(cameraPosition.x, cameraPosition.y, cameraPosition.z)
 
-        drawMoon()
+        drawMoon(moonPosition)
 
         drawSun(sunPosition)
 
@@ -757,8 +758,7 @@ class EarthRenderer(private val context: Context) : GLSurfaceView.Renderer {
         )
     }
 
-    private fun drawMoon() {
-        val moonPosition = calculateMoonPosition()
+    private fun drawMoon(moonPosition: SceneVector) {
         val moonModelMatrix = FloatArray(16)
         Matrix.setIdentityM(moonModelMatrix, 0)
         Matrix.translateM(moonModelMatrix, 0, moonPosition.x, moonPosition.y, moonPosition.z)
