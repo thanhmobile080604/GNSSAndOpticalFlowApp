@@ -74,8 +74,8 @@ internal class GnssBackendVideoProcessor(
             callbacks.postStatus("Connecting to MQTT for updates...")
             connectMqtt()
 
-            callbacks.postStatus("Triggering AI analysis...")
-            requestAnalysis(mediaLogId, options)
+//            callbacks.postStatus("Triggering AI analysis...")
+//            requestAnalysis(mediaLogId, options)
 
             callbacks.postStatus("Waiting for AI processing via MQTT...")
             val processedS3Key = waitForMqttResult(mediaLogId)
