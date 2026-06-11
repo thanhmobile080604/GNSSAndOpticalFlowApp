@@ -5,6 +5,7 @@ import com.example.gnssandopticalflowapp.model.OFOutput
 import com.example.gnssandopticalflowapp.model.OpticalFlowMetrics
 import com.example.gnssandopticalflowapp.function.optical_flow.interfaces.OpticalFlow
 import org.opencv.core.*
+import org.opencv.features.Features
 import org.opencv.imgproc.Imgproc
 import org.opencv.video.Video
 import java.util.concurrent.Semaphore
@@ -78,7 +79,7 @@ class KLT : OpticalFlow {
     private fun updatePoints(prevGray: Mat, currGray: Mat, prevPts: MatOfPoint2f) {
         currGray.copyTo(prevGray)
         val corners = MatOfPoint()
-        Imgproc.goodFeaturesToTrack(prevGray, corners, maxCorners, qualityLevel, minDistance)
+        Features.goodFeaturesToTrack(prevGray, corners, maxCorners, qualityLevel, minDistance)
         prevPts.fromArray(*corners.toArray())
     }
 

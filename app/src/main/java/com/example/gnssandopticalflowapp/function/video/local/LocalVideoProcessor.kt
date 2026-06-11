@@ -119,7 +119,7 @@ internal class LocalVideoProcessor(
                 }
 
                 val frameForProcessing = rotateFrameForDisplay(rgbaMat, orientedMat, rotationDegrees)
-                val activeEncoder = encoder ?: break
+                val activeEncoder = encoder
                 showFrameProcessingStageIfNeeded(opticalFlow, options, framesProcessed + 1L, totalFrames)
                 encodeProcessedFrame(
                     opticalFlow = opticalFlow,
@@ -414,6 +414,7 @@ internal class LocalVideoProcessor(
             mask = createRoiMask(normalized, frameCols, frameRows, rect, ::mapX, ::mapY)
         )
     }
+
 
     private fun createRoiMask(
         normalized: VideoProcessOptions.NormalizedRoi,

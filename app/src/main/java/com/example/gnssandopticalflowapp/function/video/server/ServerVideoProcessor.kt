@@ -244,8 +244,20 @@ internal class ServerVideoProcessor(
     }
 
     private suspend fun waitForServerVideoJob(serverJobId: String, outputFile: File): Boolean {
+        var transientStatusFailures = 0
         while (callbacks.isActive()) {
-            val statusPayload = fetchServerVideoJob(serverJobId) ?: return false
+            val statusPayload = fetchServerVideoJob(serverJobId)
+            if (statusPayload == null) {
+                transientStatusFailures++
+                if (transientStatusFailures > MAX_TRANSIENT_STATUS_FAILURES) {
+                    Log.e(TAG, "Server job status unavailable too many times: $serverJobId")
+                    return false
+                }
+                callbacks.postStatus("Server is busy; waiting...")
+                delay(SERVER_BUSY_RETRY_DELAY_MS)
+                continue
+            }
+            transientStatusFailures = 0
             when (val status = statusPayload.status) {
                 "queued" -> {
                     callbacks.postStatus("Queued on server...")
@@ -285,9 +297,12 @@ internal class ServerVideoProcessor(
             val response = api.getProcessVideoJob(serverJobId)
             if (response.isSuccessful) {
                 response.body()
+            } else if (response.code() in TRANSIENT_SERVER_STATUS_CODES) {
+                Log.w(TAG, "Transient server job status error: ${response.code()} ${response.errorBodyText()}")
+                null
             } else {
                 Log.e(TAG, "Server job status error: ${response.code()} ${response.errorBodyText()}")
-                null
+                ServerVideoJobResponse(jobId = serverJobId, status = "failed", error = "Server status error ${response.code()}")
             }
         }
     }
@@ -507,6 +522,7 @@ internal class ServerVideoProcessor(
             fields["roi_right"] = roi.right.toString()
             fields["roi_bottom"] = roi.bottom.toString()
             fields["roi_view_aspect_ratio"] = roi.viewAspectRatio.toString()
+            fields["roi_selected_position_ms"] = roi.selectedPositionMs.toString()
             fields["roi_path_points"] =
                 roi.pathPoints.joinToString(separator = ";") { point ->
                     "${point.x},${point.y}"
@@ -562,6 +578,8 @@ internal class ServerVideoProcessor(
     private companion object {
         private const val TAG = "SERVER-VIDEO"
         private const val SERVER_POLL_INTERVAL_MS = 2_000L
+        private const val SERVER_BUSY_RETRY_DELAY_MS = 8_000L
+        private const val MAX_TRANSIENT_STATUS_FAILURES = 45
         private const val SERVER_CANCEL_TIMEOUT_MS = 5_000L
         private const val SERVER_QUEUE_RETRY_DELAY_MS = 5_000L
         private const val NETWORK_RETRY_DELAY_MS = 3_000L
@@ -572,5 +590,6 @@ internal class ServerVideoProcessor(
         private const val SERVER_DOWNLOAD_PROGRESS_START_PERCENT = 90
         private const val SERVER_DOWNLOAD_PROGRESS_RANGE_PERCENT = 10
         private const val HTTP_TOO_MANY_REQUESTS = 429
+        private val TRANSIENT_SERVER_STATUS_CODES = setOf(408, 429, 500, 502, 503, 504)
     }
 }

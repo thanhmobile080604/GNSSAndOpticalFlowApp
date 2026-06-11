@@ -29,6 +29,9 @@ import com.example.gnssandopticalflowapp.databinding.DialogVideoProcessOptionsBi
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
 import com.example.gnssandopticalflowapp.screen.viewmodel.VideoProcessOptionsViewModel
 import com.example.gnssandopticalflowapp.util.VideoPlaybackSupport
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -45,6 +48,8 @@ class VideoProcessOptionsDialog :
     private var previewUnsupportedShown = false
     private var videoUri: Uri? = null
     private var videoAspectRatio = 0f
+    private var previewProgressJob: Job? = null
+    private var userSeekingPreview = false
 
     override fun DialogVideoProcessOptionsBinding.initView() {
         isCancelable = true
@@ -53,6 +58,7 @@ class VideoProcessOptionsDialog :
 
         setupPreviewPlayer()
         setupPreviewSurface()
+        setupPreviewControls()
         setupRoiOverlay()
 
         renderOptionsState(optionsViewModel.currentState())
@@ -100,11 +106,13 @@ class VideoProcessOptionsDialog :
         }
 
         btnRoiSelect.setSingleClick {
-            roiOverlay.setSelectionEnabled(true)
+            pausePreviewForRoiSelection()
+            previewControls.isVisible = true
             optionsViewModel.enableRoiSelection()
         }
 
         btnRoiFull.setSingleClick {
+            previewControls.isVisible = false
             roiOverlay.setSelectionEnabled(false)
             roiOverlay.clearSelection()
             optionsViewModel.clearRoiSelection()
@@ -152,16 +160,21 @@ class VideoProcessOptionsDialog :
         super.onResume()
 
         if (previewPrepared && !previewUnsupportedShown) {
-            player?.play()
+            if (!optionsViewModel.currentState().roiSelectEnabled) {
+                player?.play()
+            }
+            startPreviewProgressUpdates()
         }
     }
 
     override fun onPause() {
+        stopPreviewProgressUpdates()
         player?.pause()
         super.onPause()
     }
 
     override fun onDestroyView() {
+        stopPreviewProgressUpdates()
         player?.clearVideoSurface()
 
         previewSurface?.release()
@@ -190,7 +203,11 @@ class VideoProcessOptionsDialog :
             useFarnebackHeatmap = state.useFarnebackHeatmap,
             useAi = state.useAi,
             roi = state.roiForApply,
-            processingMode = state.processingMode
+            processingMode = if (state.roiForApply != null) {
+                VideoProcessOptions.ProcessingMode.ONLINE
+            } else {
+                state.processingMode
+            }
         )
 
         onApplyOptions?.invoke(options)
@@ -269,7 +286,7 @@ class VideoProcessOptionsDialog :
             "ROI"
         }
 
-        roiOverlay.setSelectionEnabled(state.roiSelectEnabled)
+        updateRoiOverlayInteractivity()
 
         if (sensitivityBar.progress != state.sensitivity) {
             sensitivityBar.progress = state.sensitivity
@@ -304,8 +321,49 @@ class VideoProcessOptionsDialog :
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     disableUnsupportedPreview()
                 }
+
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    binding.btnPreviewPlayPause.text = if (isPlaying) "Pause" else "Play"
+                    updateRoiOverlayInteractivity()
+                }
             })
         }
+    }
+
+    private fun setupPreviewControls() = with(binding) {
+        previewControls.isVisible = false
+        btnPreviewPlayPause.setSingleClick {
+            val activePlayer = player ?: return@setSingleClick
+            if (activePlayer.isPlaying) {
+                activePlayer.pause()
+            } else {
+                roiOverlay.setSelectionEnabled(false)
+                activePlayer.play()
+            }
+            btnPreviewPlayPause.text = if (activePlayer.isPlaying) "Pause" else "Play"
+            updateRoiOverlayInteractivity()
+        }
+
+        previewSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                val activePlayer = player ?: return
+                val duration = activePlayer.duration.takeIf { it > 0L } ?: return
+                activePlayer.seekTo((duration * progress) / PREVIEW_PROGRESS_MAX)
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                userSeekingPreview = true
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                userSeekingPreview = false
+                player?.pause()
+                roiOverlay.clearSelection()
+                optionsViewModel.updateSelectedRoi(null)
+                updateRoiOverlayInteractivity()
+            }
+        })
     }
 
     private fun setupPreviewSurface() = with(binding) {
@@ -365,6 +423,7 @@ class VideoProcessOptionsDialog :
                     } else {
                         1f
                     },
+                    selectedPositionMs = player?.currentPosition?.coerceAtLeast(0L) ?: 0L,
                     pathPoints = roiOverlay.normalizedPath.map { point ->
                         VideoProcessOptions.NormalizedPoint(point.x, point.y)
                     }
@@ -400,8 +459,50 @@ class VideoProcessOptionsDialog :
         player?.setMediaItem(MediaItem.fromUri(uri))
         player?.prepare()
         player?.play()
+        startPreviewProgressUpdates()
 
         previewPrepared = true
+    }
+
+    private fun pausePreviewForRoiSelection() {
+        player?.pause()
+        binding.btnPreviewPlayPause.text = "Play"
+        updateRoiOverlayInteractivity()
+    }
+
+    private fun updateRoiOverlayInteractivity() {
+        if (!isAdded || view == null) return
+        val state = optionsViewModel.currentState()
+        val canDraw = state.roiSelectEnabled && player?.isPlaying != true
+        binding.roiOverlay.setSelectionEnabled(canDraw)
+    }
+
+    private fun startPreviewProgressUpdates() {
+        if (previewProgressJob != null) return
+        previewProgressJob = viewLifecycleOwner.lifecycleScope.launch {
+            while (isActive) {
+                syncPreviewProgress()
+                delay(250L)
+            }
+        }
+    }
+
+    private fun stopPreviewProgressUpdates() {
+        previewProgressJob?.cancel()
+        previewProgressJob = null
+    }
+
+    private fun syncPreviewProgress() = with(binding) {
+        if (userSeekingPreview) return@with
+        val activePlayer = player ?: return@with
+        val duration = activePlayer.duration.takeIf { it > 0L } ?: return@with
+        val progress = ((activePlayer.currentPosition.coerceAtLeast(0L) * PREVIEW_PROGRESS_MAX) / duration)
+            .toInt()
+            .coerceIn(0, PREVIEW_PROGRESS_MAX)
+        if (previewSeekBar.progress != progress) {
+            previewSeekBar.progress = progress
+        }
+        btnPreviewPlayPause.text = if (activePlayer.isPlaying) "Pause" else "Play"
     }
 
     private fun disableUnsupportedPreview() {
@@ -489,6 +590,7 @@ class VideoProcessOptionsDialog :
         private const val TAG = "VideoProcessOptionsDialog"
         private const val ARG_VIDEO_URI = "video_uri"
         private const val CLOSED_AREA_MESSAGE = "You must draw a closed area"
+        private const val PREVIEW_PROGRESS_MAX = 1000
 
         fun show(
             fragmentManager: FragmentManager,

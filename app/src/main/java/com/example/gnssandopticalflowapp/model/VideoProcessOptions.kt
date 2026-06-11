@@ -23,6 +23,7 @@ data class VideoProcessOptions(
         val right: Float,
         val bottom: Float,
         val viewAspectRatio: Float,
+        val selectedPositionMs: Long = 0L,
         val pathPoints: List<NormalizedPoint> = emptyList()
     ) : Serializable
 

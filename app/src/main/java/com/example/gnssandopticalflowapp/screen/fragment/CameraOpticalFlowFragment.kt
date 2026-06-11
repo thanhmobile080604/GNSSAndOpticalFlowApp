@@ -31,6 +31,7 @@ import com.example.gnssandopticalflowapp.function.optical_flow.classes.Farneback
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.IMUEstimator
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.MotionVectorViz
+import com.example.gnssandopticalflowapp.function.optical_flow.classes.ObjectRoiTracker
 import com.example.gnssandopticalflowapp.function.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.screen.viewmodel.CameraOpticalFlowViewModel.MotionControlMode
 import com.example.gnssandopticalflowapp.screen.viewmodel.CameraOpticalFlowViewModel
@@ -84,6 +85,7 @@ class CameraOpticalFlowFragment :
     private lateinit var farnebackLabFlow: Farneback
     private lateinit var imuEstimator: IMUEstimator
     private lateinit var mvViewer: MotionVectorViz
+    private val objectRoiTracker = ObjectRoiTracker()
     private var frameCount: Int
         get() = cameraViewModel.frameCount
         set(value) {
@@ -393,6 +395,7 @@ class CameraOpticalFlowFragment :
 
     private fun resetActiveOpticalFlow() {
         opticalFlow = createSelectedOpticalFlow()
+        objectRoiTracker.reset()
         mvViewer.resetMotionVector()
         motionVectorBitmap = null
         binding.motionVector.setImageBitmap(null)
@@ -555,6 +558,7 @@ class CameraOpticalFlowFragment :
         if (::cameraExecutor.isInitialized) {
             cameraExecutor.shutdown()
         }
+        objectRoiTracker.reset()
         super.onDestroyView()
     }
 
@@ -817,7 +821,15 @@ class CameraOpticalFlowFragment :
             return
         }
 
-        val activeRoi = activeRoi(frame)
+        val activeRoi = activeTrackedRoi(frame)
+        if (isObjectRoiRequested() && activeRoi == null) {
+            currentFrameWidth = frame.cols()
+            currentFrameHeight = frame.rows()
+            renderOpticalFlowFrame(frame)
+            writeToVideoWriter(frame)
+            return
+        }
+
         val processingFrame = activeRoi?.rect?.let { frame.submat(it) } ?: frame
         val originalRoiFrame = activeRoi?.mask?.let { processingFrame.clone() }
         try {
@@ -854,6 +866,32 @@ class CameraOpticalFlowFragment :
         currentFrameHeight = frame.rows()
         renderOpticalFlowFrame(frame)
         writeToVideoWriter(frame)
+    }
+
+    private fun activeTrackedRoi(frame: Mat): ActiveRoi? {
+        val initialRoi = activeRoi(frame)
+        if (initialRoi == null) {
+            objectRoiTracker.reset()
+            return null
+        }
+
+        val tracked = if (objectRoiTracker.isInitialized) {
+            objectRoiTracker.update(frame, initialRoi.rect, initialRoi.mask)
+        } else {
+            objectRoiTracker.initialize(frame, initialRoi.rect, initialRoi.mask)
+        }
+
+        if (tracked == null) {
+            initialRoi.mask?.release()
+            return null
+        }
+
+        initialRoi.mask?.release()
+        return ActiveRoi(tracked.rect, tracked.mask)
+    }
+
+    private fun isObjectRoiRequested(): Boolean {
+        return cameraViewModel.roiEnabled && cameraViewModel.normalizedRoi != null
     }
 
     private fun activeRoi(frame: Mat): ActiveRoi? {

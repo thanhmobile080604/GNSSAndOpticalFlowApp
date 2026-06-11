@@ -91,6 +91,43 @@
                     android:layout_height="match_parent"
                     android:visibility="gone" />
 
+                <LinearLayout
+                    android:id="@+id/previewControls"
+                    android:layout_width="match_parent"
+                    android:layout_height="58dp"
+                    android:layout_gravity="bottom"
+                    android:background="#99000000"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="12dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/btnPreviewPlayPause"
+                        android:layout_width="70dp"
+                        android:layout_height="38dp"
+                        android:background="@drawable/bg_glass_chip"
+                        android:fontFamily="@font/inter_black"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:text="Play"
+                        android:textColor="@color/white"
+                        android:textSize="13sp" />
+
+                    <SeekBar
+                        android:id="@+id/previewSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:max="1000"
+                        android:maxHeight="6dp"
+                        android:minHeight="6dp"
+                        android:progressDrawable="@drawable/seekbar_glass_purple"
+                        android:thumb="@drawable/ripple_glow_purple_thumb" />
+
+                </LinearLayout>
+
             </androidx.media3.ui.AspectRatioFrameLayout>
 
         </FrameLayout>

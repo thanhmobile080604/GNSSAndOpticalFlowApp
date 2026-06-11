@@ -32,6 +32,7 @@ internal object VideoProcessOptionsCodec {
                     .put("right", normalizedRoi.right.toDouble())
                     .put("bottom", normalizedRoi.bottom.toDouble())
                     .put("viewAspectRatio", normalizedRoi.viewAspectRatio.toDouble())
+                    .put("selectedPositionMs", normalizedRoi.selectedPositionMs)
                     .put("pathPoints", pathPoints)
             )
         }
@@ -62,6 +63,7 @@ internal object VideoProcessOptionsCodec {
                     right = roiJson.getDouble("right").toFloat(),
                     bottom = roiJson.getDouble("bottom").toFloat(),
                     viewAspectRatio = roiJson.getDouble("viewAspectRatio").toFloat(),
+                    selectedPositionMs = roiJson.optLong("selectedPositionMs", 0L),
                     pathPoints = pathPoints
                 )
             }
