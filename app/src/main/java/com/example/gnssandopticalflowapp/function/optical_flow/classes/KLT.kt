@@ -1,11 +1,18 @@
 package com.example.gnssandopticalflowapp.function.optical_flow.classes
 
 import android.util.Log
+import com.example.gnssandopticalflowapp.function.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.model.OFOutput
 import com.example.gnssandopticalflowapp.model.OpticalFlowMetrics
-import com.example.gnssandopticalflowapp.function.optical_flow.interfaces.OpticalFlow
-import org.opencv.core.*
-import org.opencv.features.Features
+import org.opencv.core.Mat
+import org.opencv.core.MatOfByte
+import org.opencv.core.MatOfFloat
+import org.opencv.core.MatOfPoint
+import org.opencv.core.MatOfPoint2f
+import org.opencv.core.Point
+import org.opencv.core.Scalar
+import org.opencv.core.Size
+import org.opencv.core.TermCriteria
 import org.opencv.imgproc.Imgproc
 import org.opencv.video.Video
 import java.util.concurrent.Semaphore
@@ -79,7 +86,7 @@ class KLT : OpticalFlow {
     private fun updatePoints(prevGray: Mat, currGray: Mat, prevPts: MatOfPoint2f) {
         currGray.copyTo(prevGray)
         val corners = MatOfPoint()
-        Features.goodFeaturesToTrack(prevGray, corners, maxCorners, qualityLevel, minDistance)
+        Imgproc.goodFeaturesToTrack(prevGray, corners, maxCorners, qualityLevel, minDistance)
         prevPts.fromArray(*corners.toArray())
     }
 
