@@ -205,26 +205,27 @@
                     android:textColor="@color/white"
                     android:textSize="13sp" />
 
-                <TextView
-                    android:id="@+id/btnProcessingOffline"
-                    android:layout_width="0dp"
-                    android:layout_height="42dp"
-                    android:layout_marginStart="8dp"
-                    android:layout_marginEnd="6dp"
-                    android:layout_weight="1"
-                    android:background="@drawable/bg_gradient_update_button_12"
-                    android:fontFamily="@font/inter_black"
-                    android:gravity="center"
-                    android:maxLines="1"
-                    android:text="On-device"
-                    android:textColor="@color/white"
-                    android:textSize="10sp" />
+<!--                <TextView-->
+<!--                    android:id="@+id/btnProcessingOffline"-->
+<!--                    android:layout_width="0dp"-->
+<!--                    android:layout_height="42dp"-->
+<!--                    android:layout_marginStart="8dp"-->
+<!--                    android:layout_marginEnd="6dp"-->
+<!--                    android:layout_weight="1"-->
+<!--                    android:background="@drawable/bg_gradient_update_button_12"-->
+<!--                    android:fontFamily="@font/inter_black"-->
+<!--                    android:gravity="center"-->
+<!--                    android:maxLines="1"-->
+<!--                    android:text="On-device"-->
+<!--                    android:textColor="@color/white"-->
+<!--                    android:textSize="10sp" />-->
 
                 <TextView
                     android:id="@+id/btnProcessingMyServer"
                     android:layout_width="0dp"
                     android:layout_height="42dp"
                     android:layout_weight="1"
+                    android:layout_marginStart="8dp"
                     android:layout_marginEnd="6dp"
                     android:background="@drawable/bg_glass_chip"
                     android:fontFamily="@font/inter_black"
