@@ -2,6 +2,7 @@ package com.example.gnssandopticalflowapp.screen.fragment
 
 import android.Manifest
 import android.graphics.Bitmap
+import android.graphics.RectF
 import android.media.MediaScannerConnection
 import android.content.pm.PackageManager
 import android.util.Log
@@ -37,6 +38,7 @@ import com.example.gnssandopticalflowapp.screen.viewmodel.CameraOpticalFlowViewM
 import com.example.gnssandopticalflowapp.util.AnalyticsStorageUtil
 import com.example.gnssandopticalflowapp.util.VideoEncoder
 import com.example.gnssandopticalflowapp.util.MediaStorageUtil
+import com.example.gnssandopticalflowapp.view.RoiOverlayView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -45,11 +47,13 @@ import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
-import org.opencv.core.MatOfPoint
 import org.opencv.core.Point
 import org.opencv.core.Rect
+import org.opencv.core.Rect2d
 import org.opencv.core.Scalar
 import org.opencv.core.Size
+import org.opencv.tracking.legacy_Tracker
+import org.opencv.tracking.legacy_TrackerCSRT
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -60,6 +64,7 @@ import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import org.opencv.imgproc.Imgproc
+import kotlin.time.Duration.Companion.milliseconds
 
 class CameraOpticalFlowFragment :
     BaseFragment<FragmentCameraOpticalFlowBinding>(FragmentCameraOpticalFlowBinding::inflate) {
@@ -84,6 +89,16 @@ class CameraOpticalFlowFragment :
     private lateinit var farnebackLabFlow: Farneback
     private lateinit var imuEstimator: IMUEstimator
     private lateinit var mvViewer: MotionVectorViz
+    private var objectTracker: legacy_Tracker? = null
+    private var lastTrackedFrameRect: Rect? = null
+    private var objectTemplateGray: Mat? = null
+    private var trackerFrameWidth = 0
+    private var trackerFrameHeight = 0
+    private var trackerInitializedFromSelection = false
+    private var lostTrackingFrameCount = 0
+    private var reacquireFrameCounter = 0
+    @Volatile
+    private var roiSelectionVersion = 0
     private var frameCount: Int
         get() = cameraViewModel.frameCount
         set(value) {
@@ -151,6 +166,7 @@ class CameraOpticalFlowFragment :
 
         cameraExecutor = Executors.newSingleThreadExecutor()
         cameraView.scaleType = PreviewView.ScaleType.FILL_CENTER
+        roiOverlay.selectionShape = RoiOverlayView.SelectionShape.RECTANGLE
         roiOverlay.onRoiChanged = {
             cameraViewModel.normalizedRoi = roiOverlay.normalizedRoi?.let { roi ->
                 CameraOpticalFlowViewModel.NormalizedRoi(
@@ -169,11 +185,11 @@ class CameraOpticalFlowFragment :
                 )
             }
             cameraViewModel.roiEnabled = roiOverlay.selectionEnabled || cameraViewModel.normalizedRoi != null
-            resetActiveOpticalFlow()
+            invalidateRoiTrackingState()
             updateRoiUi()
         }
         roiOverlay.onInvalidSelection = {
-            Toast.makeText(safeContext(), "You must draw a closed area", Toast.LENGTH_SHORT).show()
+            Toast.makeText(safeContext(), "Drag a larger rectangle", Toast.LENGTH_SHORT).show()
         }
 
         imuEstimator = IMUEstimator(safeContext().applicationContext)
@@ -307,14 +323,18 @@ class CameraOpticalFlowFragment :
 
         btnRoiSelect.setSingleClick {
             cameraViewModel.roiEnabled = true
+            cameraViewModel.normalizedRoi = null
+            invalidateRoiTrackingState()
             roiOverlay.setSelectionEnabled(true)
+            roiOverlay.clearSelection()
             updateRoiUi()
         }
         btnRoiFull.setSingleClick {
             cameraViewModel.roiEnabled = false
+            cameraViewModel.normalizedRoi = null
+            invalidateRoiTrackingState()
             roiOverlay.setSelectionEnabled(false)
             roiOverlay.clearSelection()
-            resetActiveOpticalFlow()
             updateRoiUi()
         }
 
@@ -396,6 +416,25 @@ class CameraOpticalFlowFragment :
         mvViewer.resetMotionVector()
         motionVectorBitmap = null
         binding.motionVector.setImageBitmap(null)
+    }
+
+    private fun resetObjectTracker(clearTemplate: Boolean = false) {
+        objectTracker = null
+        lastTrackedFrameRect = null
+        trackerFrameWidth = 0
+        trackerFrameHeight = 0
+        lostTrackingFrameCount = 0
+        reacquireFrameCounter = 0
+        if (clearTemplate) {
+            objectTemplateGray?.release()
+            objectTemplateGray = null
+            trackerInitializedFromSelection = false
+        }
+    }
+
+    private fun invalidateRoiTrackingState() {
+        roiSelectionVersion++
+        resetObjectTracker(clearTemplate = true)
     }
 
     private fun createSelectedOpticalFlow(): OpticalFlow {
@@ -555,6 +594,7 @@ class CameraOpticalFlowFragment :
         if (::cameraExecutor.isInitialized) {
             cameraExecutor.shutdown()
         }
+        resetObjectTracker(clearTemplate = true)
         super.onDestroyView()
     }
 
@@ -627,7 +667,7 @@ class CameraOpticalFlowFragment :
                 binding.tvTimer.show()
                 val elapsedMillis = cameraViewModel.currentTimerElapsed()
                 binding.tvTimer.text = formatElapsedTime(elapsedMillis)
-                delay(1000L)
+                delay(1000L.milliseconds)
             }
         }
     }
@@ -652,6 +692,7 @@ class CameraOpticalFlowFragment :
     }
 
     private fun startAnalysis() {
+        resetObjectTracker()
         cameraViewModel.startAnalysis(
             kltSensitivity = binding.kltSensitivityBar.progress,
             farnebackSensitivity = binding.farnebackSensitivityBar.progress
@@ -817,15 +858,21 @@ class CameraOpticalFlowFragment :
             return
         }
 
-        val activeRoi = activeRoi(frame)
-        val processingFrame = activeRoi?.rect?.let { frame.submat(it) } ?: frame
-        val originalRoiFrame = activeRoi?.mask?.let { processingFrame.clone() }
+        val roiModeActive = cameraViewModel.roiEnabled
+        val activeRoi = activeTrackedRoi(frame)
+        val originalFrame = if (roiModeActive) frame.clone() else null
         try {
-            val currentOutput = opticalFlow.run(processingFrame)
+            val currentOutput = opticalFlow.run(frame)
             output = currentOutput
-            restoreOutsideRoiMask(processingFrame, originalRoiFrame, activeRoi?.mask)
 
             if (currentOutput != null && currentOutput.ofFrame != null) {
+                val outFrame = currentOutput.ofFrame ?: frame
+                if (activeRoi != null) {
+                    val roi = activeRoi
+                    keepOverlayInsideTrackedRect(outFrame, originalFrame, roi.rect)
+                } else if (roiModeActive) {
+                    originalFrame?.copyTo(outFrame)
+                }
                 currentOutput.position?.let { pos ->
                     val mv = mvViewer.getMotionVector(pos)
                     mvMat = mv
@@ -836,7 +883,6 @@ class CameraOpticalFlowFragment :
                         binding.motionVector.setImageBitmap(dst)
                     }
                 }
-                val outFrame = if (activeRoi != null) frame else currentOutput.ofFrame ?: frame
                 currentFrameWidth = outFrame.cols()
                 currentFrameHeight = outFrame.rows()
                 renderOpticalFlowFrame(outFrame)
@@ -844,11 +890,7 @@ class CameraOpticalFlowFragment :
                 return
             }
         } finally {
-            if (processingFrame !== frame) {
-                processingFrame.release()
-            }
-            originalRoiFrame?.release()
-            activeRoi?.mask?.release()
+            originalFrame?.release()
         }
         currentFrameWidth = frame.cols()
         currentFrameHeight = frame.rows()
@@ -856,85 +898,318 @@ class CameraOpticalFlowFragment :
         writeToVideoWriter(frame)
     }
 
-    private fun activeRoi(frame: Mat): ActiveRoi? {
+    private fun activeTrackedRoi(frame: Mat): ActiveRoi? {
         val normalized = cameraViewModel.normalizedRoi ?: return null
         if (!cameraViewModel.roiEnabled) return null
+        val selectionVersion = roiSelectionVersion
 
-        val frameCols = frame.cols().coerceAtLeast(1)
-        val frameRows = frame.rows().coerceAtLeast(1)
-        val viewHeight = 1.0
-        val viewWidth = normalized.viewAspectRatio.toDouble().coerceAtLeast(0.01)
-        val scale = max(viewWidth / frameCols.toDouble(), viewHeight / frameRows.toDouble())
-        val offsetX = ((frameCols * scale) - viewWidth) / 2.0
-        val offsetY = ((frameRows * scale) - viewHeight) / 2.0
-
-        fun mapX(normalizedX: Float): Int {
-            return (((normalizedX * viewWidth) + offsetX) / scale).roundToInt()
+        val mapper = RoiFrameMapper(
+            frameCols = frame.cols().coerceAtLeast(1),
+            frameRows = frame.rows().coerceAtLeast(1),
+            viewAspectRatio = normalized.viewAspectRatio
+        )
+        val frameSizeChanged = trackerFrameWidth != 0 &&
+            (trackerFrameWidth != mapper.frameCols || trackerFrameHeight != mapper.frameRows)
+        if (frameSizeChanged) {
+            resetObjectTracker(clearTemplate = true)
         }
 
-        fun mapY(normalizedY: Float): Int {
-            return (((normalizedY * viewHeight) + offsetY) / scale).roundToInt()
+        val trackerInputFrame = createTrackerInputFrame(frame)
+        val trackedRect = try {
+            if (objectTracker == null) {
+                if (trackerInitializedFromSelection && objectTemplateGray != null) {
+                    reacquireObjectTracker(trackerInputFrame, mapper)
+                } else {
+                    initializeObjectTracker(trackerInputFrame, normalized, mapper)
+                }
+            } else {
+                updateObjectTracker(trackerInputFrame, mapper)
+            }?.let { rect ->
+                sanitizeFrameRect(rect, mapper.frameCols, mapper.frameRows)
+            }
+        } finally {
+            trackerInputFrame.release()
         }
 
-        val left = mapX(normalized.left).coerceIn(0, frameCols - 1)
-        val top = mapY(normalized.top).coerceIn(0, frameRows - 1)
-        val right = mapX(normalized.right).coerceIn(left + 1, frameCols)
-        val bottom = mapY(normalized.bottom).coerceIn(top + 1, frameRows)
+        if (trackedRect == null) {
+            if (trackerInitializedFromSelection) {
+                clearTrackingOverlayRect(selectionVersion)
+            }
+            return null
+        }
+
+        lastTrackedFrameRect = copyRect(trackedRect)
+        syncTrackingOverlay(trackedRect, mapper, selectionVersion)
+        return ActiveRoi(rect = trackedRect)
+    }
+
+    private fun clearTrackingOverlayRect(selectionVersion: Int) {
+        activity?.runOnUiThread {
+            if (isAdded && selectionVersion == roiSelectionVersion && cameraViewModel.roiEnabled) {
+                binding.roiOverlay.setNormalizedRoi(null, notify = false)
+            }
+        }
+    }
+
+    private fun keepOverlayInsideTrackedRect(frameWithOverlay: Mat, originalFrame: Mat?, rect: Rect) {
+        if (originalFrame == null || frameWithOverlay.empty()) return
+
+        val clippedRect = sanitizeFrameRect(
+            rect = rect,
+            frameCols = frameWithOverlay.cols(),
+            frameRows = frameWithOverlay.rows()
+        ) ?: return
+
+        var processedRect: Mat? = null
+        var processedRectCopy: Mat? = null
+        var outputRect: Mat? = null
+        try {
+            processedRect = frameWithOverlay.submat(clippedRect)
+            processedRectCopy = processedRect.clone()
+            originalFrame.copyTo(frameWithOverlay)
+            outputRect = frameWithOverlay.submat(clippedRect)
+            processedRectCopy.copyTo(outputRect)
+        } finally {
+            processedRect?.release()
+            processedRectCopy?.release()
+            outputRect?.release()
+        }
+    }
+
+    private fun createTrackerInputFrame(frame: Mat): Mat {
+        val trackerFrame = Mat()
+        when (frame.channels()) {
+            4 -> Imgproc.cvtColor(frame, trackerFrame, Imgproc.COLOR_RGBA2BGR)
+            1 -> Imgproc.cvtColor(frame, trackerFrame, Imgproc.COLOR_GRAY2BGR)
+            else -> frame.copyTo(trackerFrame)
+        }
+        return trackerFrame
+    }
+
+    private fun initializeObjectTracker(
+        frame: Mat,
+        normalized: CameraOpticalFlowViewModel.NormalizedRoi,
+        mapper: RoiFrameMapper
+    ): Rect? {
+        val initialRect = mapper.mapNormalizedRoiToFrame(normalized) ?: return null
+        storeObjectTemplate(frame, initialRect)
+        return initializeTrackerAtRect(frame, initialRect, mapper)
+    }
+
+    private fun initializeTrackerAtRect(frame: Mat, rect: Rect, mapper: RoiFrameMapper): Rect? {
+        val safeRect = sanitizeFrameRect(rect, mapper.frameCols, mapper.frameRows) ?: return null
+        return try {
+            val tracker = legacy_TrackerCSRT.create()
+            val initialized = tracker.init(frame, safeRect.toRect2d())
+            if (!initialized) {
+                objectTracker = null
+                return null
+            }
+            objectTracker = tracker
+            trackerFrameWidth = mapper.frameCols
+            trackerFrameHeight = mapper.frameRows
+            trackerInitializedFromSelection = true
+            lostTrackingFrameCount = 0
+            reacquireFrameCounter = 0
+            safeRect
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize object tracker: ${e.message}", e)
+            objectTracker = null
+            safeRect
+        }
+    }
+
+    private fun updateObjectTracker(frame: Mat, mapper: RoiFrameMapper): Rect? {
+        val updatedRect = Rect2d()
+        val success = try {
+            objectTracker?.update(frame, updatedRect) == true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update object tracker: ${e.message}", e)
+            objectTracker = null
+            false
+        }
+
+        val safeRect = if (success && isTrackerRectVisible(updatedRect, mapper.frameCols, mapper.frameRows)) {
+            sanitizeFrameRect(updatedRect.toRect(), mapper.frameCols, mapper.frameRows)
+        } else {
+            null
+        }
+
+        return if (safeRect != null) {
+            lostTrackingFrameCount = 0
+            reacquireFrameCounter = 0
+            safeRect
+        } else {
+            lostTrackingFrameCount++
+            objectTracker = null
+            reacquireObjectTracker(frame, mapper)
+        }
+    }
+
+    private fun storeObjectTemplate(frame: Mat, rect: Rect) {
+        val safeRect = sanitizeFrameRect(rect, frame.cols(), frame.rows()) ?: return
+        var roi: Mat? = null
+        val templateGray = Mat()
+        try {
+            roi = frame.submat(safeRect)
+            Imgproc.cvtColor(roi, templateGray, Imgproc.COLOR_BGR2GRAY)
+            objectTemplateGray?.release()
+            objectTemplateGray = templateGray.clone()
+        } finally {
+            roi?.release()
+            templateGray.release()
+        }
+    }
+
+    private fun reacquireObjectTracker(frame: Mat, mapper: RoiFrameMapper): Rect? {
+        val template = objectTemplateGray ?: return null
+        reacquireFrameCounter++
+        if (reacquireFrameCounter != 1 && reacquireFrameCounter % REACQUIRE_FRAME_INTERVAL != 0) {
+            return null
+        }
+
+        val frameGray = Mat()
+        val scaledFrame = Mat()
+        val scaledTemplate = Mat()
+        val matchResult = Mat()
+        try {
+            Imgproc.cvtColor(frame, frameGray, Imgproc.COLOR_BGR2GRAY)
+            Imgproc.resize(
+                frameGray,
+                scaledFrame,
+                Size(),
+                REACQUIRE_SEARCH_SCALE,
+                REACQUIRE_SEARCH_SCALE,
+                Imgproc.INTER_AREA
+            )
+
+            var bestScore = Double.NEGATIVE_INFINITY
+            var bestRect: Rect? = null
+            for (templateScale in REACQUIRE_TEMPLATE_SCALES) {
+                val width = (template.cols() * REACQUIRE_SEARCH_SCALE * templateScale).roundToInt()
+                val height = (template.rows() * REACQUIRE_SEARCH_SCALE * templateScale).roundToInt()
+                if (width < MIN_REACQUIRE_TEMPLATE_SIZE || height < MIN_REACQUIRE_TEMPLATE_SIZE) continue
+                if (width >= scaledFrame.cols() || height >= scaledFrame.rows()) continue
+
+                Imgproc.resize(
+                    template,
+                    scaledTemplate,
+                    Size(width.toDouble(), height.toDouble()),
+                    0.0,
+                    0.0,
+                    Imgproc.INTER_AREA
+                )
+                Imgproc.matchTemplate(
+                    scaledFrame,
+                    scaledTemplate,
+                    matchResult,
+                    Imgproc.TM_CCOEFF_NORMED
+                )
+                val result = Core.minMaxLoc(matchResult)
+                if (result.maxVal > bestScore) {
+                    bestScore = result.maxVal
+                    bestRect = Rect(
+                        (result.maxLoc.x / REACQUIRE_SEARCH_SCALE).roundToInt(),
+                        (result.maxLoc.y / REACQUIRE_SEARCH_SCALE).roundToInt(),
+                        (width / REACQUIRE_SEARCH_SCALE).roundToInt(),
+                        (height / REACQUIRE_SEARCH_SCALE).roundToInt()
+                    )
+                }
+            }
+
+            val reacquiredRect = bestRect
+                ?.takeIf { bestScore >= REACQUIRE_MATCH_THRESHOLD }
+                ?.let { sanitizeFrameRect(it, mapper.frameCols, mapper.frameRows) }
+                ?: return null
+
+            return initializeTrackerAtRect(frame, reacquiredRect, mapper)
+        } finally {
+            frameGray.release()
+            scaledFrame.release()
+            scaledTemplate.release()
+            matchResult.release()
+        }
+    }
+
+    private fun syncTrackingOverlay(frameRect: Rect, mapper: RoiFrameMapper, selectionVersion: Int) {
+        if (selectionVersion != roiSelectionVersion || !cameraViewModel.roiEnabled) return
+
+        val normalizedRect = mapper.mapFrameRectToNormalized(frameRect)
+        cameraViewModel.normalizedRoi = CameraOpticalFlowViewModel.NormalizedRoi(
+            left = normalizedRect.left,
+            top = normalizedRect.top,
+            right = normalizedRect.right,
+            bottom = normalizedRect.bottom,
+            viewAspectRatio = mapper.viewAspectRatio,
+            pathPoints = emptyList()
+        )
+
+        activity?.runOnUiThread {
+            if (isAdded && selectionVersion == roiSelectionVersion && cameraViewModel.roiEnabled) {
+                binding.roiOverlay.setNormalizedRoi(normalizedRect, notify = false)
+            }
+        }
+    }
+
+    private fun sanitizeFrameRect(rect: Rect, frameCols: Int, frameRows: Int): Rect? {
+        if (frameCols <= 1 || frameRows <= 1) return null
+
+        val rawLeft = minOf(rect.x, rect.x + rect.width)
+        val rawRight = maxOf(rect.x, rect.x + rect.width)
+        val rawTop = minOf(rect.y, rect.y + rect.height)
+        val rawBottom = maxOf(rect.y, rect.y + rect.height)
+        val left = rawLeft.coerceIn(0, frameCols - 1)
+        val top = rawTop.coerceIn(0, frameRows - 1)
+        val right = rawRight.coerceIn(left + 1, frameCols)
+        val bottom = rawBottom.coerceIn(top + 1, frameRows)
         val width = right - left
         val height = bottom - top
         if (width < MIN_ROI_FRAME_SIZE || height < MIN_ROI_FRAME_SIZE) return null
+        return Rect(left, top, width, height)
+    }
 
-        val rect = Rect(left, top, width, height)
-        return ActiveRoi(
-            rect = rect,
-            mask = createRoiMask(
-                normalized = normalized,
-                frameCols = frameCols,
-                frameRows = frameRows,
-                rect = rect,
-                mapX = { value -> mapX(value) },
-                mapY = { value -> mapY(value) }
-            )
+    private fun isTrackerRectVisible(rect: Rect2d, frameCols: Int, frameRows: Int): Boolean {
+        if (frameCols <= 1 || frameRows <= 1 || rect.width <= 0.0 || rect.height <= 0.0) return false
+
+        val rawLeft = rect.x
+        val rawTop = rect.y
+        val rawRight = rect.x + rect.width
+        val rawBottom = rect.y + rect.height
+        if (rawRight <= 0.0 ||
+            rawBottom <= 0.0 ||
+            rawLeft >= frameCols.toDouble() ||
+            rawTop >= frameRows.toDouble()
+        ) {
+            return false
+        }
+
+        val visibleLeft = rawLeft.coerceIn(0.0, frameCols.toDouble())
+        val visibleTop = rawTop.coerceIn(0.0, frameRows.toDouble())
+        val visibleRight = rawRight.coerceIn(0.0, frameCols.toDouble())
+        val visibleBottom = rawBottom.coerceIn(0.0, frameRows.toDouble())
+        val visibleArea = (visibleRight - visibleLeft).coerceAtLeast(0.0) *
+            (visibleBottom - visibleTop).coerceAtLeast(0.0)
+        val rectArea = rect.width * rect.height
+        if (rectArea <= 0.0) return false
+
+        return visibleArea / rectArea >= MIN_TRACKER_VISIBLE_RATIO
+    }
+
+    private fun copyRect(rect: Rect): Rect {
+        return Rect(rect.x, rect.y, rect.width, rect.height)
+    }
+
+    private fun Rect.toRect2d(): Rect2d {
+        return Rect2d(x.toDouble(), y.toDouble(), width.toDouble(), height.toDouble())
+    }
+
+    private fun Rect2d.toRect(): Rect {
+        return Rect(
+            x.roundToInt(),
+            y.roundToInt(),
+            width.roundToInt(),
+            height.roundToInt()
         )
-    }
-
-    private fun createRoiMask(
-        normalized: CameraOpticalFlowViewModel.NormalizedRoi,
-        frameCols: Int,
-        frameRows: Int,
-        rect: Rect,
-        mapX: (Float) -> Int,
-        mapY: (Float) -> Int
-    ): Mat? {
-        if (normalized.pathPoints.size < 3) return null
-
-        val polygon = normalized.pathPoints.map { point ->
-            Point(
-                mapX(point.x).coerceIn(0, frameCols - 1).minus(rect.x).toDouble(),
-                mapY(point.y).coerceIn(0, frameRows - 1).minus(rect.y).toDouble()
-            )
-        }
-        val mask = Mat.zeros(rect.height, rect.width, CvType.CV_8UC1)
-        val polygonMat = MatOfPoint(*polygon.toTypedArray())
-        Imgproc.fillPoly(mask, listOf(polygonMat), Scalar(255.0))
-        polygonMat.release()
-        return mask
-    }
-
-    private fun restoreOutsideRoiMask(
-        processingFrame: Mat,
-        originalRoiFrame: Mat?,
-        mask: Mat?
-    ) {
-        if (originalRoiFrame == null || mask == null) return
-
-        val inverseMask = Mat()
-        try {
-            Core.bitwise_not(mask, inverseMask)
-            originalRoiFrame.copyTo(processingFrame, inverseMask)
-        } finally {
-            inverseMask.release()
-        }
     }
 
     private fun processAnalysisFrame(frame: Mat) {
@@ -1149,7 +1424,7 @@ class CameraOpticalFlowFragment :
         if (isRecording && videoEncoder != null) {
             // Log mean occasionally
             if (System.currentTimeMillis() % 2000 < 100) {
-                val mean = org.opencv.core.Core.mean(matFrame)
+                val mean = Core.mean(matFrame)
                 Log.d("CAMERA-RECORD", "Recording frame mean: $mean")
             }
 
@@ -1229,10 +1504,61 @@ class CameraOpticalFlowFragment :
     companion object {
         private const val ANALYSIS_SENSITIVITY = 100
         private const val MIN_ROI_FRAME_SIZE = 32
+        private const val MIN_TRACKER_VISIBLE_RATIO = 0.70
+        private const val REACQUIRE_SEARCH_SCALE = 0.5
+        private const val REACQUIRE_MATCH_THRESHOLD = 0.68
+        private const val REACQUIRE_FRAME_INTERVAL = 5
+        private const val MIN_REACQUIRE_TEMPLATE_SIZE = 12
+        private val REACQUIRE_TEMPLATE_SCALES = doubleArrayOf(0.85, 1.0, 1.15)
+    }
+
+    private data class RoiFrameMapper(
+        val frameCols: Int,
+        val frameRows: Int,
+        val viewAspectRatio: Float
+    ) {
+        private val viewHeight = 1.0
+        private val viewWidth = viewAspectRatio.toDouble().coerceAtLeast(0.01)
+        private val scale = max(viewWidth / frameCols.toDouble(), viewHeight / frameRows.toDouble())
+        private val offsetX = ((frameCols * scale) - viewWidth) / 2.0
+        private val offsetY = ((frameRows * scale) - viewHeight) / 2.0
+
+        fun mapNormalizedRoiToFrame(normalized: CameraOpticalFlowViewModel.NormalizedRoi): Rect? {
+            if (frameCols <= 1 || frameRows <= 1) return null
+
+            val left = mapX(normalized.left).coerceIn(0, frameCols - 1)
+            val top = mapY(normalized.top).coerceIn(0, frameRows - 1)
+            val right = mapX(normalized.right).coerceIn(left + 1, frameCols)
+            val bottom = mapY(normalized.bottom).coerceIn(top + 1, frameRows)
+            return Rect(left, top, right - left, bottom - top)
+        }
+
+        fun mapFrameRectToNormalized(frameRect: Rect): RectF {
+            val left = normalizeX(frameRect.x.toDouble()).coerceIn(0f, 1f)
+            val top = normalizeY(frameRect.y.toDouble()).coerceIn(0f, 1f)
+            val right = normalizeX((frameRect.x + frameRect.width).toDouble()).coerceIn(left, 1f)
+            val bottom = normalizeY((frameRect.y + frameRect.height).toDouble()).coerceIn(top, 1f)
+            return RectF(left, top, right, bottom)
+        }
+
+        private fun mapX(normalizedX: Float): Int {
+            return (((normalizedX * viewWidth) + offsetX) / scale).roundToInt()
+        }
+
+        private fun mapY(normalizedY: Float): Int {
+            return (((normalizedY * viewHeight) + offsetY) / scale).roundToInt()
+        }
+
+        private fun normalizeX(frameX: Double): Float {
+            return ((frameX * scale - offsetX) / viewWidth).toFloat()
+        }
+
+        private fun normalizeY(frameY: Double): Float {
+            return ((frameY * scale - offsetY) / viewHeight).toFloat()
+        }
     }
 
     private data class ActiveRoi(
-        val rect: Rect,
-        val mask: Mat?
+        val rect: Rect
     )
 }

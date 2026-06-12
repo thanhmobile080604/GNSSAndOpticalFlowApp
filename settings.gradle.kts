@@ -24,4 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "GNSSAndOpticalFlowApp"
 include(":app")
- 
+include(":openCVLibrary412")

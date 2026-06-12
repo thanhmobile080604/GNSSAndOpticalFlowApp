@@ -21,6 +21,11 @@ class RoiOverlayView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
+    enum class SelectionShape {
+        FREEHAND,
+        RECTANGLE
+    }
+
     private val dimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(95, 0, 0, 0)
         style = Paint.Style.FILL
@@ -53,6 +58,9 @@ class RoiOverlayView @JvmOverloads constructor(
     private val drawingPoints = mutableListOf<PointF>()
     private val normalizedPathPoints = mutableListOf<PointF>()
     private val drawPath = Path()
+    private val drawingRect = RectF()
+    private var rectangleStart: PointF? = null
+    private var rectangleEnd: PointF? = null
 
     var normalizedRoi: RectF? = null
         private set
@@ -62,6 +70,13 @@ class RoiOverlayView @JvmOverloads constructor(
 
     var selectionEnabled = false
         private set
+
+    var selectionShape: SelectionShape = SelectionShape.FREEHAND
+        set(value) {
+            if (field == value) return
+            field = value
+            clearSelection(notify = true)
+        }
 
     var onRoiChanged: (() -> Unit)? = null
     var onInvalidSelection: (() -> Unit)? = null
@@ -76,9 +91,32 @@ class RoiOverlayView @JvmOverloads constructor(
         clearSelection(notify = true)
     }
 
+    fun setNormalizedRoi(rect: RectF?, notify: Boolean = true) {
+        normalizedRoi = rect?.let {
+            RectF(
+                it.left.coerceIn(0f, 1f),
+                it.top.coerceIn(0f, 1f),
+                it.right.coerceIn(0f, 1f),
+                it.bottom.coerceIn(0f, 1f)
+            )
+        }
+        normalizedPathPoints.clear()
+        drawingPoints.clear()
+        rectangleStart = null
+        rectangleEnd = null
+        visibility = if (selectionEnabled || normalizedRoi != null) VISIBLE else GONE
+        if (notify) onRoiChanged?.invoke()
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!selectionEnabled && normalizedRoi == null) return
+
+        if (selectionShape == SelectionShape.RECTANGLE) {
+            drawRectangleSelection(canvas)
+            return
+        }
 
         val closedPath = closedSelectionPath()
         if (closedPath != null) {
@@ -105,6 +143,10 @@ class RoiOverlayView @JvmOverloads constructor(
         val x = event.x.coerceIn(0f, width.toFloat())
         val y = event.y.coerceIn(0f, height.toFloat())
 
+        if (selectionShape == SelectionShape.RECTANGLE) {
+            return handleRectangleTouch(event, x, y)
+        }
+
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
@@ -125,6 +167,47 @@ class RoiOverlayView @JvmOverloads constructor(
                 addDrawingPoint(x, y, force = true)
                 parent?.requestDisallowInterceptTouchEvent(false)
                 if (commitClosedArea()) {
+                    onRoiChanged?.invoke()
+                } else {
+                    clearSelection(notify = true)
+                    onInvalidSelection?.invoke()
+                }
+                invalidate()
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                clearSelection(notify = true)
+                invalidate()
+                return true
+            }
+        }
+        return true
+    }
+
+    private fun handleRectangleTouch(event: MotionEvent, x: Float, y: Float): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                clearSelection(notify = false)
+                rectangleStart = PointF(x, y)
+                rectangleEnd = PointF(x, y)
+                onRoiChanged?.invoke()
+                invalidate()
+                return true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                rectangleEnd = PointF(x, y)
+                invalidate()
+                return true
+            }
+
+            MotionEvent.ACTION_UP -> {
+                rectangleEnd = PointF(x, y)
+                parent?.requestDisallowInterceptTouchEvent(false)
+                if (commitRectangle()) {
                     onRoiChanged?.invoke()
                 } else {
                     clearSelection(notify = true)
@@ -175,6 +258,43 @@ class RoiOverlayView @JvmOverloads constructor(
         return true
     }
 
+    private fun commitRectangle(): Boolean {
+        val start = rectangleStart ?: return false
+        val end = rectangleEnd ?: return false
+        val bounds = normalizedBoundsFor(start, end)
+        if (bounds.width() < minRoiSizePx() || bounds.height() < minRoiSizePx()) return false
+
+        normalizedRoi = RectF(
+            bounds.left / width.toFloat(),
+            bounds.top / height.toFloat(),
+            bounds.right / width.toFloat(),
+            bounds.bottom / height.toFloat()
+        )
+        normalizedPathPoints.clear()
+        rectangleStart = null
+        rectangleEnd = null
+        return true
+    }
+
+    private fun drawRectangleSelection(canvas: Canvas) {
+        val selectedRect = normalizedRoi?.let { normalized ->
+            RectF(
+                normalized.left * width,
+                normalized.top * height,
+                normalized.right * width,
+                normalized.bottom * height
+            )
+        } ?: activeRectangle()
+
+        if (selectedRect == null) {
+            return
+        }
+
+        canvas.drawRect(selectedRect, fillPaint)
+        canvas.drawRect(selectedRect, borderPaint)
+        canvas.drawCircle(selectedRect.left, selectedRect.top, 8f, handlePaint)
+    }
+
     private fun drawClosedArea(canvas: Canvas, path: Path) {
         val saveCount = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
@@ -198,6 +318,12 @@ class RoiOverlayView @JvmOverloads constructor(
         return drawPath
     }
 
+    private fun activeRectangle(): RectF? {
+        val start = rectangleStart ?: return null
+        val end = rectangleEnd ?: return null
+        return normalizedBoundsFor(start, end)
+    }
+
     private fun closedSelectionPath(): Path? {
         if (normalizedPathPoints.isEmpty()) return null
         drawPath.reset()
@@ -214,6 +340,8 @@ class RoiOverlayView @JvmOverloads constructor(
         normalizedRoi = null
         drawingPoints.clear()
         normalizedPathPoints.clear()
+        rectangleStart = null
+        rectangleEnd = null
         visibility = if (selectionEnabled) VISIBLE else GONE
         if (notify) onRoiChanged?.invoke()
         invalidate()
@@ -231,6 +359,16 @@ class RoiOverlayView @JvmOverloads constructor(
             bottom = max(bottom, point.y)
         }
         return RectF(left, top, right, bottom)
+    }
+
+    private fun normalizedBoundsFor(start: PointF, end: PointF): RectF {
+        drawingRect.set(
+            min(start.x, end.x),
+            min(start.y, end.y),
+            max(start.x, end.x),
+            max(start.y, end.y)
+        )
+        return drawingRect
     }
 
     private fun distance(from: PointF, toX: Float, toY: Float): Float {
