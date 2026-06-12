@@ -118,7 +118,7 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 
-    implementation("org.opencv:opencv:5.0.0")
+    implementation(project(":openCVLibrary412"))
     implementation("androidx.navigation:navigation-fragment-ktx:2.7.7")
     implementation("androidx.navigation:navigation-ui-ktx:2.7.7")
     implementation("androidx.work:work-runtime-ktx:2.11.2")

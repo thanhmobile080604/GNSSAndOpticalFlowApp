@@ -8,6 +8,7 @@ import android.hardware.SensorManager
 import android.util.Log
 import java.util.concurrent.Semaphore
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 class IMUEstimator(context: Context) : SensorEventListener {
     // Get a reference to the SensorManager
@@ -143,6 +144,18 @@ class IMUEstimator(context: Context) : SensorEventListener {
             Log.e("IMU", "Failed to acquire semaphore")
         }
         return output
+    }
+
+    fun getYawRate(): Float {
+        // Project angular velocity onto gravity vector to get yaw rate around Earth's Z axis (UP/DOWN)
+        val gMag = sqrt((gravity[0] * gravity[0] + gravity[1] * gravity[1] + gravity[2] * gravity[2]).toDouble()).toFloat()
+        if (gMag < 0.1f) return 0f
+        
+        // angularVelocity dot gravity.
+        // Tùy thuộc vào hệ tọa độ của Canvas (thường Y hướng xuống dưới), 
+        // dấu của góc xoay cần đảo ngược để xoay phải vẽ sang phải.
+        val yawRateRadSec = -(angularVelocity[0] * gravity[0] + angularVelocity[1] * gravity[1] + angularVelocity[2] * gravity[2]) / gMag
+        return Math.toDegrees(yawRateRadSec.toDouble()).toFloat()
     }
 
     fun getPosition(): FloatArray {

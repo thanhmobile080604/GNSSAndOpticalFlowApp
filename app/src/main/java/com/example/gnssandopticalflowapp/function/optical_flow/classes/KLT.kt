@@ -214,14 +214,8 @@ class KLT : OpticalFlow {
 
             dxList.add(dx)
             dyList.add(dy)
-            var displayDx = dx * vectorDirectionSign * displayVectorLengthMultiplier
-            var displayDy = dy * vectorDirectionSign * displayVectorLengthMultiplier
-            val displayMagnitude = sqrt((displayDx * displayDx) + (displayDy * displayDy))
-            if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
-                val scaleUp = minDisplayVectorLength / displayMagnitude
-                displayDx *= scaleUp
-                displayDy *= scaleUp
-            }
+            val displayDx = dx * vectorDirectionSign * displayVectorLengthMultiplier
+            val displayDy = dy * vectorDirectionSign * displayVectorLengthMultiplier
             val displayEnd = Point(motion.start.x + displayDx, motion.start.y + displayDy)
             Imgproc.line(currFrame, motion.start, displayEnd, color, vectorThickness)
             motionPts++

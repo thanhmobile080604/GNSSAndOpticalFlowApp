@@ -77,9 +77,9 @@ class VideoProcessOptionsDialog :
             optionsViewModel.selectAlgorithm(VideoProcessOptionsViewModel.Algorithm.AI)
         }
 
-        btnProcessingOffline.setSingleClick {
-            optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.OFFLINE)
-        }
+//        btnProcessingOffline.setSingleClick {
+//            optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.OFFLINE)
+//        }
 
         btnProcessingMyServer.setSingleClick {
             optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.ONLINE)
@@ -235,10 +235,10 @@ class VideoProcessOptionsDialog :
         processingModeCard.isVisible = state.showProcessing
         farnebackViewCard.isVisible = state.showDisplay
 
-        setSegmentSelected(
-            btnProcessingOffline,
-            state.processingMode == VideoProcessOptions.ProcessingMode.OFFLINE
-        )
+//        setSegmentSelected(
+//            btnProcessingOffline,
+//            state.processingMode == VideoProcessOptions.ProcessingMode.OFFLINE
+//        )
 
         setSegmentSelected(
             btnProcessingMyServer,
