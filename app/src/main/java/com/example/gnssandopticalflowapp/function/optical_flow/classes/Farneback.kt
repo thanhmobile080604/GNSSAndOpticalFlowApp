@@ -227,14 +227,8 @@ class Farneback : OpticalFlow {
 
                     if (visualizationMode == VisualizationMode.VECTORS) {
                         val start = Point(screenX.toDouble(), screenY.toDouble())
-                        var displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
-                        var displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
-                        val displayMagnitude = sqrt((displayFx * displayFx) + (displayFy * displayFy))
-                        if (displayMagnitude < minDisplayVectorLength && displayMagnitude > 0.0) {
-                            val scaleUp = minDisplayVectorLength / displayMagnitude
-                            displayFx *= scaleUp
-                            displayFy *= scaleUp
-                        }
+                        val displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
+                        val displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
                         val end = Point(
                             start.x + displayFx,
                             start.y + displayFy
