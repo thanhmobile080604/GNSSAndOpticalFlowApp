@@ -76,7 +76,9 @@ class LiveRoutingFragment :
     private var navigationMarker: Marker? = null
     private var targetMarker: Marker? = null
     private var routeLine: Polyline? = null
-    private var opticalAssistLine: Polyline? = null
+    private val gnssTravelLines = ArrayList<Polyline>()
+    private val testGnssLines = ArrayList<Polyline>()
+    private val opticalAssistLines = ArrayList<Polyline>()
 
     private var tickerJob: Job? = null
     private var testDropoutJob: Job? = null
@@ -264,18 +266,55 @@ class LiveRoutingFragment :
         binding.mapView.invalidate()
     }
 
-    private fun drawOpticalAssistLine(points: List<GeoPoint>) {
-        if (points.size < 2) return
-        if (opticalAssistLine == null) {
-            opticalAssistLine = Polyline(binding.mapView).apply {
-                outlinePaint.color = Color.rgb(255, 40, 60)
-                outlinePaint.strokeWidth = 8f
+    private fun drawOpticalAssistLines(segments: List<List<GeoPoint>>) {
+        drawPathSegments(
+            segments = segments,
+            lines = opticalAssistLines,
+            color = Color.rgb(255, 40, 60),
+            strokeWidth = 8f
+        )
+    }
+
+    private fun drawGnssTravelLines(segments: List<List<GeoPoint>>) {
+        drawPathSegments(
+            segments = segments,
+            lines = gnssTravelLines,
+            color = Color.BLACK,
+            strokeWidth = 8f
+        )
+    }
+
+    private fun drawTestGnssLines(segments: List<List<GeoPoint>>) {
+        drawPathSegments(
+            segments = segments,
+            lines = testGnssLines,
+            color = Color.rgb(0, 122, 255),
+            strokeWidth = 8f
+        )
+    }
+
+    private fun drawPathSegments(
+        segments: List<List<GeoPoint>>,
+        lines: ArrayList<Polyline>,
+        color: Int,
+        strokeWidth: Float
+    ) {
+        val visibleSegments = segments.filter { it.size >= 2 }
+        while (lines.size > visibleSegments.size) {
+            binding.mapView.overlays.remove(lines.removeAt(lines.lastIndex))
+        }
+        visibleSegments.forEachIndexed { index, segment ->
+            val line = lines.getOrNull(index) ?: Polyline(binding.mapView).apply {
+                outlinePaint.color = color
+                outlinePaint.strokeWidth = strokeWidth
                 outlinePaint.strokeCap = Paint.Cap.ROUND
                 outlinePaint.strokeJoin = Paint.Join.ROUND
+                lines.add(this)
+                binding.mapView.overlays.add(this)
             }
-            binding.mapView.overlays.add(opticalAssistLine)
+            line.setPoints(segment)
         }
-        opticalAssistLine?.setPoints(points)
+        binding.mapView.invalidate()
     }
 
     private fun updateTargetMarker(point: GeoPoint) {
@@ -293,7 +332,10 @@ class LiveRoutingFragment :
     }
 
     private fun applyNavigationSnapshot(snapshot: LiveRoutingViewModel.NavigationSnapshot) {
-        snapshot.opticalAssistPoints?.let(::drawOpticalAssistLine)
+        snapshot.remainingRoutePoints?.let(::drawRouteLine)
+        snapshot.gnssTravelPathSegments?.let(::drawGnssTravelLines)
+        snapshot.testGnssPathSegments?.let(::drawTestGnssLines)
+        snapshot.opticalAssistSegments?.let(::drawOpticalAssistLines)
         updateNavigationMarker(snapshot.point, snapshot.headingDeg)
         updateSpeedText(snapshot.speedMps)
     }
@@ -412,6 +454,7 @@ class LiveRoutingFragment :
             mainViewModel.postCurrentLocation(location)
             mainViewModel.postCurrentTime(location.time)
         }
+        result.testGnssPathSegments?.let(::drawTestGnssLines)
         result.navigation?.let(::applyNavigationSnapshot)
         applyAssistDecision(result.assistDecision)
     }
