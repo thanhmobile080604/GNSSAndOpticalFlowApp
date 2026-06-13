@@ -9,7 +9,6 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.gnssandopticalflowapp.function.video.contract.VideoProcessingJobContract
 import com.example.gnssandopticalflowapp.function.video.jobs.VideoProcessingJobs
-import com.example.gnssandopticalflowapp.function.video.local.LocalVideoProcessor
 import com.example.gnssandopticalflowapp.function.video.notification.VideoProcessingNotifier
 import com.example.gnssandopticalflowapp.function.video.options.VideoProcessOptionsCodec
 import com.example.gnssandopticalflowapp.function.video.server.GnssBackendVideoProcessor
@@ -47,18 +46,6 @@ class VideoProcessingWorker(
         jobCreatedAtMs = localJobCreatedAtMs
     )
 
-    private val localProcessor by lazy {
-        LocalVideoProcessor(
-            context = applicationContext,
-            callbacks = object : LocalVideoProcessor.Callbacks {
-                override fun isActive() = isProcessingActive()
-                override fun currentPercent() = currentProgressPercent
-                override fun postStatus(status: String) = postCurrentProgress(status)
-                override fun postPercent(percent: Int) = postProgressPercent(percent)
-            }
-        )
-    }
-
     override suspend fun getForegroundInfo(): ForegroundInfo {
         notifier.createChannels()
         return notifier.foregroundInfo(currentProgressMessage(), ongoing = true)
@@ -84,7 +71,8 @@ class VideoProcessingWorker(
             return Result.failure()
         }
 
-        currentProcessingMode = options.processingMode
+        val effectiveOptions = options
+        currentProcessingMode = effectiveOptions.processingMode
         if (VideoProcessingBus.isDismissed(localJobId)) {
             File(sourcePath).delete()
             optionsFile.delete()
@@ -94,11 +82,11 @@ class VideoProcessingWorker(
 
         currentProgressPercent = VideoProcessingProgressText.DEFAULT_PERCENT
         setForeground(notifier.foregroundInfo(currentProgressMessage(), ongoing = true))
-        VideoProcessingBus.postProcessing(localJobId, options.processingMode, currentProgressMessage())
+        VideoProcessingBus.postProcessing(localJobId, effectiveOptions.processingMode, currentProgressMessage())
 
         val sourceFile = File(sourcePath)
         return try {
-            val outputFile = processVideo(sourceFile, options)
+            val outputFile = processVideo(sourceFile, effectiveOptions)
             acceptsJobUpdates = false
             MediaScannerConnection.scanFile(
                 applicationContext,
@@ -145,9 +133,6 @@ class VideoProcessingWorker(
 
         val processed = try {
             when (options.processingMode) {
-                VideoProcessOptions.ProcessingMode.OFFLINE -> {
-                    localProcessor.process(sourceFile, outputFile, options)
-                }
                 VideoProcessOptions.ProcessingMode.ONLINE -> {
                     serverProcessor().process(sourceFile, outputFile, options)
                 }

@@ -84,7 +84,7 @@ internal class ServerVideoProcessor(
             Log.d(
                 TAG,
                 "Creating server video job mode=${if (options.useFarnebackHeatmap) "HEATMAP" else "VECTORS"} " +
-                    "algorithm=${serverAlgorithmName(options)} isMoving=${options.isMoving}"
+                    "algorithm=${serverAlgorithmName()} isMoving=${options.isMoving}"
             )
             val response = runServerNetworkRequest("Server job upload") {
                 val videoBody = sourceFile.asRequestBody("video/mp4".toMediaType())
@@ -510,7 +510,7 @@ internal class ServerVideoProcessor(
         val fields = mutableMapOf<String, String>()
         fields["mode"] = if (options.useFarnebackHeatmap) "HEATMAP" else "VECTORS"
         fields["processing_mode"] = options.processingMode.name
-        fields["algorithm"] = serverAlgorithmName(options)
+        fields["algorithm"] = serverAlgorithmName()
         fields["sensitivity"] = options.sensitivity.toString()
         fields["is_moving"] = options.isMoving.toString()
         fields["isMoving"] = options.isMoving.toString()
@@ -543,12 +543,8 @@ internal class ServerVideoProcessor(
         }
     }
 
-    private fun serverAlgorithmName(options: VideoProcessOptions): String {
-        return when {
-            options.useAi -> "AI"
-            options.useFarneback -> "FARNEBACK"
-            else -> "KLT"
-        }
+    private fun serverAlgorithmName(): String {
+        return "AI"
     }
 
     private class FileChunkRequestBody(

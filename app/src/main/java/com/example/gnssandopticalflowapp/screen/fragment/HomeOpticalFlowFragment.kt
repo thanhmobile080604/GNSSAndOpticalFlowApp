@@ -132,12 +132,10 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         val modeCount = VideoProcessingBus.activeJobCount(mode)
         val totalCount = VideoProcessingBus.activeJobCount()
         val hardLimit = when (mode) {
-            VideoProcessOptions.ProcessingMode.OFFLINE -> ON_DEVICE_HARD_LIMIT
             VideoProcessOptions.ProcessingMode.ONLINE -> ONLINE_HARD_LIMIT
             VideoProcessOptions.ProcessingMode.OUTER_SERVER -> ONLINE_HARD_LIMIT
         }
         val warnAt = when (mode) {
-            VideoProcessOptions.ProcessingMode.OFFLINE -> ON_DEVICE_WARN_AT
             VideoProcessOptions.ProcessingMode.ONLINE -> ONLINE_WARN_AT
             VideoProcessOptions.ProcessingMode.OUTER_SERVER -> ONLINE_WARN_AT
         }
@@ -155,7 +153,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
 
     private fun showProcessingLimitToast(loadDecision: ProcessingLoadDecision) {
         val modeLabel = when (loadDecision.mode) {
-            VideoProcessOptions.ProcessingMode.OFFLINE -> "on-device"
             VideoProcessOptions.ProcessingMode.ONLINE -> "server"
             VideoProcessOptions.ProcessingMode.OUTER_SERVER -> "outer server"
         }
@@ -171,7 +168,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
         onContinue: () -> Unit
     ) {
         val modeLabel = when (loadDecision.mode) {
-            VideoProcessOptions.ProcessingMode.OFFLINE -> "on-device"
             VideoProcessOptions.ProcessingMode.ONLINE -> "server"
             VideoProcessOptions.ProcessingMode.OUTER_SERVER -> "outer server"
         }
@@ -217,8 +213,6 @@ class HomeOpticalFlowFragment : BaseFragment<FragmentHomeOpticalFlowBinding>(Fra
     )
 
     private companion object {
-        const val ON_DEVICE_WARN_AT = 1
-        const val ON_DEVICE_HARD_LIMIT = 2
         const val ONLINE_WARN_AT = 3
         const val ONLINE_HARD_LIMIT = 5
         const val GLOBAL_WARN_AT = 4

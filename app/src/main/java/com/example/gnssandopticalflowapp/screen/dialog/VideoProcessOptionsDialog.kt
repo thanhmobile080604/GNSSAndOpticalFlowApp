@@ -29,6 +29,7 @@ import com.example.gnssandopticalflowapp.databinding.DialogVideoProcessOptionsBi
 import com.example.gnssandopticalflowapp.model.VideoProcessOptions
 import com.example.gnssandopticalflowapp.screen.viewmodel.VideoProcessOptionsViewModel
 import com.example.gnssandopticalflowapp.util.VideoPlaybackSupport
+import com.example.gnssandopticalflowapp.view.RoiOverlayView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -50,6 +51,7 @@ class VideoProcessOptionsDialog :
     private var videoAspectRatio = 0f
     private var previewProgressJob: Job? = null
     private var userSeekingPreview = false
+    private var previewControlsHiddenByTap = false
 
     override fun DialogVideoProcessOptionsBinding.initView() {
         isCancelable = true
@@ -65,22 +67,6 @@ class VideoProcessOptionsDialog :
     }
 
     override fun DialogVideoProcessOptionsBinding.initListener() {
-        btnAlgorithmKlt.setSingleClick {
-            optionsViewModel.selectAlgorithm(VideoProcessOptionsViewModel.Algorithm.KLT)
-        }
-
-        btnAlgorithmFarneback.setSingleClick {
-            optionsViewModel.selectAlgorithm(VideoProcessOptionsViewModel.Algorithm.FARNEBACK)
-        }
-
-        btnAlgorithmAi.setSingleClick {
-            optionsViewModel.selectAlgorithm(VideoProcessOptionsViewModel.Algorithm.AI)
-        }
-
-//        btnProcessingOffline.setSingleClick {
-//            optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.OFFLINE)
-//        }
-
         btnProcessingMyServer.setSingleClick {
             optionsViewModel.selectProcessingMode(VideoProcessOptions.ProcessingMode.ONLINE)
         }
@@ -107,12 +93,12 @@ class VideoProcessOptionsDialog :
 
         btnRoiSelect.setSingleClick {
             pausePreviewForRoiSelection()
-            previewControls.isVisible = true
+            setPreviewControlsVisible(visible = true, animate = false)
             optionsViewModel.enableRoiSelection()
         }
 
         btnRoiFull.setSingleClick {
-            previewControls.isVisible = false
+            setPreviewControlsVisible(visible = false, animate = false)
             roiOverlay.setSelectionEnabled(false)
             roiOverlay.clearSelection()
             optionsViewModel.clearRoiSelection()
@@ -192,22 +178,18 @@ class VideoProcessOptionsDialog :
         val state = optionsViewModel.currentState()
 
         if (state.shouldRequireRoiBeforeApply) {
-            Toast.makeText(requireContext(), CLOSED_AREA_MESSAGE, Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), ROI_RECT_MESSAGE, Toast.LENGTH_SHORT).show()
             return@with
         }
 
         val options = VideoProcessOptions(
             isMoving = state.isMoving,
-            useFarneback = state.useFarneback,
+            useFarneback = false,
             sensitivity = state.sensitivity,
             useFarnebackHeatmap = state.useFarnebackHeatmap,
-            useAi = state.useAi,
+            useAi = true,
             roi = state.roiForApply,
-            processingMode = if (state.roiForApply != null) {
-                VideoProcessOptions.ProcessingMode.ONLINE
-            } else {
-                state.processingMode
-            }
+            processingMode = state.processingMode
         )
 
         onApplyOptions?.invoke(options)
@@ -217,28 +199,7 @@ class VideoProcessOptionsDialog :
     private fun DialogVideoProcessOptionsBinding.renderOptionsState(
         state: VideoProcessOptionsViewModel.UiState
     ) {
-        setSegmentSelected(
-            btnAlgorithmKlt,
-            state.algorithm == VideoProcessOptionsViewModel.Algorithm.KLT
-        )
-
-        setSegmentSelected(
-            btnAlgorithmFarneback,
-            state.algorithm == VideoProcessOptionsViewModel.Algorithm.FARNEBACK
-        )
-
-        setSegmentSelected(
-            btnAlgorithmAi,
-            state.algorithm == VideoProcessOptionsViewModel.Algorithm.AI
-        )
-
-        processingModeCard.isVisible = state.showProcessing
-        farnebackViewCard.isVisible = state.showDisplay
-
-//        setSegmentSelected(
-//            btnProcessingOffline,
-//            state.processingMode == VideoProcessOptions.ProcessingMode.OFFLINE
-//        )
+        farnebackViewCard.isVisible = true
 
         setSegmentSelected(
             btnProcessingMyServer,
@@ -331,7 +292,15 @@ class VideoProcessOptionsDialog :
     }
 
     private fun setupPreviewControls() = with(binding) {
-        previewControls.isVisible = false
+        setPreviewControlsVisible(visible = false, animate = false)
+        videoPreview.setOnClickListener {
+            if (!optionsViewModel.currentState().roiSelectEnabled) return@setOnClickListener
+            togglePreviewControls()
+        }
+        previewAspectFrame.setOnClickListener {
+            if (!optionsViewModel.currentState().roiSelectEnabled) return@setOnClickListener
+            togglePreviewControls()
+        }
         btnPreviewPlayPause.setSingleClick {
             val activePlayer = player ?: return@setSingleClick
             if (activePlayer.isPlaying) {
@@ -411,6 +380,7 @@ class VideoProcessOptionsDialog :
     }
 
     private fun setupRoiOverlay() = with(binding) {
+        roiOverlay.selectionShape = RoiOverlayView.SelectionShape.RECTANGLE
         roiOverlay.onRoiChanged = {
             val selectedRoi = roiOverlay.normalizedRoi?.let { roi ->
                 VideoProcessOptions.NormalizedRoi(
@@ -434,7 +404,16 @@ class VideoProcessOptionsDialog :
         }
 
         roiOverlay.onInvalidSelection = {
-            Toast.makeText(requireContext(), CLOSED_AREA_MESSAGE, Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), ROI_RECT_MESSAGE, Toast.LENGTH_SHORT).show()
+        }
+
+        roiOverlay.onSingleTap = {
+            if (!optionsViewModel.currentState().roiSelectEnabled) {
+                false
+            } else {
+                togglePreviewControls()
+                true
+            }
         }
     }
 
@@ -468,6 +447,46 @@ class VideoProcessOptionsDialog :
         player?.pause()
         binding.btnPreviewPlayPause.text = "Play"
         updateRoiOverlayInteractivity()
+    }
+
+    private fun togglePreviewControls() {
+        val nextVisible = binding.previewControls.isVisible && !previewControlsHiddenByTap
+        setPreviewControlsVisible(visible = !nextVisible, animate = true)
+    }
+
+    private fun setPreviewControlsVisible(visible: Boolean, animate: Boolean) = with(binding.previewControls) {
+        animate().cancel()
+        previewControlsHiddenByTap = !visible
+        if (visible) {
+            isVisible = true
+            if (!animate) {
+                translationY = 0f
+                alpha = 1f
+                return@with
+            }
+            translationY = height.takeIf { it > 0 }?.toFloat() ?: 58f * resources.displayMetrics.density
+            alpha = 0f
+            animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(180L)
+                .start()
+            return@with
+        }
+
+        val hiddenOffset = height.takeIf { it > 0 }?.toFloat() ?: 58f * resources.displayMetrics.density
+        if (!animate) {
+            translationY = hiddenOffset
+            alpha = 0f
+            isVisible = false
+            return@with
+        }
+        animate()
+            .translationY(hiddenOffset)
+            .alpha(0f)
+            .setDuration(180L)
+            .withEndAction { isVisible = false }
+            .start()
     }
 
     private fun updateRoiOverlayInteractivity() {
@@ -589,7 +608,7 @@ class VideoProcessOptionsDialog :
     companion object {
         private const val TAG = "VideoProcessOptionsDialog"
         private const val ARG_VIDEO_URI = "video_uri"
-        private const val CLOSED_AREA_MESSAGE = "You must draw a closed area"
+        private const val ROI_RECT_MESSAGE = "Drag a larger rectangle"
         private const val PREVIEW_PROGRESS_MAX = 1000
 
         fun show(

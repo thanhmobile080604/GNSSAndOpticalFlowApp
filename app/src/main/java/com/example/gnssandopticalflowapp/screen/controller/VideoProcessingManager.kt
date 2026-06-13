@@ -489,7 +489,6 @@ class VideoProcessingManager(
             ?: 1
         val modeLabel = when (job.mode) {
             VideoProcessOptions.ProcessingMode.ONLINE -> "ONLINE"
-            VideoProcessOptions.ProcessingMode.OFFLINE -> "DEVICE"
             VideoProcessOptions.ProcessingMode.OUTER_SERVER-> "ONLINE2"
             null -> "VIDEO"
         }

@@ -26,14 +26,6 @@ class RoiOverlayView @JvmOverloads constructor(
         RECTANGLE
     }
 
-    private val dimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(95, 0, 0, 0)
-        style = Paint.Style.FILL
-    }
-    private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-        style = Paint.Style.FILL
-    }
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(42, 220, 203, 255)
         style = Paint.Style.FILL
@@ -49,18 +41,14 @@ class RoiOverlayView @JvmOverloads constructor(
         color = Color.WHITE
         style = Paint.Style.FILL
     }
-    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = 32f
-        typeface = android.graphics.Typeface.DEFAULT_BOLD
-    }
-
     private val drawingPoints = mutableListOf<PointF>()
     private val normalizedPathPoints = mutableListOf<PointF>()
     private val drawPath = Path()
     private val drawingRect = RectF()
     private var rectangleStart: PointF? = null
     private var rectangleEnd: PointF? = null
+    private var touchStart: PointF? = null
+    private var touchMoved = false
 
     var normalizedRoi: RectF? = null
         private set
@@ -80,6 +68,7 @@ class RoiOverlayView @JvmOverloads constructor(
 
     var onRoiChanged: (() -> Unit)? = null
     var onInvalidSelection: (() -> Unit)? = null
+    var onSingleTap: (() -> Boolean)? = null
 
     fun setSelectionEnabled(enabled: Boolean) {
         selectionEnabled = enabled
@@ -125,11 +114,7 @@ class RoiOverlayView @JvmOverloads constructor(
         }
 
         val activePath = activeDrawingPath()
-        canvas.drawColor(Color.argb(40, 0, 0, 0))
-        if (activePath == null) {
-            canvas.drawText("Draw a closed area", 28f, 48f, labelPaint)
-            return
-        }
+        if (activePath == null) return
 
         canvas.drawPath(activePath, borderPaint)
         drawingPoints.firstOrNull()?.let { start ->
@@ -150,6 +135,8 @@ class RoiOverlayView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
+                touchStart = PointF(x, y)
+                touchMoved = false
                 clearSelection(notify = false)
                 drawingPoints.add(PointF(x, y))
                 onRoiChanged?.invoke()
@@ -158,12 +145,14 @@ class RoiOverlayView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_MOVE -> {
+                updateTouchMoved(x, y)
                 addDrawingPoint(x, y)
                 invalidate()
                 return true
             }
 
             MotionEvent.ACTION_UP -> {
+                if (handleSingleTapIfNeeded(x, y)) return true
                 addDrawingPoint(x, y, force = true)
                 parent?.requestDisallowInterceptTouchEvent(false)
                 if (commitClosedArea()) {
@@ -178,6 +167,7 @@ class RoiOverlayView @JvmOverloads constructor(
 
             MotionEvent.ACTION_CANCEL -> {
                 parent?.requestDisallowInterceptTouchEvent(false)
+                touchStart = null
                 clearSelection(notify = true)
                 invalidate()
                 return true
@@ -190,6 +180,8 @@ class RoiOverlayView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
+                touchStart = PointF(x, y)
+                touchMoved = false
                 clearSelection(notify = false)
                 rectangleStart = PointF(x, y)
                 rectangleEnd = PointF(x, y)
@@ -199,12 +191,14 @@ class RoiOverlayView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_MOVE -> {
+                updateTouchMoved(x, y)
                 rectangleEnd = PointF(x, y)
                 invalidate()
                 return true
             }
 
             MotionEvent.ACTION_UP -> {
+                if (handleSingleTapIfNeeded(x, y)) return true
                 rectangleEnd = PointF(x, y)
                 parent?.requestDisallowInterceptTouchEvent(false)
                 if (commitRectangle()) {
@@ -219,11 +213,35 @@ class RoiOverlayView @JvmOverloads constructor(
 
             MotionEvent.ACTION_CANCEL -> {
                 parent?.requestDisallowInterceptTouchEvent(false)
+                touchStart = null
                 clearSelection(notify = true)
                 invalidate()
                 return true
             }
         }
+        return true
+    }
+
+    private fun updateTouchMoved(x: Float, y: Float) {
+        val start = touchStart ?: return
+        if (distance(start, x, y) >= tapSlopPx()) {
+            touchMoved = true
+        }
+    }
+
+    private fun handleSingleTapIfNeeded(x: Float, y: Float): Boolean {
+        val start = touchStart ?: return false
+        val isTap = !touchMoved && distance(start, x, y) < tapSlopPx()
+        touchStart = null
+        if (!isTap) return false
+        val handled = onSingleTap?.invoke() == true
+        if (!handled) return false
+
+        parent?.requestDisallowInterceptTouchEvent(false)
+        drawingPoints.clear()
+        rectangleStart = null
+        rectangleEnd = null
+        invalidate()
         return true
     }
 
@@ -296,11 +314,6 @@ class RoiOverlayView @JvmOverloads constructor(
     }
 
     private fun drawClosedArea(canvas: Canvas, path: Path) {
-        val saveCount = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
-        canvas.drawPath(path, clearPaint)
-        canvas.restoreToCount(saveCount)
-
         canvas.drawPath(path, fillPaint)
         canvas.drawPath(path, borderPaint)
         normalizedPathPoints.firstOrNull()?.let { normalized ->
@@ -387,10 +400,15 @@ class RoiOverlayView @JvmOverloads constructor(
         return MIN_ROI_SIZE_DP * resources.displayMetrics.density
     }
 
+    private fun tapSlopPx(): Float {
+        return TAP_SLOP_DP * resources.displayMetrics.density
+    }
+
     private companion object {
         const val MIN_PATH_POINTS = 8
         const val MIN_POINT_DISTANCE_DP = 3f
         const val MIN_ROI_SIZE_DP = 48f
         const val CLOSE_THRESHOLD_DP = 44f
+        const val TAP_SLOP_DP = 8f
     }
 }

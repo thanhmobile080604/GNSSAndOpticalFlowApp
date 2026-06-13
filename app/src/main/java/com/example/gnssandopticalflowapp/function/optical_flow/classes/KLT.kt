@@ -118,6 +118,23 @@ class KLT : OpticalFlow {
             )
         }
 
+        if (prevGray.cols() != currGray.cols() || prevGray.rows() != currGray.rows()) {
+            resetMotionVector()
+            flowPts = 0
+            this.updatePoints(prevGray, currGray, prevPts)
+            return buildOutput(
+                frame = currFrame,
+                position = null,
+                startNanos = startNanos,
+                featureCount = prevPts.toArray().size,
+                activeVectorCount = 0,
+                avgDx = 0.0,
+                avgDy = 0.0,
+                avgMagnitude = 0.0,
+                confidence = 0.0
+            )
+        }
+
         try {
             semaphore.acquire()
             val limit = maxCorners / 5

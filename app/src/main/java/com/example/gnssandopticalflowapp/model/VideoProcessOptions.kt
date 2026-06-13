@@ -7,12 +7,11 @@ data class VideoProcessOptions(
     val useFarneback: Boolean,
     val sensitivity: Int,
     val useFarnebackHeatmap: Boolean = false,
-    val useAi: Boolean = false,
+    val useAi: Boolean = true,
     val roi: NormalizedRoi? = null,
-    val processingMode: ProcessingMode = ProcessingMode.OFFLINE
+    val processingMode: ProcessingMode = ProcessingMode.ONLINE
 ) : Serializable {
     enum class ProcessingMode : Serializable {
-        OFFLINE,
         ONLINE,
         OUTER_SERVER
     }

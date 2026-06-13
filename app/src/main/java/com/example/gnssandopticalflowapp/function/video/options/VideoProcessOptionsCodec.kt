@@ -8,10 +8,10 @@ internal object VideoProcessOptionsCodec {
     fun encode(options: VideoProcessOptions): String {
         val root = JSONObject()
             .put("isMoving", options.isMoving)
-            .put("useFarneback", options.useFarneback)
+            .put("useFarneback", false)
             .put("sensitivity", options.sensitivity)
             .put("useFarnebackHeatmap", options.useFarnebackHeatmap)
-            .put("useAi", options.useAi)
+            .put("useAi", true)
             .put("processingMode", options.processingMode.name)
 
         options.roi?.let { normalizedRoi ->
@@ -72,17 +72,17 @@ internal object VideoProcessOptionsCodec {
                 VideoProcessOptions.ProcessingMode.valueOf(
                     root.optString(
                         "processingMode",
-                        VideoProcessOptions.ProcessingMode.OFFLINE.name
+                        VideoProcessOptions.ProcessingMode.ONLINE.name
                     )
                 )
-            }.getOrDefault(VideoProcessOptions.ProcessingMode.OFFLINE)
+            }.getOrDefault(VideoProcessOptions.ProcessingMode.ONLINE)
 
             VideoProcessOptions(
                 isMoving = root.getBoolean("isMoving"),
-                useFarneback = root.getBoolean("useFarneback"),
+                useFarneback = false,
                 sensitivity = root.getInt("sensitivity"),
                 useFarnebackHeatmap = root.optBoolean("useFarnebackHeatmap", false),
-                useAi = root.optBoolean("useAi", false),
+                useAi = true,
                 roi = roi,
                 processingMode = processingMode
             )
