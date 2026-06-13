@@ -7,6 +7,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import com.example.gnssandopticalflowapp.common.Constants
+import com.example.gnssandopticalflowapp.model.LiveRouteState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,6 +34,8 @@ class MainViewModel :
     val analyticsLibraryUpdated = MutableLiveData<Long>()
     val videoProcessingMessage = MutableLiveData<String?>()
     val processedVideoPathToOpen = MutableLiveData<String?>()
+    var liveRouteState: LiveRouteState? = null
+    var resetGnssViewerRouteOnResume = false
     val videoProcessingScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var videoUploadJob: Job? = null
     private val videoUploadJobs = ConcurrentHashMap<String, Job>()

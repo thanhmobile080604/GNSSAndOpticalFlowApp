@@ -39,6 +39,8 @@ import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.isVisible
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavOptions
+import androidx.navigation.fragment.findNavController
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
 import com.example.gnssandopticalflowapp.common.Constants
@@ -50,6 +52,7 @@ import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
 import com.example.gnssandopticalflowapp.databinding.FragmentGnssViewerBinding
 import com.example.gnssandopticalflowapp.function.gnss.renderer.EarthRenderer
+import com.example.gnssandopticalflowapp.model.LiveRouteState
 import com.example.gnssandopticalflowapp.model.RouteInfo
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
 import com.example.gnssandopticalflowapp.model.SearchPlace
@@ -118,11 +121,6 @@ class GNSSViewerFragment :
         get() = viewerViewModel.cachedRoute
         set(value) {
             viewerViewModel.cachedRoute = value
-        }
-    private var navigationActive: Boolean
-        get() = viewerViewModel.navigationActive
-        set(value) {
-            viewerViewModel.navigationActive = value
         }
     private var gnssStatusRegistered: Boolean
         get() = viewerViewModel.gnssStatusRegistered
@@ -538,8 +536,6 @@ class GNSSViewerFragment :
             }
             binding.mapView.overlays.add(userMarker)
             binding.mapView.controller.setCenter(point)
-        } else if (navigationActive && !is3DMode) {
-            binding.mapView.controller.animateTo(point)
         }
 
         userMarker?.position = point
@@ -547,12 +543,12 @@ class GNSSViewerFragment :
 
         selectedPlace?.let { place ->
             val route = cachedRoute
-            if (route != null && loc != null) {
+            if (route != null) {
                 updateRoutePreviewFromCachedRoute(route, loc)
             } else {
                 updateRoutePreviewFromDirectDistance()
             }
-            val shouldDrawRoute = routeLine != null || navigationActive
+            val shouldDrawRoute = routeLine != null
             if (cachedRoute == null && routeJob?.isActive != true) {
                 requestRouteUpdate(force = true, drawRoute = shouldDrawRoute)
             }
@@ -642,7 +638,7 @@ class GNSSViewerFragment :
         }
 
         ivSearchClear.setSingleClick {
-            if (selectedPlace != null || navigationActive) {
+            if (selectedPlace != null) {
                 resetRouteMode()
             } else {
                 searchJob?.cancel()
@@ -652,11 +648,7 @@ class GNSSViewerFragment :
         }
 
         btnStartNavigation.setSingleClick {
-            if (navigationActive) {
-                resetRouteMode()
-            } else {
-                startNavigation()
-            }
+            startNavigation()
         }
 
         routeBottomBar.setSingleClick {
@@ -762,7 +754,7 @@ class GNSSViewerFragment :
         if (!viewerViewModel.consumeRestoreSearchResultsAfter3D()) return
 
         val query = binding.etSearchLocation.text?.toString()?.trim().orEmpty()
-        if (query.isEmpty() || selectedPlace != null || navigationActive) return
+        if (query.isEmpty() || selectedPlace != null) return
 
         binding.ivSearchClear.show()
         if (binding.searchResultsList.childCount > 0) {
@@ -886,16 +878,36 @@ class GNSSViewerFragment :
             return
         }
 
-        navigationActive = true
-        binding.btnStartNavigation.text = "Cancel"
-        binding.btnStartNavigation.alpha = 1f
+        val origin = GeoPoint(loc.latitude, loc.longitude)
+        val destination = GeoPoint(place.latitude, place.longitude)
+        val routePoints = selectedRoutePoints().takeIf { it.size > 1 }
+            ?: listOf(origin, destination)
+        val distanceMeters = cachedRoute?.distanceMeters
+            ?: viewerViewModel.directDistanceMeters(
+                loc.latitude,
+                loc.longitude,
+                place.latitude,
+                place.longitude
+            )
+
+        mainViewModel.liveRouteState = LiveRouteState(
+            destination = place,
+            startLocation = Location(loc),
+            routePoints = routePoints,
+            distanceMeters = distanceMeters
+        )
         if (is3DMode) toggle3DMode()
-        binding.mapView.controller.setZoom(18.0)
-        binding.mapView.controller.animateTo(GeoPoint(loc.latitude, loc.longitude))
-        if (!is3DMode) {
-            binding.routeBottomBar.show()
-        }
-        requestRouteUpdate(force = true, drawRoute = true)
+        navigateToLiveRouting()
+    }
+
+    private fun navigateToLiveRouting() {
+        val options = NavOptions.Builder()
+            .setEnterAnim(R.anim.enter_from_bottom)
+            .setExitAnim(R.anim.fade_out)
+            .setPopEnterAnim(R.anim.fade_in)
+            .setPopExitAnim(R.anim.exit_to_bottom)
+            .build()
+        findNavController().navigate(R.id.liveRoutingFragment, null, options)
     }
 
     private fun updateRoutePreviewFromDirectDistance() {
@@ -965,12 +977,12 @@ class GNSSViewerFragment :
             if (route != null && route.points.isNotEmpty()) {
                 cachedRoute = route
                 updateRouteSummary(route)
-                if (drawRoute || navigationActive) {
+                if (drawRoute) {
                     drawRouteLine(route.points)
                 }
             } else {
                 updateRoutePreviewFromDirectDistance()
-                if (drawRoute || navigationActive) {
+                if (drawRoute) {
                     drawRouteLine(listOf(origin, destination))
                 }
             }
@@ -1471,6 +1483,7 @@ class GNSSViewerFragment :
     override fun onResume() {
         super.onResume()
         binding.mapView.onResume()
+        resetRouteModeAfterLiveRoutingIfNeeded()
         if (rendererSet) {
             binding.myGLSurfaceView.onResume()
         }
@@ -1481,6 +1494,13 @@ class GNSSViewerFragment :
             scheduleGnssErrorDialogCheck()
         }
         startRealTimeTicker()
+    }
+
+    private fun resetRouteModeAfterLiveRoutingIfNeeded() {
+        if (!mainViewModel.resetGnssViewerRouteOnResume) return
+        mainViewModel.resetGnssViewerRouteOnResume = false
+        mainViewModel.liveRouteState = null
+        resetRouteMode()
     }
 
     private fun startRealTimeTicker() {

@@ -36,6 +36,11 @@
         android:label="GnssViewerFragment"
         tools:ignore="NewApi" />
     <fragment
+        android:id="@+id/liveRoutingFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.LiveRoutingFragment"
+        android:label="LiveRoutingFragment"
+        tools:layout="@layout/fragment_live_routing" />
+    <fragment
         android:id="@+id/videoListFragment"
         android:name="com.example.gnssandopticalflowapp.screen.fragment.MediaListFragment"
         android:label="VideoListFragment" />

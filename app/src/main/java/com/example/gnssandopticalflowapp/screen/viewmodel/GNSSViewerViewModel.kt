@@ -24,7 +24,6 @@ class GNSSViewerViewModel(application: Application) : AndroidViewModel(applicati
     var currentLocation: Location? = null
     var selectedPlace: SearchPlace? = null
     var cachedRoute: RouteInfo? = null
-    var navigationActive = false
     var restoreSearchResultsWhenBackTo2D = false
     var gnssStatusRegistered = false
     var gnssMeasurementsRegistered = false
@@ -50,14 +49,12 @@ class GNSSViewerViewModel(application: Application) : AndroidViewModel(applicati
     fun selectPlace(place: SearchPlace) {
         selectedPlace = place
         cachedRoute = null
-        navigationActive = false
         resetRouteRequestThrottle()
     }
 
     fun resetRouteState() {
         selectedPlace = null
         cachedRoute = null
-        navigationActive = false
         resetRouteRequestThrottle()
     }
 
@@ -136,7 +133,6 @@ class GNSSViewerViewModel(application: Application) : AndroidViewModel(applicati
     ): Boolean {
         return query.isNotEmpty() &&
             selectedPlace == null &&
-            !navigationActive &&
             searchResultCount > 0
     }
 
