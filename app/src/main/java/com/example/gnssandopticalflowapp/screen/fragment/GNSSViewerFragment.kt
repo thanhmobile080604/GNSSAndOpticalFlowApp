@@ -36,6 +36,8 @@ import androidx.appcompat.content.res.AppCompatResources.getDrawable
 import androidx.core.app.ActivityCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toDrawable
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
@@ -99,6 +101,8 @@ class GNSSViewerFragment :
     private var externalOrbitRefreshJob: Job? = null
     private var gnssErrorDialogJob: Job? = null
     private var lastMap2DDialogShownAt = 0L
+    private var searchResultsPanelAllowed = false
+    private var wasKeyboardVisible = false
     private val useTestLocation: Boolean = Constants.USE_FAKE_LOCATION
     private val externalOrbitRetryDelayMs = 30_000L
     private val externalOrbitRefreshAttempts = 3
@@ -580,15 +584,13 @@ class GNSSViewerFragment :
 
     private fun setupSearchInteractions() = with(binding) {
         etSearchLocation.setOnFocusChangeListener { _, hasFocus ->
-            if (hasFocus && etSearchLocation.text?.toString()?.trim().isNullOrEmpty()) {
-                showRecentSearches()
+            if (hasFocus) {
+                showSearchPanelForCurrentInput()
             }
         }
 
         etSearchLocation.setOnClickListener {
-            if (etSearchLocation.text?.toString()?.trim().isNullOrEmpty()) {
-                showRecentSearches()
-            }
+            showSearchPanelForCurrentInput()
         }
 
         etSearchLocation.addTextChangedListener(object : TextWatcher {
@@ -601,6 +603,7 @@ class GNSSViewerFragment :
                 if (ignoreSearchTextChanges) return
 
                 val query = s?.toString()?.trim().orEmpty()
+                searchResultsPanelAllowed = etSearchLocation.hasFocus()
                 ivSearchClear.visibility = if (query.isEmpty()) View.GONE else View.VISIBLE
 
                 searchJob?.cancel()
@@ -653,6 +656,28 @@ class GNSSViewerFragment :
 
         routeBottomBar.setSingleClick {
             showSelectedRouteOnMap2D()
+        }
+    }
+
+    private fun setupKeyboardVisibilityListener() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val keyboardVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            if (wasKeyboardVisible && !keyboardVisible) {
+                hideSearchResultsPanelForKeyboardDismiss()
+            }
+            wasKeyboardVisible = keyboardVisible
+            insets
+        }
+        ViewCompat.requestApplyInsets(binding.root)
+    }
+
+    private fun showSearchPanelForCurrentInput() = with(binding) {
+        searchResultsPanelAllowed = true
+        val query = etSearchLocation.text?.toString()?.trim().orEmpty()
+        if (query.isEmpty()) {
+            showRecentSearches()
+        } else if (searchResultsList.childCount > 0) {
+            showSearchResultsPanelIfAllowed()
         }
     }
 
@@ -737,8 +762,10 @@ class GNSSViewerFragment :
         if (is3DMode) {
             viewerViewModel.restoreSearchResultsWhenBackTo2D = shouldRestoreSearchResultsAfter3D()
             binding.searchResultsPanel.hide()
-        } else {
+        } else if (searchResultsPanelAllowed) {
             binding.searchResultsPanel.show()
+        } else {
+            binding.searchResultsPanel.hide()
         }
     }
 
@@ -756,6 +783,7 @@ class GNSSViewerFragment :
         val query = binding.etSearchLocation.text?.toString()?.trim().orEmpty()
         if (query.isEmpty() || selectedPlace != null) return
 
+        searchResultsPanelAllowed = true
         binding.ivSearchClear.show()
         if (binding.searchResultsList.childCount > 0) {
             binding.searchResultsPanel.show()
@@ -838,6 +866,13 @@ class GNSSViewerFragment :
             safeContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         inputMethodManager.hideSoftInputFromWindow(binding.etSearchLocation.windowToken, 0)
         binding.etSearchLocation.clearFocus()
+        hideSearchResultsPanelForKeyboardDismiss()
+    }
+
+    private fun hideSearchResultsPanelForKeyboardDismiss() {
+        searchResultsPanelAllowed = false
+        binding.etSearchLocation.clearFocus()
+        binding.searchResultsPanel.hide()
     }
 
     private fun resetRouteMode() = with(binding) {
@@ -1185,6 +1220,7 @@ class GNSSViewerFragment :
     @SuppressLint("ClickableViewAccessibility")
     override fun FragmentGnssViewerBinding.initListener() {
         setupSearchInteractions()
+        setupKeyboardVisibilityListener()
 
         val mapTapDetector =
             GestureDetector(safeContext(), object : GestureDetector.SimpleOnGestureListener() {
