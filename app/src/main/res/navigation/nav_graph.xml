@@ -4,8 +4,6 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/nav_graph"
     app:startDestination="@id/introFragment">
-
-
     <fragment
         android:id="@+id/introFragment"
         android:name="com.example.gnssandopticalflowapp.screen.fragment.IntroFragment"
@@ -73,11 +71,5 @@
         android:id="@+id/blankFragment"
         android:name="com.example.gnssandopticalflowapp.screen.test.BlankFragment"
         android:label="BlankFragment" />
-
-    <fragment
-        android:id="@+id/flowPathTrackerFragment"
-        android:name="com.example.gnssandopticalflowapp.screen.test.FlowPathTrackerFragment"
-        android:label="FlowPathTrackerFragment"
-        tools:layout="@layout/fragment_flow_path_tracker" />
 
 </navigation>

@@ -352,7 +352,7 @@ class LiveRoutingFragment :
 
         navigationMarker?.position = point
         navigationMarker?.rotation = 0f
-        binding.mapView.setMapOrientation((-headingDeg).toFloat())
+        binding.mapView.mapOrientation = (-headingDeg).toFloat()
         binding.mapView.controller.setCenter(point)
         binding.mapView.invalidate()
     }
