@@ -86,8 +86,9 @@ class LiveRoutingFragment :
     private var targetMarker: Marker? = null
     private var routeLine: Polyline? = null
     private val gnssTravelLines = ArrayList<Polyline>()
-    private val testGnssLines = ArrayList<Polyline>()
     private val opticalAssistLines = ArrayList<Polyline>()
+    private val weakMarkers = ArrayList<Marker>()
+    private val strongMarkers = ArrayList<Marker>()
 
     private var tickerJob: Job? = null
     private var testDropoutJob: Job? = null
@@ -303,23 +304,46 @@ class LiveRoutingFragment :
             segments = segments,
             lines = gnssTravelLines,
             color = Color.BLACK,
+            alpha = 255,
             strokeWidth = 8f
         )
     }
 
-    private fun drawTestGnssLines(segments: List<List<GeoPoint>>) {
-        drawPathSegments(
-            segments = segments,
-            lines = testGnssLines,
-            color = Color.rgb(0, 122, 255),
-            strokeWidth = 8f
-        )
+    private fun drawWeakMarkers(points: List<GeoPoint>) {
+        drawMarkers(points, weakMarkers, R.drawable.ic_weak, "GNSS Lost")
+    }
+
+    private fun drawStrongMarkers(points: List<GeoPoint>) {
+        drawMarkers(points, strongMarkers, R.drawable.ic_strong, "GNSS Restored")
+    }
+
+    private fun drawMarkers(
+        points: List<GeoPoint>,
+        markers: ArrayList<Marker>,
+        iconRes: Int,
+        titleText: String
+    ) {
+        while (markers.size > points.size) {
+            binding.mapView.overlays.remove(markers.removeAt(markers.lastIndex))
+        }
+        points.forEachIndexed { index, point ->
+            val marker = markers.getOrNull(index) ?: Marker(binding.mapView).apply {
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                icon = buildMarkerIcon(iconRes, 24)
+                title = titleText
+                markers.add(this)
+                binding.mapView.overlays.add(this)
+            }
+            marker.position = point
+        }
+        binding.mapView.invalidate()
     }
 
     private fun drawPathSegments(
         segments: List<List<GeoPoint>>,
         lines: ArrayList<Polyline>,
         color: Int,
+        alpha: Int = 255,
         strokeWidth: Float
     ) {
         val visibleSegments = segments.filter { it.size >= 2 }
@@ -329,6 +353,7 @@ class LiveRoutingFragment :
         visibleSegments.forEachIndexed { index, segment ->
             val line = lines.getOrNull(index) ?: Polyline(binding.mapView).apply {
                 outlinePaint.color = color
+                outlinePaint.alpha = alpha
                 outlinePaint.strokeWidth = strokeWidth
                 outlinePaint.strokeCap = Paint.Cap.ROUND
                 outlinePaint.strokeJoin = Paint.Join.ROUND
@@ -357,7 +382,8 @@ class LiveRoutingFragment :
     private fun applyNavigationSnapshot(snapshot: LiveRoutingViewModel.NavigationSnapshot) {
         snapshot.remainingRoutePoints?.let(::drawRouteLine)
         snapshot.gnssTravelPathSegments?.let(::drawGnssTravelLines)
-        snapshot.testGnssPathSegments?.let(::drawTestGnssLines)
+        snapshot.weakGnssPoints?.let(::drawWeakMarkers)
+        snapshot.strongGnssPoints?.let(::drawStrongMarkers)
         snapshot.opticalAssistSegments?.let(::drawOpticalAssistLines)
         updateNavigationMarker(snapshot.point, snapshot.headingDeg)
         updateSpeedText(snapshot.speedMps)
@@ -495,7 +521,6 @@ class LiveRoutingFragment :
             mainViewModel.postCurrentLocation(location)
             mainViewModel.postCurrentTime(location.time)
         }
-        result.testGnssPathSegments?.let(::drawTestGnssLines)
         result.navigation?.let(::applyNavigationSnapshot)
         applyAssistDecision(result.assistDecision)
         if (result.accepted) {

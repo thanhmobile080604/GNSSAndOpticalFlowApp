@@ -32,7 +32,8 @@ class LiveRoutingViewModel : ViewModel() {
         val speedMps: Double,
         val opticalAssistSegments: List<List<GeoPoint>>? = null,
         val gnssTravelPathSegments: List<List<GeoPoint>>? = null,
-        val testGnssPathSegments: List<List<GeoPoint>>? = null,
+        val weakGnssPoints: List<GeoPoint>? = null,
+        val strongGnssPoints: List<GeoPoint>? = null,
         val remainingRoutePoints: List<GeoPoint>? = null
     )
 
@@ -44,8 +45,7 @@ class LiveRoutingViewModel : ViewModel() {
     data class GnssUpdateResult(
         val accepted: Boolean,
         val navigation: NavigationSnapshot?,
-        val assistDecision: AssistDecision,
-        val testGnssPathSegments: List<List<GeoPoint>>? = null
+        val assistDecision: AssistDecision
     )
 
     data class TickResult(
@@ -76,9 +76,10 @@ class LiveRoutingViewModel : ViewModel() {
             GeoPoint(destination.latitude, destination.longitude)
         }
 
-    private val opticalAssistSegments = ArrayList<ArrayList<GeoPoint>>()
     private val gnssTravelPathSegments = ArrayList<ArrayList<GeoPoint>>()
-    private val testGnssPathSegments = ArrayList<ArrayList<GeoPoint>>()
+    private val weakGnssPoints = ArrayList<GeoPoint>()
+    private val strongGnssPoints = ArrayList<GeoPoint>()
+    private val opticalAssistSegments = ArrayList<ArrayList<GeoPoint>>()
 
     private var currentPoint: GeoPoint? = null
     private var currentHeadingDeg = 0.0
@@ -88,7 +89,7 @@ class LiveRoutingViewModel : ViewModel() {
     private var lastGnssSatelliteCount = Int.MAX_VALUE
     private var lastGnssStatusMs = 0L
     private var testGnssSuppressed = false
-    private var testGnssSegmentOpen = false
+    private var gnssTravelSegmentOpen = true
     private var offRouteSampleCount = 0
     private var lastRouteRefreshStartedMs = 0L
 
@@ -99,17 +100,19 @@ class LiveRoutingViewModel : ViewModel() {
     private var emaFlowDyPxPerSec = 0.0
     private var lastFlowSampleMs = 0L
     private var lastFlowConfidence = 0.0
+    private var dynamicFlowToMpsRatio = FLOW_PX_PER_SEC_TO_MPS
 
     fun initialize(state: LiveRouteState, nowMs: Long = System.currentTimeMillis()): InitialRouteUi {
         routeState = state
-        opticalAssistSegments.clear()
         gnssTravelPathSegments.clear()
-        testGnssPathSegments.clear()
+        weakGnssPoints.clear()
+        strongGnssPoints.clear()
+        opticalAssistSegments.clear()
         gnssAssistActive = false
         cameraDismissedForCurrentGnssLoss = false
         cameraPanelVisible = false
         testGnssSuppressed = false
-        testGnssSegmentOpen = false
+        gnssTravelSegmentOpen = true
         offRouteSampleCount = 0
         lastRouteRefreshStartedMs = 0L
         resetOpticalRuntime()
@@ -140,6 +143,9 @@ class LiveRoutingViewModel : ViewModel() {
                 point = startPoint,
                 headingDeg = currentHeadingDeg,
                 speedMps = lastTrueSpeedMps,
+                gnssTravelPathSegments = snapshotSegments(gnssTravelPathSegments),
+                weakGnssPoints = weakGnssPoints.toList(),
+                strongGnssPoints = strongGnssPoints.toList(),
                 remainingRoutePoints = remainingRouteFrom(startPoint)
             )
         )
@@ -166,7 +172,8 @@ class LiveRoutingViewModel : ViewModel() {
                 speedMps = if (gnssAssistActive) deadReckoningSpeedMps else lastTrueSpeedMps,
                 opticalAssistSegments = snapshotSegments(opticalAssistSegments),
                 gnssTravelPathSegments = snapshotSegments(gnssTravelPathSegments),
-                testGnssPathSegments = snapshotSegments(testGnssPathSegments),
+                weakGnssPoints = weakGnssPoints.toList(),
+                strongGnssPoints = strongGnssPoints.toList(),
                 remainingRoutePoints = remainingRouteFrom(point)
             )
         )
@@ -177,11 +184,12 @@ class LiveRoutingViewModel : ViewModel() {
         gnssAssistActive = false
         cameraDismissedForCurrentGnssLoss = false
         cameraPanelVisible = false
-        testGnssSegmentOpen = false
+        gnssTravelSegmentOpen = true
         offRouteSampleCount = 0
-        opticalAssistSegments.clear()
         gnssTravelPathSegments.clear()
-        testGnssPathSegments.clear()
+        weakGnssPoints.clear()
+        strongGnssPoints.clear()
+        opticalAssistSegments.clear()
     }
 
     fun setActiveOpticalMode(mode: OpticalMode) {
@@ -217,16 +225,16 @@ class LiveRoutingViewModel : ViewModel() {
     }
 
     fun onLocationUpdate(location: Location, nowMs: Long = System.currentTimeMillis()): GnssUpdateResult {
-        val point = GeoPoint(location.latitude, location.longitude)
-        if (TEST_GNSS_DROPOUT && testGnssSuppressed) {
+        if (!isLocationUsableForGnss(location, nowMs)) {
             return GnssUpdateResult(
                 accepted = false,
                 navigation = null,
-                assistDecision = evaluateGnssAssist(nowMs),
-                testGnssPathSegments = appendTestGnssPathPoint(point)
+                assistDecision = evaluateGnssAssist(nowMs)
             )
         }
-        if (!isLocationUsableForGnss(location, nowMs)) {
+
+        val point = GeoPoint(location.latitude, location.longitude)
+        if (TEST_GNSS_DROPOUT && testGnssSuppressed) {
             return GnssUpdateResult(
                 accepted = false,
                 navigation = null,
@@ -236,9 +244,6 @@ class LiveRoutingViewModel : ViewModel() {
 
         val previousPoint = currentPoint
         val previousGnssMs = lastAcceptedGnssMs
-        val shouldStartNewGnssSegment = gnssAssistActive ||
-            previousGnssMs == 0L ||
-            nowMs - previousGnssMs > GNSS_LOCATION_STALE_MS
         val previousDistance = previousPoint?.distanceToAsDouble(point) ?: 0.0
 
         lastTrueSpeedMps = when {
@@ -263,14 +268,25 @@ class LiveRoutingViewModel : ViewModel() {
 
         currentPoint = point
         lastAcceptedGnssMs = nowMs
-        val gnssTravelPath = appendGnssTravelPathPoint(point, shouldStartNewGnssSegment)
+        
+        val gnssPath = if (!gnssTravelSegmentOpen) {
+            gnssTravelSegmentOpen = true
+            strongGnssPoints.add(point)
+            startNewSegment(gnssTravelPathSegments, point)
+            snapshotSegments(gnssTravelPathSegments)
+        } else {
+            appendPathPoint(gnssTravelPathSegments, point, GNSS_PATH_APPEND_DISTANCE_M)
+        }
+
         return GnssUpdateResult(
             accepted = true,
             navigation = NavigationSnapshot(
                 point = point,
                 headingDeg = currentHeadingDeg,
                 speedMps = lastTrueSpeedMps,
-                gnssTravelPathSegments = gnssTravelPath,
+                gnssTravelPathSegments = gnssPath,
+                weakGnssPoints = weakGnssPoints.toList(),
+                strongGnssPoints = strongGnssPoints.toList(),
                 remainingRoutePoints = remainingRouteFrom(point)
             ),
             assistDecision = setGnssAssistActive(false)
@@ -284,6 +300,11 @@ class LiveRoutingViewModel : ViewModel() {
     ): TickResult {
         val assistDecision = setGnssAssistActive(!hasCurrentlyUsableGnss(nowMs))
         if (!assistDecision.active) {
+            // Dynamic calibration of optical flow scale
+            if (lastTrueSpeedMps > 2.0 && emaFlowMagPxPerSec > 5.0) {
+                val currentRatio = lastTrueSpeedMps / emaFlowMagPxPerSec
+                dynamicFlowToMpsRatio = 0.05 * currentRatio + 0.95 * dynamicFlowToMpsRatio
+            }
             return TickResult(
                 navigation = null,
                 speedMps = lastTrueSpeedMps,
@@ -339,15 +360,16 @@ class LiveRoutingViewModel : ViewModel() {
             point = point,
             headingDeg = currentHeadingDeg,
             speedMps = if (gnssAssistActive) deadReckoningSpeedMps else lastTrueSpeedMps,
+            opticalAssistSegments = snapshotSegments(opticalAssistSegments),
+            gnssTravelPathSegments = snapshotSegments(gnssTravelPathSegments),
+            weakGnssPoints = weakGnssPoints.toList(),
+            strongGnssPoints = strongGnssPoints.toList(),
             remainingRoutePoints = remainingRouteFrom(point)
         )
     }
 
     fun toggleTestGnssDropout(nowMs: Long = System.currentTimeMillis()): AssistDecision {
         testGnssSuppressed = !testGnssSuppressed
-        if (!testGnssSuppressed) {
-            testGnssSegmentOpen = false
-        }
         return evaluateGnssAssist(nowMs)
     }
 
@@ -390,10 +412,10 @@ class LiveRoutingViewModel : ViewModel() {
         val hasTranslationFlow = translationFlowPxPerSec >= TRANSLATION_FLOW_STILL_PX_PER_SEC
 
         deadReckoningSpeedMps = if (hasTranslationFlow) {
-            val flowSpeed = ((translationFlowPxPerSec - TRANSLATION_FLOW_STILL_PX_PER_SEC) * FLOW_PX_PER_SEC_TO_MPS)
+            val flowSpeed = ((translationFlowPxPerSec - TRANSLATION_FLOW_STILL_PX_PER_SEC) * dynamicFlowToMpsRatio)
             val priorSpeed = if (lastTrueSpeedMps > 0.0) lastTrueSpeedMps * LAST_GNSS_SPEED_ASSIST_RATIO else 0.0
             max(MIN_DEAD_RECKONING_WALK_SPEED_MPS, max(flowSpeed, priorSpeed))
-                .coerceIn(0.0, MAX_DEAD_RECKONING_SPEED_MPS)
+                .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
         } else {
             0.0
         }
@@ -409,6 +431,10 @@ class LiveRoutingViewModel : ViewModel() {
                 point = point,
                 headingDeg = currentHeadingDeg,
                 speedMps = 0.0,
+                opticalAssistSegments = snapshotSegments(opticalAssistSegments),
+                gnssTravelPathSegments = snapshotSegments(gnssTravelPathSegments),
+                weakGnssPoints = weakGnssPoints.toList(),
+                strongGnssPoints = strongGnssPoints.toList(),
                 remainingRoutePoints = remainingRouteFrom(point)
             )
         }
@@ -416,55 +442,25 @@ class LiveRoutingViewModel : ViewModel() {
         val nextPoint = offsetPoint(point, deadReckoningSpeedMps * dtSec, currentHeadingDeg)
         currentPoint = nextPoint
 
-        val assistPoints = appendOpticalAssistPoint(nextPoint)
+        val assistPoints = appendPathPoint(opticalAssistSegments, nextPoint, DEAD_RECKONING_APPEND_DISTANCE_M)
         return NavigationSnapshot(
             point = nextPoint,
             headingDeg = currentHeadingDeg,
             speedMps = deadReckoningSpeedMps,
             opticalAssistSegments = assistPoints,
+            gnssTravelPathSegments = snapshotSegments(gnssTravelPathSegments),
+            weakGnssPoints = weakGnssPoints.toList(),
+            strongGnssPoints = strongGnssPoints.toList(),
             remainingRoutePoints = remainingRouteFrom(nextPoint)
-        )
-    }
-
-    private fun appendOpticalAssistPoint(point: GeoPoint): List<List<GeoPoint>>? {
-        return appendPathPoint(
-            segments = opticalAssistSegments,
-            point = point,
-            minDistanceMeters = DEAD_RECKONING_APPEND_DISTANCE_M,
-            startNewSegment = false
-        )
-    }
-
-    private fun appendGnssTravelPathPoint(
-        point: GeoPoint,
-        startNewSegment: Boolean
-    ): List<List<GeoPoint>>? {
-        return appendPathPoint(
-            segments = gnssTravelPathSegments,
-            point = point,
-            minDistanceMeters = GNSS_PATH_APPEND_DISTANCE_M,
-            startNewSegment = startNewSegment
-        )
-    }
-
-    private fun appendTestGnssPathPoint(point: GeoPoint): List<List<GeoPoint>>? {
-        val startNewSegment = !testGnssSegmentOpen
-        testGnssSegmentOpen = true
-        return appendPathPoint(
-            segments = testGnssPathSegments,
-            point = point,
-            minDistanceMeters = GNSS_PATH_APPEND_DISTANCE_M,
-            startNewSegment = startNewSegment
         )
     }
 
     private fun appendPathPoint(
         segments: ArrayList<ArrayList<GeoPoint>>,
         point: GeoPoint,
-        minDistanceMeters: Double,
-        startNewSegment: Boolean
+        minDistanceMeters: Double
     ): List<List<GeoPoint>>? {
-        if (startNewSegment || segments.isEmpty()) {
+        if (segments.isEmpty()) {
             startNewSegment(segments, point)
             return snapshotSegments(segments)
         }
@@ -492,6 +488,8 @@ class LiveRoutingViewModel : ViewModel() {
             segment.takeIf { it.size >= 2 }?.toList()
         }.takeIf { it.isNotEmpty() }
     }
+
+
 
     private fun remainingRouteFrom(point: GeoPoint): List<GeoPoint> {
         val points = routeState?.routePoints.orEmpty()
@@ -557,7 +555,11 @@ class LiveRoutingViewModel : ViewModel() {
         if (changed) {
             gnssAssistActive = active
             if (active) {
-                currentPoint?.let { startNewSegment(opticalAssistSegments, it) }
+                currentPoint?.let { 
+                    startNewSegment(opticalAssistSegments, it)
+                    weakGnssPoints.add(it)
+                }
+                gnssTravelSegmentOpen = false
             }
             if (active && !cameraDismissedForCurrentGnssLoss) {
                 cameraPanelVisible = true
@@ -650,18 +652,17 @@ class LiveRoutingViewModel : ViewModel() {
         private const val ARRIVAL_DISTANCE_M = 18.0
 
         private const val FEATURE_UPDATE_INTERVAL = 30
-        private const val EMA_ALPHA = 0.25
+        private const val EMA_ALPHA = 0.45
         private const val FLOW_STALE_MS = 650L
         private const val TRANSLATION_FLOW_STILL_PX_PER_SEC = 4.0
         private const val MIN_FLOW_CONFIDENCE = 5.0
-        private const val FLOW_PX_PER_SEC_TO_MPS = 0.0035
+        private const val FLOW_PX_PER_SEC_TO_MPS = 0.024
         private const val FLOW_YAW_GAIN = 0.004
         private const val ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC = 12.0
         private const val ROTATION_LATERAL_FLOW_DISCOUNT = 0.35
-        private const val LAST_GNSS_SPEED_ASSIST_RATIO = 0.80
+        private const val LAST_GNSS_SPEED_ASSIST_RATIO = 0.85
         private const val MIN_DEAD_RECKONING_WALK_SPEED_MPS = 0.35
         private const val MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC = 0.5
-        private const val MAX_DEAD_RECKONING_SPEED_MPS = 4.5
         private const val DEAD_RECKONING_APPEND_DISTANCE_M = 0.35
         private const val GNSS_PATH_APPEND_DISTANCE_M = 0.75
         private const val EARTH_RADIUS_M = 6_378_137.0
