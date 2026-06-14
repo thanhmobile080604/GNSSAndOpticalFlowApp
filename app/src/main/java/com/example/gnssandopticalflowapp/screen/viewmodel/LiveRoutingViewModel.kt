@@ -6,9 +6,11 @@ import com.example.gnssandopticalflowapp.model.LiveRouteState
 import com.example.gnssandopticalflowapp.model.OpticalFlowMetrics
 import com.example.gnssandopticalflowapp.model.RouteInfo
 import org.osmdroid.util.GeoPoint
+import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -59,6 +61,34 @@ class LiveRoutingViewModel : ViewModel() {
         val showHandle: Boolean
     )
 
+    private data class VisualOdometry(
+        val usable: Boolean,
+        val speedMps: Double,
+        val deltaHeadingDeg: Double,
+        val translationPxPerSec: Double,
+        val quality: Double
+    )
+
+    private data class RouteProjection(
+        val point: GeoPoint,
+        val segmentIndex: Int,
+        val distanceAlongRouteM: Double,
+        val distanceFromRouteM: Double,
+        val segmentHeadingDeg: Double
+    )
+
+    private data class MapMatchResult(
+        val point: GeoPoint,
+        val headingDeg: Double,
+        val confidence: Double
+    )
+
+    private data class FusedPose(
+        val point: GeoPoint,
+        val headingDeg: Double,
+        val mapMatchConfidence: Double
+    )
+
     var routeState: LiveRouteState? = null
         private set
     var activeOpticalMode = OpticalMode.KLT
@@ -85,12 +115,15 @@ class LiveRoutingViewModel : ViewModel() {
     private var currentHeadingDeg = 0.0
     private var lastTrueSpeedMps = 0.0
     private var deadReckoningSpeedMps = 0.0
+    private var vehicleDeadReckoningSpeedMps = 0.0
+    private var positionUncertaintyM = INITIAL_POSITION_UNCERTAINTY_M
     private var lastAcceptedGnssMs = 0L
     private var lastGnssSatelliteCount = Int.MAX_VALUE
     private var lastGnssStatusMs = 0L
     private var testGnssSuppressed = false
     private var gnssTravelSegmentOpen = true
     private var offRouteSampleCount = 0
+    private var lastRouteDeviationSampleMs = 0L
     private var lastRouteRefreshStartedMs = 0L
 
     private var flowFrameCount = 0
@@ -114,8 +147,10 @@ class LiveRoutingViewModel : ViewModel() {
         testGnssSuppressed = false
         gnssTravelSegmentOpen = true
         offRouteSampleCount = 0
+        lastRouteDeviationSampleMs = 0L
         lastRouteRefreshStartedMs = 0L
         resetOpticalRuntime()
+        resetDeadReckoningRuntime()
 
         val startPoint = GeoPoint(state.startLocation.latitude, state.startLocation.longitude)
         val destinationPoint = GeoPoint(state.destination.latitude, state.destination.longitude)
@@ -134,6 +169,13 @@ class LiveRoutingViewModel : ViewModel() {
         } else {
             0.0
         }
+        positionUncertaintyM = if (state.startLocation.hasAccuracy()) {
+            state.startLocation.accuracy.toDouble().coerceAtLeast(MIN_POSITION_UNCERTAINTY_M)
+        } else {
+            INITIAL_POSITION_UNCERTAINTY_M
+        }
+        vehicleDeadReckoningSpeedMps = lastTrueSpeedMps
+        deadReckoningSpeedMps = lastTrueSpeedMps
         lastAcceptedGnssMs = nowMs
 
         return InitialRouteUi(
@@ -186,10 +228,12 @@ class LiveRoutingViewModel : ViewModel() {
         cameraPanelVisible = false
         gnssTravelSegmentOpen = true
         offRouteSampleCount = 0
+        lastRouteDeviationSampleMs = 0L
         gnssTravelPathSegments.clear()
         weakGnssPoints.clear()
         strongGnssPoints.clear()
         opticalAssistSegments.clear()
+        resetDeadReckoningRuntime()
     }
 
     fun setActiveOpticalMode(mode: OpticalMode) {
@@ -265,6 +309,13 @@ class LiveRoutingViewModel : ViewModel() {
                 bearingBetween(previousPoint, point)
             else -> currentHeadingDeg
         }
+        vehicleDeadReckoningSpeedMps = lastTrueSpeedMps
+        deadReckoningSpeedMps = lastTrueSpeedMps
+        positionUncertaintyM = if (location.hasAccuracy()) {
+            location.accuracy.toDouble().coerceAtLeast(MIN_POSITION_UNCERTAINTY_M)
+        } else {
+            GNSS_FIX_UNCERTAINTY_M
+        }
 
         currentPoint = point
         lastAcceptedGnssMs = nowMs
@@ -298,13 +349,12 @@ class LiveRoutingViewModel : ViewModel() {
         dtSec: Double,
         yawRateDegPerSec: Double
     ): TickResult {
+        val visualOdometry = resolveVisualOdometry(nowMs, dtSec, yawRateDegPerSec)
         val assistDecision = setGnssAssistActive(!hasCurrentlyUsableGnss(nowMs))
         if (!assistDecision.active) {
-            // Dynamic calibration of optical flow scale
-            if (lastTrueSpeedMps > 2.0 && emaFlowMagPxPerSec > 5.0) {
-                val currentRatio = lastTrueSpeedMps / emaFlowMagPxPerSec
-                dynamicFlowToMpsRatio = 0.05 * currentRatio + 0.95 * dynamicFlowToMpsRatio
-            }
+            calibrateCameraSpeedScale(visualOdometry)
+            vehicleDeadReckoningSpeedMps = lastTrueSpeedMps
+            deadReckoningSpeedMps = lastTrueSpeedMps
             return TickResult(
                 navigation = null,
                 speedMps = lastTrueSpeedMps,
@@ -315,7 +365,8 @@ class LiveRoutingViewModel : ViewModel() {
         val navigation = integrateDeadReckoning(
             nowMs = nowMs,
             dtSec = dtSec,
-            yawRateDegPerSec = yawRateDegPerSec
+            yawRateDegPerSec = yawRateDegPerSec,
+            visualOdometry = visualOdometry
         )
         return TickResult(
             navigation = navigation,
@@ -339,6 +390,10 @@ class LiveRoutingViewModel : ViewModel() {
             return false
         }
 
+        if (nowMs - lastRouteDeviationSampleMs < ROUTE_DEVIATION_SAMPLE_INTERVAL_MS) {
+            return false
+        }
+        lastRouteDeviationSampleMs = nowMs
         offRouteSampleCount += 1
         return offRouteSampleCount >= ROUTE_DEVIATION_REQUIRED_SAMPLES &&
             nowMs - lastRouteRefreshStartedMs >= ROUTE_REFRESH_COOLDOWN_MS
@@ -356,6 +411,7 @@ class LiveRoutingViewModel : ViewModel() {
             distanceMeters = route.distanceMeters
         )
         offRouteSampleCount = 0
+        lastRouteDeviationSampleMs = 0L
         return NavigationSnapshot(
             point = point,
             headingDeg = currentHeadingDeg,
@@ -397,61 +453,377 @@ class LiveRoutingViewModel : ViewModel() {
     private fun integrateDeadReckoning(
         nowMs: Long,
         dtSec: Double,
-        yawRateDegPerSec: Double
+        yawRateDegPerSec: Double,
+        visualOdometry: VisualOdometry
     ): NavigationSnapshot? {
-        val point = currentPoint ?: return null
-        val flowFresh = nowMs - lastFlowSampleMs < FLOW_STALE_MS
-        val forwardFlowPxPerSec = kotlin.math.abs(emaFlowDyPxPerSec)
-        val lateralFlowPxPerSec = kotlin.math.abs(emaFlowDxPxPerSec)
-        val yawAbs = kotlin.math.abs(yawRateDegPerSec)
-        val translationFlowPxPerSec = when {
-            !flowFresh || lastFlowConfidence < MIN_FLOW_CONFIDENCE -> 0.0
-            yawAbs < ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC -> emaFlowMagPxPerSec
-            else -> max(0.0, forwardFlowPxPerSec - lateralFlowPxPerSec * ROTATION_LATERAL_FLOW_DISCOUNT)
-        }
-        val hasTranslationFlow = translationFlowPxPerSec >= TRANSLATION_FLOW_STILL_PX_PER_SEC
+        val origin = currentPoint ?: return null
 
-        deadReckoningSpeedMps = if (hasTranslationFlow) {
-            val flowSpeed = ((translationFlowPxPerSec - TRANSLATION_FLOW_STILL_PX_PER_SEC) * dynamicFlowToMpsRatio)
-            val priorSpeed = if (lastTrueSpeedMps > 0.0) lastTrueSpeedMps * LAST_GNSS_SPEED_ASSIST_RATIO else 0.0
-            max(MIN_DEAD_RECKONING_WALK_SPEED_MPS, max(flowSpeed, priorSpeed))
-                .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
-        } else {
-            0.0
-        }
+        deadReckoningSpeedMps = estimateVehicleDeadReckoningSpeed(
+            visualOdometry = visualOdometry,
+            nowMs = nowMs,
+            dtSec = dtSec
+        )
+        updateDeadReckoningUncertainty(visualOdometry, dtSec)
 
-        if (yawAbs >= MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC || hasTranslationFlow) {
+        val yawAbs = abs(yawRateDegPerSec)
+        if (yawAbs >= MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC || visualOdometry.usable) {
             currentHeadingDeg = normalizeDeg(
-                currentHeadingDeg + yawRateDegPerSec * dtSec + emaFlowDxPxPerSec * FLOW_YAW_GAIN * dtSec
+                currentHeadingDeg + visualOdometry.deltaHeadingDeg
             )
         }
 
         if (deadReckoningSpeedMps <= 0.0) {
             return NavigationSnapshot(
-                point = point,
+                point = origin,
                 headingDeg = currentHeadingDeg,
                 speedMps = 0.0,
                 opticalAssistSegments = snapshotSegments(opticalAssistSegments),
                 gnssTravelPathSegments = snapshotSegments(gnssTravelPathSegments),
                 weakGnssPoints = weakGnssPoints.toList(),
                 strongGnssPoints = strongGnssPoints.toList(),
-                remainingRoutePoints = remainingRouteFrom(point)
+                remainingRoutePoints = remainingRouteFrom(origin)
             )
         }
 
-        val nextPoint = offsetPoint(point, deadReckoningSpeedMps * dtSec, currentHeadingDeg)
-        currentPoint = nextPoint
+        val predictedPoint = offsetPoint(
+            origin = origin,
+            distanceMeters = deadReckoningSpeedMps * dtSec,
+            bearingDeg = currentHeadingDeg
+        )
+        val fusedPose = fusePredictedPoseWithRoute(
+            origin = origin,
+            predictedPoint = predictedPoint,
+            predictedHeadingDeg = currentHeadingDeg,
+            distanceMeters = deadReckoningSpeedMps * dtSec,
+            visualOdometry = visualOdometry
+        )
+        currentPoint = fusedPose.point
+        currentHeadingDeg = fusedPose.headingDeg
+        if (fusedPose.mapMatchConfidence > 0.0) {
+            positionUncertaintyM = (
+                positionUncertaintyM *
+                    (1.0 - fusedPose.mapMatchConfidence * ROUTE_MATCH_UNCERTAINTY_REDUCTION)
+                ).coerceAtLeast(MIN_POSITION_UNCERTAINTY_M)
+        }
 
-        val assistPoints = appendPathPoint(opticalAssistSegments, nextPoint, DEAD_RECKONING_APPEND_DISTANCE_M)
+        val assistPoints = appendPathPoint(
+            opticalAssistSegments,
+            fusedPose.point,
+            DEAD_RECKONING_APPEND_DISTANCE_M
+        )
         return NavigationSnapshot(
-            point = nextPoint,
+            point = fusedPose.point,
             headingDeg = currentHeadingDeg,
             speedMps = deadReckoningSpeedMps,
             opticalAssistSegments = assistPoints,
             gnssTravelPathSegments = snapshotSegments(gnssTravelPathSegments),
             weakGnssPoints = weakGnssPoints.toList(),
             strongGnssPoints = strongGnssPoints.toList(),
-            remainingRoutePoints = remainingRouteFrom(nextPoint)
+            remainingRoutePoints = remainingRouteFrom(fusedPose.point)
+        )
+    }
+
+    private fun resolveVisualOdometry(
+        nowMs: Long,
+        dtSec: Double,
+        yawRateDegPerSec: Double
+    ): VisualOdometry {
+        val flowFresh = nowMs - lastFlowSampleMs < FLOW_STALE_MS
+        val forwardFlowPxPerSec = abs(emaFlowDyPxPerSec)
+        val lateralFlowPxPerSec = abs(emaFlowDxPxPerSec)
+        val yawAbs = abs(yawRateDegPerSec)
+        val translationFlowPxPerSec = when {
+            !flowFresh || lastFlowConfidence < MIN_FLOW_CONFIDENCE -> 0.0
+            yawAbs < ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC -> emaFlowMagPxPerSec
+            else -> max(0.0, forwardFlowPxPerSec - lateralFlowPxPerSec * ROTATION_LATERAL_FLOW_DISCOUNT)
+        }
+        val usable = translationFlowPxPerSec >= TRANSLATION_FLOW_STILL_PX_PER_SEC
+        val speedMps = if (usable) {
+            ((translationFlowPxPerSec - TRANSLATION_FLOW_STILL_PX_PER_SEC) * dynamicFlowToMpsRatio)
+                .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
+        } else {
+            0.0
+        }
+        val quality = if (usable) {
+            val confidenceScore = (lastFlowConfidence / 100.0).coerceIn(0.0, 1.0)
+            val flowScore = (
+                translationFlowPxPerSec /
+                    (TRANSLATION_FLOW_STILL_PX_PER_SEC + FLOW_FULL_QUALITY_PX_PER_SEC)
+                ).coerceIn(0.0, 1.0)
+            (0.65 * confidenceScore + 0.35 * flowScore).coerceIn(0.0, 1.0)
+        } else {
+            0.0
+        }
+        val opticalYawDeg = if (usable) {
+            emaFlowDxPxPerSec * FLOW_YAW_GAIN * dtSec
+        } else {
+            0.0
+        }
+
+        return VisualOdometry(
+            usable = usable,
+            speedMps = speedMps,
+            deltaHeadingDeg = yawRateDegPerSec * dtSec + opticalYawDeg,
+            translationPxPerSec = translationFlowPxPerSec,
+            quality = quality
+        )
+    }
+
+    private fun calibrateCameraSpeedScale(visualOdometry: VisualOdometry) {
+        if (!visualOdometry.usable || lastTrueSpeedMps < MIN_CAMERA_CALIBRATION_SPEED_MPS) return
+
+        val currentRatio = lastTrueSpeedMps / visualOdometry.translationPxPerSec.coerceAtLeast(1.0)
+        dynamicFlowToMpsRatio = (
+            CAMERA_SPEED_SCALE_ALPHA * currentRatio +
+                (1.0 - CAMERA_SPEED_SCALE_ALPHA) * dynamicFlowToMpsRatio
+            ).coerceIn(MIN_FLOW_PX_PER_SEC_TO_MPS, MAX_FLOW_PX_PER_SEC_TO_MPS)
+    }
+
+    private fun estimateVehicleDeadReckoningSpeed(
+        visualOdometry: VisualOdometry,
+        nowMs: Long,
+        dtSec: Double
+    ): Double {
+        val priorSpeed = decayedLastGnssSpeed(nowMs)
+        val visualWeight = (VEHICLE_FLOW_WEIGHT * visualOdometry.quality)
+            .coerceIn(0.0, VEHICLE_FLOW_WEIGHT)
+        val targetSpeed = when {
+            visualOdometry.usable ->
+                (visualWeight * visualOdometry.speedMps +
+                    (1.0 - visualWeight) * priorSpeed)
+                    .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
+            else -> priorSpeed
+        }
+
+        val currentSpeed = vehicleDeadReckoningSpeedMps.takeIf { it > 0.0 } ?: priorSpeed
+        val dropLimit = if (visualOdometry.usable) {
+            VEHICLE_BRAKE_LIMIT_MPS2
+        } else {
+            VEHICLE_COAST_DECAY_MPS2
+        }
+        vehicleDeadReckoningSpeedMps = approachSpeed(
+            current = currentSpeed,
+            target = targetSpeed,
+            dtSec = dtSec,
+            maxRiseMps2 = VEHICLE_ACCEL_LIMIT_MPS2,
+            maxDropMps2 = dropLimit
+        ).coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
+
+        return if (vehicleDeadReckoningSpeedMps < VEHICLE_STOP_SPEED_FLOOR_MPS) {
+            0.0
+        } else {
+            vehicleDeadReckoningSpeedMps
+        }
+    }
+
+    private fun updateDeadReckoningUncertainty(
+        visualOdometry: VisualOdometry,
+        dtSec: Double
+    ) {
+        val sensorGrowthMps = if (visualOdometry.usable) {
+            DR_VISUAL_UNCERTAINTY_GROWTH_MPS
+        } else {
+            DR_NO_CAMERA_UNCERTAINTY_GROWTH_MPS
+        }
+        val distanceGrowth = deadReckoningSpeedMps * dtSec *
+            if (visualOdometry.usable) DR_VISUAL_DISTANCE_ERROR_RATIO else DR_NO_CAMERA_DISTANCE_ERROR_RATIO
+        positionUncertaintyM = (
+            positionUncertaintyM +
+                sensorGrowthMps * dtSec +
+                distanceGrowth
+            ).coerceIn(MIN_POSITION_UNCERTAINTY_M, MAX_POSITION_UNCERTAINTY_M)
+    }
+
+    private fun decayedLastGnssSpeed(nowMs: Long): Double {
+        if (lastTrueSpeedMps <= 0.0 || lastAcceptedGnssMs <= 0L) return 0.0
+
+        val outageSec = ((nowMs - lastAcceptedGnssMs).coerceAtLeast(0L)) / 1000.0
+        return (lastTrueSpeedMps * exp(-outageSec / LAST_GNSS_SPEED_DECAY_SEC))
+            .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
+    }
+
+    private fun approachSpeed(
+        current: Double,
+        target: Double,
+        dtSec: Double,
+        maxRiseMps2: Double,
+        maxDropMps2: Double
+    ): Double {
+        val delta = target - current
+        val limit = if (delta >= 0.0) maxRiseMps2 * dtSec else maxDropMps2 * dtSec
+        return current + delta.coerceIn(-limit, limit)
+    }
+
+    private fun fusePredictedPoseWithRoute(
+        origin: GeoPoint,
+        predictedPoint: GeoPoint,
+        predictedHeadingDeg: Double,
+        distanceMeters: Double,
+        visualOdometry: VisualOdometry
+    ): FusedPose {
+        val mapMatch = mapMatchPredictedPose(
+            origin = origin,
+            predictedPoint = predictedPoint,
+            predictedHeadingDeg = predictedHeadingDeg,
+            distanceMeters = distanceMeters,
+            visualOdometry = visualOdometry
+        ) ?: return FusedPose(
+            point = predictedPoint,
+            headingDeg = predictedHeadingDeg,
+            mapMatchConfidence = 0.0
+        )
+
+        val pointBlend = (mapMatch.confidence * ROUTE_MATCH_MAX_POINT_BLEND)
+            .coerceIn(0.0, ROUTE_MATCH_MAX_POINT_BLEND)
+        val headingBlend = pointBlend * ROUTE_MATCH_HEADING_BLEND_RATIO
+        return FusedPose(
+            point = interpolatePoint(predictedPoint, mapMatch.point, pointBlend),
+            headingDeg = interpolateHeading(predictedHeadingDeg, mapMatch.headingDeg, headingBlend),
+            mapMatchConfidence = mapMatch.confidence
+        )
+    }
+
+    private fun mapMatchPredictedPose(
+        origin: GeoPoint,
+        predictedPoint: GeoPoint,
+        predictedHeadingDeg: Double,
+        distanceMeters: Double,
+        visualOdometry: VisualOdometry
+    ): MapMatchResult? {
+        val originProjection = projectOnRoute(origin)
+        val predictedProjection = projectOnRoute(predictedPoint) ?: return null
+        val distanceGate = (
+            ROUTE_MATCH_BASE_DISTANCE_GATE_M +
+                positionUncertaintyM * ROUTE_MATCH_UNCERTAINTY_GATE_RATIO
+            ).coerceIn(ROUTE_MATCH_BASE_DISTANCE_GATE_M, ROUTE_MATCH_MAX_DISTANCE_GATE_M)
+
+        val routeDistance = if (
+            originProjection != null &&
+            originProjection.distanceFromRouteM <= distanceGate
+        ) {
+            originProjection.distanceAlongRouteM + distanceMeters
+        } else if (predictedProjection.distanceFromRouteM <= distanceGate) {
+            predictedProjection.distanceAlongRouteM
+        } else {
+            return null
+        }
+
+        val routePose = pointAtRouteDistance(routeDistance) ?: predictedProjection
+        val lateralDistance = predictedPoint.distanceToAsDouble(routePose.point)
+        val headingError = absHeadingDelta(predictedHeadingDeg, routePose.segmentHeadingDeg)
+        val distanceScore = (1.0 - lateralDistance / distanceGate).coerceIn(0.0, 1.0)
+        val headingScore = (1.0 - headingError / ROUTE_MATCH_HEADING_GATE_DEG).coerceIn(0.0, 1.0)
+        val continuityScore = originProjection
+            ?.let { (1.0 - it.distanceFromRouteM / distanceGate).coerceIn(0.0, 1.0) }
+            ?: 0.35
+        val visualScore = if (visualOdometry.usable) visualOdometry.quality else ROUTE_MATCH_NO_CAMERA_VISUAL_SCORE
+        val confidence = (
+            distanceScore * ROUTE_MATCH_DISTANCE_WEIGHT +
+                headingScore * ROUTE_MATCH_HEADING_WEIGHT +
+                continuityScore * ROUTE_MATCH_CONTINUITY_WEIGHT +
+                visualScore * ROUTE_MATCH_VISUAL_WEIGHT
+            ).coerceIn(0.0, 1.0)
+
+        if (
+            confidence < ROUTE_MATCH_MIN_CONFIDENCE ||
+            distanceScore <= 0.0 ||
+            headingScore <= ROUTE_MATCH_MIN_HEADING_SCORE
+        ) {
+            return null
+        }
+
+        return MapMatchResult(
+            point = routePose.point,
+            headingDeg = routePose.segmentHeadingDeg,
+            confidence = confidence
+        )
+    }
+
+    private fun projectOnRoute(point: GeoPoint): RouteProjection? {
+        val routePoints = routeState?.routePoints.orEmpty()
+        if (routePoints.size < 2) return null
+
+        var traveledMeters = 0.0
+        var best: RouteProjection? = null
+        for (index in 0 until routePoints.lastIndex) {
+            val start = routePoints[index]
+            val end = routePoints[index + 1]
+            val segmentMeters = start.distanceToAsDouble(end)
+            if (segmentMeters <= 0.01) continue
+
+            val metersPerDegreeLatitude = 111_132.0
+            val metersPerDegreeLongitude = 111_320.0 * cos(Math.toRadians(point.latitude))
+            val startX = (start.longitude - point.longitude) * metersPerDegreeLongitude
+            val startY = (start.latitude - point.latitude) * metersPerDegreeLatitude
+            val endX = (end.longitude - point.longitude) * metersPerDegreeLongitude
+            val endY = (end.latitude - point.latitude) * metersPerDegreeLatitude
+            val segmentX = endX - startX
+            val segmentY = endY - startY
+            val segmentLengthSq = segmentX * segmentX + segmentY * segmentY
+            val projectionRatio = if (segmentLengthSq <= 0.01) {
+                0.0
+            } else {
+                (-(startX * segmentX + startY * segmentY) / segmentLengthSq).coerceIn(0.0, 1.0)
+            }
+            val projected = interpolatePoint(start, end, projectionRatio)
+            val distanceFromRoute = point.distanceToAsDouble(projected)
+            val candidate = RouteProjection(
+                point = projected,
+                segmentIndex = index,
+                distanceAlongRouteM = traveledMeters + segmentMeters * projectionRatio,
+                distanceFromRouteM = distanceFromRoute,
+                segmentHeadingDeg = bearingBetween(start, end)
+            )
+            if (best == null || candidate.distanceFromRouteM < best.distanceFromRouteM) {
+                best = candidate
+            }
+            traveledMeters += segmentMeters
+        }
+        return best
+    }
+
+    private fun pointAtRouteDistance(distanceAlongRouteM: Double): RouteProjection? {
+        val routePoints = routeState?.routePoints.orEmpty()
+        if (routePoints.size < 2) return null
+
+        val targetDistance = distanceAlongRouteM.coerceAtLeast(0.0)
+        var traveledMeters = 0.0
+        for (index in 0 until routePoints.lastIndex) {
+            val start = routePoints[index]
+            val end = routePoints[index + 1]
+            val segmentMeters = start.distanceToAsDouble(end)
+            if (segmentMeters <= 0.01) continue
+
+            val segmentEndDistance = traveledMeters + segmentMeters
+            if (targetDistance <= segmentEndDistance) {
+                val segmentRatio = ((targetDistance - traveledMeters) / segmentMeters)
+                    .coerceIn(0.0, 1.0)
+                return RouteProjection(
+                    point = interpolatePoint(start, end, segmentRatio),
+                    segmentIndex = index,
+                    distanceAlongRouteM = targetDistance,
+                    distanceFromRouteM = 0.0,
+                    segmentHeadingDeg = bearingBetween(start, end)
+                )
+            }
+            traveledMeters = segmentEndDistance
+        }
+
+        val lastIndex = routePoints.lastIndex
+        return RouteProjection(
+            point = routePoints[lastIndex],
+            segmentIndex = lastIndex - 1,
+            distanceAlongRouteM = traveledMeters,
+            distanceFromRouteM = 0.0,
+            segmentHeadingDeg = bearingBetween(routePoints[lastIndex - 1], routePoints[lastIndex])
+        )
+    }
+
+    private fun interpolatePoint(start: GeoPoint, end: GeoPoint, ratio: Double): GeoPoint {
+        val clampedRatio = ratio.coerceIn(0.0, 1.0)
+        return GeoPoint(
+            start.latitude + (end.latitude - start.latitude) * clampedRatio,
+            start.longitude + (end.longitude - start.longitude) * clampedRatio
         )
     }
 
@@ -489,11 +861,19 @@ class LiveRoutingViewModel : ViewModel() {
         }.takeIf { it.isNotEmpty() }
     }
 
-
-
     private fun remainingRouteFrom(point: GeoPoint): List<GeoPoint> {
         val points = routeState?.routePoints.orEmpty()
         if (points.size < 2) return points
+
+        val projection = projectOnRoute(point)
+        if (projection != null && projection.distanceFromRouteM <= ROUTE_REMAINING_PROJECTION_DISTANCE_M) {
+            val remaining = ArrayList<GeoPoint>(points.size - projection.segmentIndex + 1)
+            remaining.add(projection.point)
+            for (index in (projection.segmentIndex + 1)..points.lastIndex) {
+                remaining.add(points[index])
+            }
+            return remaining
+        }
 
         var minDistance = Double.MAX_VALUE
         var closestIndex = 0
@@ -504,7 +884,6 @@ class LiveRoutingViewModel : ViewModel() {
                 closestIndex = index
             }
         }
-
         val remaining = ArrayList<GeoPoint>(points.size - closestIndex + 1)
         remaining.add(point)
         val nextIndex = (closestIndex + 1).coerceAtMost(points.lastIndex)
@@ -555,6 +934,7 @@ class LiveRoutingViewModel : ViewModel() {
         if (changed) {
             gnssAssistActive = active
             if (active) {
+                positionUncertaintyM = positionUncertaintyM.coerceAtLeast(GNSS_TO_DR_INITIAL_UNCERTAINTY_M)
                 currentPoint?.let { 
                     startNewSegment(opticalAssistSegments, it)
                     weakGnssPoints.add(it)
@@ -595,6 +975,12 @@ class LiveRoutingViewModel : ViewModel() {
         lastFlowConfidence = 0.0
     }
 
+    private fun resetDeadReckoningRuntime() {
+        deadReckoningSpeedMps = 0.0
+        vehicleDeadReckoningSpeedMps = 0.0
+        positionUncertaintyM = INITIAL_POSITION_UNCERTAINTY_M
+    }
+
     private fun bearingBetween(from: GeoPoint, to: GeoPoint): Double {
         val results = FloatArray(2)
         Location.distanceBetween(
@@ -625,6 +1011,22 @@ class LiveRoutingViewModel : ViewModel() {
         return GeoPoint(Math.toDegrees(lat2), Math.toDegrees(lon2))
     }
 
+    private fun interpolateHeading(fromDeg: Double, toDeg: Double, ratio: Double): Double {
+        val delta = signedHeadingDelta(fromDeg, toDeg)
+        return normalizeDeg(fromDeg + delta * ratio.coerceIn(0.0, 1.0))
+    }
+
+    private fun absHeadingDelta(fromDeg: Double, toDeg: Double): Double {
+        return abs(signedHeadingDelta(fromDeg, toDeg))
+    }
+
+    private fun signedHeadingDelta(fromDeg: Double, toDeg: Double): Double {
+        var delta = (toDeg - fromDeg) % 360.0
+        if (delta > 180.0) delta -= 360.0
+        if (delta < -180.0) delta += 360.0
+        return delta
+    }
+
     private fun normalizeDeg(deg: Double): Double {
         var d = deg % 360.0
         if (d < 0) d += 360.0
@@ -648,20 +1050,54 @@ class LiveRoutingViewModel : ViewModel() {
         private const val MAX_NAVIGATION_SPEED_MPS = 45.0
         private const val ROUTE_DEVIATION_DISTANCE_M = 35.0
         private const val ROUTE_DEVIATION_REQUIRED_SAMPLES = 2
+        private const val ROUTE_DEVIATION_SAMPLE_INTERVAL_MS = 1_000L
         private const val ROUTE_REFRESH_COOLDOWN_MS = 12_000L
         private const val ARRIVAL_DISTANCE_M = 18.0
+        private const val INITIAL_POSITION_UNCERTAINTY_M = 8.0
+        private const val MIN_POSITION_UNCERTAINTY_M = 3.0
+        private const val GNSS_FIX_UNCERTAINTY_M = 6.0
+        private const val GNSS_TO_DR_INITIAL_UNCERTAINTY_M = 8.0
+        private const val MAX_POSITION_UNCERTAINTY_M = 180.0
 
         private const val FEATURE_UPDATE_INTERVAL = 30
         private const val EMA_ALPHA = 0.45
         private const val FLOW_STALE_MS = 650L
         private const val TRANSLATION_FLOW_STILL_PX_PER_SEC = 4.0
+        private const val FLOW_FULL_QUALITY_PX_PER_SEC = 60.0
         private const val MIN_FLOW_CONFIDENCE = 5.0
         private const val FLOW_PX_PER_SEC_TO_MPS = 0.024
         private const val FLOW_YAW_GAIN = 0.004
         private const val ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC = 12.0
         private const val ROTATION_LATERAL_FLOW_DISCOUNT = 0.35
-        private const val LAST_GNSS_SPEED_ASSIST_RATIO = 0.85
-        private const val MIN_DEAD_RECKONING_WALK_SPEED_MPS = 0.35
+        private const val MIN_CAMERA_CALIBRATION_SPEED_MPS = 2.0
+        private const val CAMERA_SPEED_SCALE_ALPHA = 0.05
+        private const val MIN_FLOW_PX_PER_SEC_TO_MPS = 0.002
+        private const val MAX_FLOW_PX_PER_SEC_TO_MPS = 0.12
+        private const val VEHICLE_FLOW_WEIGHT = 0.78
+        private const val VEHICLE_ACCEL_LIMIT_MPS2 = 3.5
+        private const val VEHICLE_BRAKE_LIMIT_MPS2 = 6.0
+        private const val VEHICLE_COAST_DECAY_MPS2 = 0.9
+        private const val VEHICLE_STOP_SPEED_FLOOR_MPS = 0.20
+        private const val LAST_GNSS_SPEED_DECAY_SEC = 10.0
+        private const val DR_VISUAL_UNCERTAINTY_GROWTH_MPS = 0.8
+        private const val DR_NO_CAMERA_UNCERTAINTY_GROWTH_MPS = 2.2
+        private const val DR_VISUAL_DISTANCE_ERROR_RATIO = 0.08
+        private const val DR_NO_CAMERA_DISTANCE_ERROR_RATIO = 0.25
+        private const val ROUTE_MATCH_BASE_DISTANCE_GATE_M = 10.0
+        private const val ROUTE_MATCH_MAX_DISTANCE_GATE_M = 45.0
+        private const val ROUTE_MATCH_UNCERTAINTY_GATE_RATIO = 0.6
+        private const val ROUTE_MATCH_HEADING_GATE_DEG = 65.0
+        private const val ROUTE_MATCH_MIN_CONFIDENCE = 0.52
+        private const val ROUTE_MATCH_MIN_HEADING_SCORE = 0.15
+        private const val ROUTE_MATCH_DISTANCE_WEIGHT = 0.40
+        private const val ROUTE_MATCH_HEADING_WEIGHT = 0.30
+        private const val ROUTE_MATCH_CONTINUITY_WEIGHT = 0.20
+        private const val ROUTE_MATCH_VISUAL_WEIGHT = 0.10
+        private const val ROUTE_MATCH_NO_CAMERA_VISUAL_SCORE = 0.20
+        private const val ROUTE_MATCH_MAX_POINT_BLEND = 0.86
+        private const val ROUTE_MATCH_HEADING_BLEND_RATIO = 0.45
+        private const val ROUTE_MATCH_UNCERTAINTY_REDUCTION = 0.28
+        private const val ROUTE_REMAINING_PROJECTION_DISTANCE_M = 60.0
         private const val MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC = 0.5
         private const val DEAD_RECKONING_APPEND_DISTANCE_M = 0.35
         private const val GNSS_PATH_APPEND_DISTANCE_M = 0.75

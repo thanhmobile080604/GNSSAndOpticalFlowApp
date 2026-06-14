@@ -101,11 +101,6 @@ class IMUEstimator(context: Context) : SensorEventListener {
         val orientationAngles = FloatArray(3)
         SensorManager.getOrientation(rotationMatrix, orientationAngles)
         convertToDegrees(orientationAngles)
-        Log.d(
-            "ORIENTATION",
-            orientationAngles[0].toString() + ", " + orientationAngles[1] + ", " + orientationAngles[2]
-        )
-
 
         // Use the velocity estimate to update the position
         try {

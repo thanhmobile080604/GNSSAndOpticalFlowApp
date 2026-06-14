@@ -328,7 +328,7 @@ class LiveRoutingFragment :
         }
         points.forEachIndexed { index, point ->
             val marker = markers.getOrNull(index) ?: Marker(binding.mapView).apply {
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                setAnchor(0.2f, 0.85f)
                 icon = buildMarkerIcon(iconRes, 24)
                 title = titleText
                 markers.add(this)
@@ -607,7 +607,10 @@ class LiveRoutingFragment :
                     yawRateDegPerSec = imuEstimator.getYawRate().toDouble()
                 )
                 applyAssistDecision(result.assistDecision)
-                result.navigation?.let(::applyNavigationSnapshot) ?: updateSpeedText(result.speedMps)
+                result.navigation?.let { navigation ->
+                    applyNavigationSnapshot(navigation)
+                    refreshRouteAfterLocationChange()
+                } ?: updateSpeedText(result.speedMps)
                 delay(LiveRoutingViewModel.TICK_MS)
             }
         }
