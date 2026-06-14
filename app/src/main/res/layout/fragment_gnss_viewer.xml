@@ -97,13 +97,58 @@
 
     </LinearLayout>
 
+    <com.example.gnssandopticalflowapp.util.liquidglass.widget.LiquidGlassView
+        android:id="@+id/chooseOnMapBubble"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="@id/chooseOnMapBar"
+        app:layout_constraintEnd_toEndOf="@id/chooseOnMapBar"
+        app:layout_constraintStart_toStartOf="@id/chooseOnMapBar"
+        app:layout_constraintTop_toTopOf="@id/chooseOnMapBar" />
+
+    <LinearLayout
+        android:id="@+id/chooseOnMapBar"
+        android:layout_width="0dp"
+        android:layout_height="52dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="10dp"
+        android:elevation="14dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:visibility="gone"
+        android:paddingEnd="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/searchBar">
+
+        <ImageView
+            android:id="@+id/ivChoose"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_target_location"
+            android:tint="@color/black"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/inter_bold"
+            android:maxLines="1"
+            android:layout_marginStart="12dp"
+            android:padding="0dp"
+            android:textSize="15sp"
+            android:singleLine="true"
+            android:textColor="@color/black"
+            android:text="Choose on map"/>
+
+    </LinearLayout>
     <Space
         android:id="@+id/searchMaxHeight"
         android:layout_width="0dp"
         android:layout_height="0dp"
         app:layout_constraintHeight_percent="0.4"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/searchBar" />
+        app:layout_constraintTop_toBottomOf="@id/chooseOnMapBar" />
 
     <com.example.gnssandopticalflowapp.util.liquidglass.widget.LiquidGlassView
         android:id="@+id/resultBubble"
@@ -132,7 +177,7 @@
         app:layout_constraintBottom_toBottomOf="@id/searchMaxHeight"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/searchBar"
+        app:layout_constraintTop_toBottomOf="@id/chooseOnMapBar"
         app:layout_constraintVertical_bias="0.0">
 
         <LinearLayout
@@ -300,5 +345,67 @@
         app:layout_constraintStart_toStartOf="@id/arBubble"
         app:layout_constraintTop_toTopOf="@id/arBubble"
         app:tint="@color/white" />
+
+    <ImageView
+        android:id="@+id/mapTargetCenterIcon"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:elevation="18dp"
+        android:src="@drawable/ic_target_location"
+        android:translationY="-24dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <com.example.gnssandopticalflowapp.util.liquidglass.widget.LiquidGlassView
+        android:id="@+id/backBubble"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/icClose"
+        app:layout_constraintEnd_toEndOf="@id/icClose"
+        app:layout_constraintStart_toStartOf="@id/icClose"
+        app:layout_constraintTop_toTopOf="@id/icClose"
+        app:round="40dp" />
+
+    <ImageView
+        android:id="@+id/icClose"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="38dp"
+        android:padding="13dp"
+        android:src="@drawable/ic_close"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_goneMarginBottom="30dp"/>
+
+    <com.example.gnssandopticalflowapp.util.liquidglass.widget.LiquidGlassView
+        android:id="@+id/checkBubble"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/icCheck"
+        app:layout_constraintEnd_toEndOf="@id/icCheck"
+        app:layout_constraintStart_toStartOf="@id/icCheck"
+        app:layout_constraintTop_toTopOf="@id/icCheck"
+        app:round="40dp" />
+
+    <ImageView
+        android:id="@+id/icCheck"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="38dp"
+        android:padding="6dp"
+        android:tint="@color/black"
+        android:src="@drawable/ic_check"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_goneMarginBottom="30dp"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

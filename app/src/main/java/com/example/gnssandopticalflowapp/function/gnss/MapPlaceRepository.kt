@@ -39,6 +39,28 @@ class MapPlaceRepository(context: Context) {
         }
     }
 
+    fun reverseGeocode(latitude: Double, longitude: Double): String? {
+        val url = URL(
+            "https://nominatim.openstreetmap.org/reverse?format=json&lat=$latitude&lon=$longitude&zoom=18&addressdetails=0"
+        )
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 5000
+            readTimeout = 5000
+            requestMethod = "GET"
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "GNSSAndOpticalFlowApp/1.0")
+        }
+
+        return try {
+            connection.useTextResponse { body ->
+                val result = JSONObject(body)
+                result.optString("display_name").takeIf { it.isNotBlank() }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     fun getRecentSearches(): List<SearchPlace> {
         val historyJson = prefs.getString(HISTORY_KEY, "[]") ?: "[]"
         return runCatching {

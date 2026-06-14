@@ -35,21 +35,26 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.base.BaseFragment
+import com.example.gnssandopticalflowapp.common.AndroidConnectivityObserver
 import com.example.gnssandopticalflowapp.common.Constants
 import com.example.gnssandopticalflowapp.common.dp
 import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentLiveRoutingBinding
+import com.example.gnssandopticalflowapp.function.gnss.MapRouteRepository
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.Farneback
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.IMUEstimator
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.function.optical_flow.interfaces.OpticalFlow
+import com.example.gnssandopticalflowapp.model.RouteInfo
 import com.example.gnssandopticalflowapp.screen.viewmodel.LiveRoutingViewModel
 import com.example.gnssandopticalflowapp.screen.viewmodel.LiveRoutingViewModel.OpticalMode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -68,6 +73,10 @@ class LiveRoutingFragment :
     BaseFragment<FragmentLiveRoutingBinding>(FragmentLiveRoutingBinding::inflate) {
 
     private val liveRoutingViewModel: LiveRoutingViewModel by activityViewModels()
+    private val routeRepository = MapRouteRepository()
+    private val connectivityObserver by lazy {
+        AndroidConnectivityObserver(requireContext().applicationContext)
+    }
 
     private lateinit var locationManager: LocationManager
     private lateinit var cameraExecutor: ExecutorService
@@ -82,12 +91,18 @@ class LiveRoutingFragment :
 
     private var tickerJob: Job? = null
     private var testDropoutJob: Job? = null
+    private var routeRefreshJob: Job? = null
+    private var connectivityJob: Job? = null
     private var lastTickMs = 0L
+    private var lastOfflineRouteToastMs = 0L
+    private var hasInternetConnection = true
 
     private var opticalFlow: OpticalFlow? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var overlayBitmap: Bitmap? = null
     private var cameraPermissionRequestInFlight = false
+    private var locationUpdatesActive = false
+    private var gnssStatusRegistered = false
 
     private var orientationUnlocked = false
     private var recreateForOrientationChange = false
@@ -117,7 +132,7 @@ class LiveRoutingFragment :
     override fun FragmentLiveRoutingBinding.initView() {
         val state = mainViewModel.liveRouteState
         if (state == null) {
-            Toast.makeText(safeContext(), "No active route", Toast.LENGTH_SHORT).show()
+            showToast(MESSAGE_NO_ACTIVE_ROUTE)
             root.post { onBack() }
             return
         }
@@ -125,15 +140,12 @@ class LiveRoutingFragment :
         unlockOrientationForLiveRouting()
         lastOrientation = resources.configuration.orientation
 
-        cameraExecutor = Executors.newSingleThreadExecutor()
-        imuEstimator = IMUEstimator(safeContext().applicationContext)
-        cameraView.scaleType = PreviewView.ScaleType.FILL_CENTER
-
+        initializeRuntimeDependencies()
         setupMap()
         bindInitialRoute(liveRoutingViewModel.restoreOrInitialize(state))
         rebuildActiveOpticalFlow()
         prepareCameraPanelFromState()
-        requestLocationPermissionIfNeeded()
+        ensureLocationPermission()
     }
 
     override fun FragmentLiveRoutingBinding.initListener() {
@@ -163,22 +175,15 @@ class LiveRoutingFragment :
         super.onResume()
         binding.mapView.onResume()
         if (::imuEstimator.isInitialized) imuEstimator.register()
-        if (hasLocationPermission()) startLocationUpdates()
-        startTicker()
-        startTestDropoutTicker()
+        startLiveRuntime()
         if (liveRoutingViewModel.cameraPanelVisible || liveRoutingViewModel.gnssAssistActive) {
-            startAssistCameraIfReady()
+            ensureAssistCameraStarted()
         }
     }
 
     override fun onPause() {
         super.onPause()
-        tickerJob?.cancel()
-        tickerJob = null
-        testDropoutJob?.cancel()
-        testDropoutJob = null
-        stopLocationUpdates()
-        stopCamera()
+        stopLiveRuntime()
         if (::imuEstimator.isInitialized) imuEstimator.unregister()
         binding.mapView.onPause()
     }
@@ -206,13 +211,32 @@ class LiveRoutingFragment :
         if (!recreateForOrientationChange) {
             restorePortrait()
         }
-        stopCamera()
-        stopLocationUpdates()
-        tickerJob?.cancel()
-        testDropoutJob?.cancel()
+        stopLiveRuntime()
         if (::imuEstimator.isInitialized) imuEstimator.unregister()
         if (::cameraExecutor.isInitialized) cameraExecutor.shutdown()
         super.onDestroyView()
+    }
+
+    private fun initializeRuntimeDependencies() {
+        cameraExecutor = Executors.newSingleThreadExecutor()
+        imuEstimator = IMUEstimator(safeContext().applicationContext)
+        binding.cameraView.scaleType = PreviewView.ScaleType.FILL_CENTER
+    }
+
+    private fun startLiveRuntime() {
+        startConnectivityObserver()
+        if (hasLocationPermission()) startLocationUpdates()
+        startNavigationTicker()
+        startTestDropoutTicker()
+    }
+
+    private fun stopLiveRuntime() {
+        tickerJob = tickerJob.cancelAndClear()
+        testDropoutJob = testDropoutJob.cancelAndClear()
+        routeRefreshJob = routeRefreshJob.cancelAndClear()
+        stopConnectivityObserver()
+        stopLocationUpdates()
+        stopCamera()
     }
 
     private fun unlockOrientationForLiveRouting() {
@@ -236,7 +260,6 @@ class LiveRoutingFragment :
 
         binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
         binding.mapView.setMultiTouchControls(true)
-        binding.mapView.setBuiltInZoomControls(false)
         binding.mapView.controller.setZoom(18.0)
     }
 
@@ -368,7 +391,7 @@ class LiveRoutingFragment :
         }
     }
 
-    private fun requestLocationPermissionIfNeeded() {
+    private fun ensureLocationPermission() {
         if (hasLocationPermission()) {
             startLocationUpdates()
             return
@@ -382,10 +405,10 @@ class LiveRoutingFragment :
             object : IPermissionListener {
                 override fun onAllow() = startLocationUpdates()
                 override fun onDenied() {
-                    Toast.makeText(safeContext(), "Location permission is required", Toast.LENGTH_LONG).show()
+                    showToast(MESSAGE_LOCATION_PERMISSION_REQUIRED, Toast.LENGTH_LONG)
                 }
                 override fun onNeverAskAgain(permission: String) {
-                    Toast.makeText(safeContext(), "Enable location permission in settings", Toast.LENGTH_LONG).show()
+                    showToast(MESSAGE_LOCATION_PERMISSION_SETTINGS, Toast.LENGTH_LONG)
                 }
             }
         )
@@ -414,6 +437,7 @@ class LiveRoutingFragment :
             mainViewModel.getEffectiveLocation(null)?.let(::handleLocationUpdate)
             return
         }
+        if (locationUpdatesActive) return
 
         runCatching {
             locationManager.requestLocationUpdates(
@@ -428,9 +452,17 @@ class LiveRoutingFragment :
                 0.5f,
                 locationListener
             )
-            locationManager.registerGnssStatusCallback(safeContext().mainExecutor, gnssStatusCallback)
         }.onFailure {
             Log.e(TAG, "Location setup failed: ${it.message}", it)
+            return
+        }
+        locationUpdatesActive = true
+
+        gnssStatusRegistered = runCatching {
+            locationManager.registerGnssStatusCallback(safeContext().mainExecutor, gnssStatusCallback)
+        }.getOrElse {
+            Log.e(TAG, "GNSS status setup failed: ${it.message}", it)
+            false
         }
 
         val lastKnown = runCatching {
@@ -443,8 +475,17 @@ class LiveRoutingFragment :
     private fun stopLocationUpdates() {
         if (!::locationManager.isInitialized) return
         runCatching {
-            locationManager.removeUpdates(locationListener)
-            locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
+            if (locationUpdatesActive) {
+                locationManager.removeUpdates(locationListener)
+            }
+            if (gnssStatusRegistered) {
+                locationManager.unregisterGnssStatusCallback(gnssStatusCallback)
+            }
+        }.onFailure {
+            Log.e(TAG, "Location cleanup failed: ${it.message}", it)
+        }.also {
+            locationUpdatesActive = false
+            gnssStatusRegistered = false
         }
     }
 
@@ -457,9 +498,75 @@ class LiveRoutingFragment :
         result.testGnssPathSegments?.let(::drawTestGnssLines)
         result.navigation?.let(::applyNavigationSnapshot)
         applyAssistDecision(result.assistDecision)
+        if (result.accepted) {
+            refreshRouteAfterLocationChange()
+        }
     }
 
-    private fun startTicker() {
+    private fun refreshRouteAfterLocationChange() {
+        if (routeRefreshJob?.isActive == true) return
+        if (!liveRoutingViewModel.updateRouteDeviation()) return
+
+        val origin = liveRoutingViewModel.currentRouteOrigin ?: return
+        val destination = liveRoutingViewModel.destinationPoint ?: return
+        if (!hasInternetConnection) {
+            showOfflineRouteToast()
+            return
+        }
+
+        liveRoutingViewModel.markRouteRefreshStarted()
+        routeRefreshJob = viewLifecycleOwner.lifecycleScope.launch {
+            val route = fetchRoute(origin, destination)
+
+            if (!isAdded || view == null) return@launch
+            applyRouteRefresh(route)
+        }
+    }
+
+    private suspend fun fetchRoute(origin: GeoPoint, destination: GeoPoint): RouteInfo? {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                routeRepository.fetchRoute(origin, destination)
+            }.getOrNull()
+        }
+    }
+
+    private fun applyRouteRefresh(route: RouteInfo?) {
+        if (route == null || route.points.size < 2) {
+            showToast(MESSAGE_ROUTE_REFRESH_FAILED)
+            return
+        }
+
+        val navigation = liveRoutingViewModel.applyRoute(route) ?: return
+        mainViewModel.liveRouteState = liveRoutingViewModel.routeState
+        applyNavigationSnapshot(navigation)
+        showToast(MESSAGE_ROUTE_UPDATED)
+    }
+
+    private fun showOfflineRouteToast() {
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastOfflineRouteToastMs < OFFLINE_ROUTE_TOAST_COOLDOWN_MS) return
+
+        lastOfflineRouteToastMs = nowMs
+        showToast(MESSAGE_ROUTE_REFRESH_OFFLINE)
+    }
+
+    private fun startConnectivityObserver() {
+        if (connectivityJob?.isActive == true) return
+
+        connectivityJob = viewLifecycleOwner.lifecycleScope.launch {
+            connectivityObserver.isConnected.collect { isConnected ->
+                hasInternetConnection = isConnected
+            }
+        }
+    }
+
+    private fun stopConnectivityObserver() {
+        connectivityJob?.cancel()
+        connectivityJob = null
+    }
+
+    private fun startNavigationTicker() {
         if (tickerJob?.isActive == true) return
 
         tickerJob = viewLifecycleOwner.lifecycleScope.launch {
@@ -496,7 +603,7 @@ class LiveRoutingFragment :
         if (!decision.changed) return
 
         if (decision.active) {
-            startAssistCameraIfReady()
+            ensureAssistCameraStarted()
             renderCameraPanelState(animated = true)
         } else {
             renderCameraPanelState(animated = true)
@@ -519,7 +626,7 @@ class LiveRoutingFragment :
     }
 
     private fun showCameraPanel(animated: Boolean) {
-        startAssistCameraIfReady()
+        ensureAssistCameraStarted()
         binding.cameraViewGroup.visibility = View.VISIBLE
         binding.cameraViewGroup.animate().cancel()
         binding.ivShowCameraView.animate().cancel()
@@ -624,7 +731,7 @@ class LiveRoutingFragment :
         view.alpha = if (selected) 1f else 0.82f
     }
 
-    private fun startAssistCameraIfReady() {
+    private fun ensureAssistCameraStarted() {
         if (cameraProvider != null) return
         if (!hasCameraPermission()) {
             requestCameraPermission()
@@ -653,12 +760,12 @@ class LiveRoutingFragment :
 
                 override fun onDenied() {
                     cameraPermissionRequestInFlight = false
-                    Toast.makeText(safeContext(), "Camera permission is required", Toast.LENGTH_LONG).show()
+                    showToast(MESSAGE_CAMERA_PERMISSION_REQUIRED, Toast.LENGTH_LONG)
                 }
 
                 override fun onNeverAskAgain(permission: String) {
                     cameraPermissionRequestInFlight = false
-                    Toast.makeText(safeContext(), "Enable camera permission in settings", Toast.LENGTH_LONG).show()
+                    showToast(MESSAGE_CAMERA_PERMISSION_SETTINGS, Toast.LENGTH_LONG)
                 }
             }
         )
@@ -821,7 +928,25 @@ class LiveRoutingFragment :
         return name.substringBefore(",").trim().ifBlank { name }
     }
 
+    private fun showToast(message: String, duration: Int = Toast.LENGTH_SHORT) {
+        Toast.makeText(safeContext(), message, duration).show()
+    }
+
+    private fun Job?.cancelAndClear(): Job? {
+        this?.cancel()
+        return null
+    }
+
     private companion object {
         const val CAMERA_PANEL_ANIM_MS = 260L
+        const val OFFLINE_ROUTE_TOAST_COOLDOWN_MS = 15_000L
+        const val MESSAGE_NO_ACTIVE_ROUTE = "No active route"
+        const val MESSAGE_LOCATION_PERMISSION_REQUIRED = "Location permission is required"
+        const val MESSAGE_LOCATION_PERMISSION_SETTINGS = "Enable location permission in settings"
+        const val MESSAGE_ROUTE_REFRESH_FAILED = "Cannot update route. Keeping current route."
+        const val MESSAGE_ROUTE_REFRESH_OFFLINE = "No internet. Keeping current route."
+        const val MESSAGE_ROUTE_UPDATED = "Route updated"
+        const val MESSAGE_CAMERA_PERMISSION_REQUIRED = "Camera permission is required"
+        const val MESSAGE_CAMERA_PERMISSION_SETTINGS = "Enable camera permission in settings"
     }
 }

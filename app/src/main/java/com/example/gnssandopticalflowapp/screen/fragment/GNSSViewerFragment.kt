@@ -103,6 +103,7 @@ class GNSSViewerFragment :
     private var lastMap2DDialogShownAt = 0L
     private var searchResultsPanelAllowed = false
     private var wasKeyboardVisible = false
+    private var isChoosingDestinationOnMap = false
     private val useTestLocation: Boolean = Constants.USE_FAKE_LOCATION
     private val externalOrbitRetryDelayMs = 30_000L
     private val externalOrbitRefreshAttempts = 3
@@ -201,13 +202,15 @@ class GNSSViewerFragment :
 
         binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
         binding.mapView.setMultiTouchControls(true)
-        binding.mapView.setBuiltInZoomControls(false)
+        binding.mapView.zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
         binding.mapView.controller.setZoom(18.0)
         // Default position before location arrives
         binding.mapView.controller.setCenter(GeoPoint(21.028511, 105.804817)) // Hanoi fallback
         binding.searchResultsPanel.hide()
+        binding.chooseOnMapBar.hide()
         binding.routeBottomBar.hide()
         binding.ivSearchClear.hide()
+        setMapTargetPickerControlsVisible(false)
         binding.btnStartNavigation.isEnabled = false
         binding.btnStartNavigation.alpha = 0.55f
 
@@ -222,7 +225,10 @@ class GNSSViewerFragment :
             startNavigationBubble,
             resultBubble,
             cancelBubble,
-            navigationBubble
+            navigationBubble,
+            chooseOnMapBubble,
+            backBubble,
+            checkBubble
         ).forEach { bubble ->
             bubble.bind(mapView)
             bubble.setElasticEnabled(true)
@@ -466,7 +472,8 @@ class GNSSViewerFragment :
             capabilities.javaClass
                 .getMethod(methodName)
                 .invoke(capabilities)
-                .toString()
+                ?.toString()
+                ?: "unavailable"
         }.getOrDefault("unavailable")
     }
 
@@ -585,11 +592,13 @@ class GNSSViewerFragment :
     private fun setupSearchInteractions() = with(binding) {
         etSearchLocation.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
+                chooseOnMapBar.show()
                 showSearchPanelForCurrentInput()
             }
         }
 
         etSearchLocation.setOnClickListener {
+            chooseOnMapBar.show()
             showSearchPanelForCurrentInput()
         }
 
@@ -808,8 +817,14 @@ class GNSSViewerFragment :
         }
     }
 
-    private fun selectPlace(place: SearchPlace) {
-        viewerViewModel.saveRecentSearch(place)
+    private fun selectPlace(
+        place: SearchPlace,
+        saveRecentSearch: Boolean = true,
+        moveCameraToPlace: Boolean = true
+    ) {
+        if (saveRecentSearch) {
+            viewerViewModel.saveRecentSearch(place)
+        }
         viewerViewModel.selectPlace(place)
         routeJob?.cancel()
         clearRouteLine()
@@ -825,8 +840,10 @@ class GNSSViewerFragment :
         val point = GeoPoint(place.latitude, place.longitude)
         updateTargetMarker(place, point)
         if (is3DMode) toggle3DMode()
-        binding.mapView.controller.setZoom(17.0)
-        binding.mapView.controller.animateTo(point)
+        if (moveCameraToPlace) {
+            binding.mapView.controller.setZoom(17.0)
+            binding.mapView.controller.animateTo(point)
+        }
 
         binding.btnStartNavigation.text = "Start"
         updateRoutePreviewFromDirectDistance()
@@ -873,9 +890,14 @@ class GNSSViewerFragment :
         searchResultsPanelAllowed = false
         binding.etSearchLocation.clearFocus()
         binding.searchResultsPanel.hide()
+        binding.chooseOnMapBar.hide()
     }
 
     private fun resetRouteMode() = with(binding) {
+        if (isChoosingDestinationOnMap) {
+            exitMapTargetPickerMode()
+        }
+
         searchJob?.cancel()
         routeJob?.cancel()
         viewerViewModel.resetRouteState()
@@ -967,7 +989,7 @@ class GNSSViewerFragment :
         }
         binding.btnStartNavigation.isEnabled = loc != null
         binding.btnStartNavigation.alpha = if (loc != null) 1f else 0.55f
-        if (!is3DMode) {
+        if (!is3DMode && !isChoosingDestinationOnMap) {
             binding.routeBottomBar.show()
         }
     }
@@ -981,7 +1003,7 @@ class GNSSViewerFragment :
         binding.tvRouteMeta.text = formatDistance(remainingDistance)
         binding.btnStartNavigation.isEnabled = true
         binding.btnStartNavigation.alpha = 1f
-        if (!is3DMode) {
+        if (!is3DMode && !isChoosingDestinationOnMap) {
             binding.routeBottomBar.show()
         }
     }
@@ -1028,7 +1050,7 @@ class GNSSViewerFragment :
         binding.tvRouteMeta.text = formatDistance(route.distanceMeters)
         binding.btnStartNavigation.isEnabled = true
         binding.btnStartNavigation.alpha = 1f
-        if (!is3DMode) {
+        if (!is3DMode && !isChoosingDestinationOnMap) {
             binding.routeBottomBar.show()
         }
     }
@@ -1130,6 +1152,8 @@ class GNSSViewerFragment :
     }
 
     private fun toggle3DMode() {
+        if (isChoosingDestinationOnMap) return
+
         is3DMode = !is3DMode
 
         if (is3DMode) {
@@ -1192,11 +1216,20 @@ class GNSSViewerFragment :
 
     private fun setTwoDControlsVisible(visible: Boolean) = with(binding) {
         if (visible) {
+            if (isChoosingDestinationOnMap) {
+                setMapTargetPickerControlsVisible(true)
+                return@with
+            }
+
             searchBar.show()
+            searchBubble.show()
+            resultBubble.show()
+            navigationBubble.show()
             arBubble.hide()
             icAr.hide()
             currentLocationBubbleNormal.hide()
             currentLocationBubble.show()
+            icPin.show()
             icPin.imageTintList = ColorStateList.valueOf(Color.BLACK)
             restoreSearchResultsAfter3DIfNeeded()
             if (selectedPlace != null) {
@@ -1206,15 +1239,105 @@ class GNSSViewerFragment :
             viewerViewModel.restoreSearchResultsWhenBackTo2D =
                 binding.searchResultsPanel.isVisible && shouldRestoreSearchResultsAfter3D()
             searchBar.hide()
+            searchBubble.hide()
             arBubble.show()
             icAr.show()
             currentLocationBubbleNormal.show()
             currentLocationBubble.hide()
             searchResultsPanel.hide()
+            icPin.show()
             icPin.imageTintList = ColorStateList.valueOf(Color.WHITE)
             routeBottomBar.hide()
+            setMapTargetPickerControlsVisible(false)
             hideKeyboard()
         }
+    }
+
+    private fun enterMapTargetPickerMode() {
+        if (is3DMode || isChoosingDestinationOnMap) return
+
+        isChoosingDestinationOnMap = true
+        searchJob?.cancel()
+        hideKeyboard()
+        searchResultsPanelAllowed = false
+        binding.searchResultsPanel.hide()
+        setMapTargetPickerControlsVisible(true)
+    }
+
+    private fun exitMapTargetPickerMode() {
+        if (!isChoosingDestinationOnMap) return
+
+        isChoosingDestinationOnMap = false
+        setMapTargetPickerControlsVisible(false)
+        setTwoDControlsVisible(true)
+    }
+
+    private fun confirmMapTargetSelection() {
+        if (!isChoosingDestinationOnMap || is3DMode) return
+
+        val targetPoint = currentMapCenterPoint()
+
+        // Show a brief loading if possible, or just proceed with background geocoding
+        lifecycleScope.launch {
+            val address = viewerViewModel.reverseGeocode(targetPoint.latitude, targetPoint.longitude)
+            val finalName = address ?: MAP_PICKED_PLACE_NAME
+
+            val targetPlace = SearchPlace(
+                name = finalName,
+                latitude = targetPoint.latitude,
+                longitude = targetPoint.longitude
+            )
+
+            exitMapTargetPickerMode()
+            selectPlace(
+                place = targetPlace,
+                saveRecentSearch = false,
+                moveCameraToPlace = false
+            )
+        }
+    }
+
+    private fun currentMapCenterPoint(): GeoPoint {
+        val center = binding.mapView.mapCenter
+        return GeoPoint(center.latitude, center.longitude)
+    }
+
+    private fun setMapTargetPickerControlsVisible(visible: Boolean) = with(binding) {
+        if (visible) {
+            searchBar.hide()
+            searchBubble.hide()
+            chooseOnMapBar.hide()
+            resultBubble.hide()
+            searchResultsPanel.hide()
+            navigationBubble.hide()
+            routeBottomBar.hide()
+            currentLocationBubble.hide()
+            currentLocationBubbleNormal.hide()
+            icPin.hide()
+            arBubble.hide()
+            icAr.hide()
+            mapTargetCenterIcon.show()
+            backBubble.show()
+            icClose.show()
+            checkBubble.show()
+            icCheck.show()
+        } else {
+            mapTargetCenterIcon.hide()
+            backBubble.hide()
+            icClose.hide()
+            checkBubble.hide()
+            icCheck.hide()
+        }
+
+        setMapOverlaysSuppressedForTargetPicker(visible)
+    }
+
+    private fun setMapOverlaysSuppressedForTargetPicker(suppressed: Boolean) {
+        val enabled = !suppressed
+        userMarker?.setEnabled(enabled)
+        targetMarker?.setEnabled(enabled)
+        routeLine?.setEnabled(enabled)
+        binding.mapView.invalidate()
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -1358,11 +1481,37 @@ class GNSSViewerFragment :
         icAr.setSingleClick {
             navigateTo(R.id.gnssARFragment)
         }
+
+        chooseOnMapBubble.setSingleClick {
+            enterMapTargetPickerMode()
+        }
+
+        chooseOnMapBar.setSingleClick {
+            enterMapTargetPickerMode()
+        }
+
+        icClose.setSingleClick {
+            exitMapTargetPickerMode()
+        }
+
+        backBubble.setSingleClick {
+            exitMapTargetPickerMode()
+        }
+
+        icCheck.setSingleClick {
+            confirmMapTargetSelection()
+        }
+
+        checkBubble.setSingleClick {
+            confirmMapTargetSelection()
+        }
     }
 
     private fun setupMapModeSwitchOverlay() {
         val mapOverlay = object : Overlay() {
             override fun onDoubleTap(e: MotionEvent, mapView: MapView): Boolean {
+                if (isChoosingDestinationOnMap) return false
+
                 toggle3DMode()
                 return true
             }
@@ -1371,6 +1520,8 @@ class GNSSViewerFragment :
     }
 
     private fun handleUserMarkerTap(event: MotionEvent): Boolean {
+        if (isChoosingDestinationOnMap) return false
+
         val loc = currentLocation ?: return false
         if (!isTapInsideUserMarker(event)) return false
 
@@ -1566,6 +1717,7 @@ class GNSSViewerFragment :
 
     override fun onDestroyView() {
         super.onDestroyView()
+        isChoosingDestinationOnMap = false
         cancelGnssErrorDialogCheck()
         mainViewModel.isGnss3DMode.value = false
         searchJob?.cancel()
@@ -1579,6 +1731,7 @@ class GNSSViewerFragment :
     private companion object {
         const val GNSS_ERROR_DIALOG_DELAY_MS = 10_000L
         const val MAP2D_DIALOG_DEBOUNCE_MS = 500L
+        const val MAP_PICKED_PLACE_NAME = "Selected map point"
         var hasGnssErrorDialogShownThisSession = false
     }
 }

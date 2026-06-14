@@ -40,6 +40,12 @@ class GNSSViewerViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    suspend fun reverseGeocode(latitude: Double, longitude: Double): String? {
+        return withContext(Dispatchers.IO) {
+            placeRepository.reverseGeocode(latitude, longitude)
+        }
+    }
+
     fun getRecentSearches(): List<SearchPlace> = placeRepository.getRecentSearches()
 
     fun saveRecentSearch(place: SearchPlace) {

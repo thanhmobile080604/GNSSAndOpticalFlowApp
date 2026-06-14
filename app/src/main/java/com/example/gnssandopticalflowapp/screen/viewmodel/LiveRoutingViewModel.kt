@@ -4,12 +4,14 @@ import android.location.Location
 import androidx.lifecycle.ViewModel
 import com.example.gnssandopticalflowapp.model.LiveRouteState
 import com.example.gnssandopticalflowapp.model.OpticalFlowMetrics
+import com.example.gnssandopticalflowapp.model.RouteInfo
 import org.osmdroid.util.GeoPoint
 import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 class LiveRoutingViewModel : ViewModel() {
     enum class OpticalMode {
@@ -67,6 +69,12 @@ class LiveRoutingViewModel : ViewModel() {
         private set
     var cameraPanelVisible = false
         private set
+    val currentRouteOrigin: GeoPoint?
+        get() = currentPoint
+    val destinationPoint: GeoPoint?
+        get() = routeState?.destination?.let { destination ->
+            GeoPoint(destination.latitude, destination.longitude)
+        }
 
     private val opticalAssistSegments = ArrayList<ArrayList<GeoPoint>>()
     private val gnssTravelPathSegments = ArrayList<ArrayList<GeoPoint>>()
@@ -81,6 +89,8 @@ class LiveRoutingViewModel : ViewModel() {
     private var lastGnssStatusMs = 0L
     private var testGnssSuppressed = false
     private var testGnssSegmentOpen = false
+    private var offRouteSampleCount = 0
+    private var lastRouteRefreshStartedMs = 0L
 
     private var flowFrameCount = 0
     private var lastFlowFrameTimeMs = 0L
@@ -100,6 +110,8 @@ class LiveRoutingViewModel : ViewModel() {
         cameraPanelVisible = false
         testGnssSuppressed = false
         testGnssSegmentOpen = false
+        offRouteSampleCount = 0
+        lastRouteRefreshStartedMs = 0L
         resetOpticalRuntime()
 
         val startPoint = GeoPoint(state.startLocation.latitude, state.startLocation.longitude)
@@ -166,6 +178,7 @@ class LiveRoutingViewModel : ViewModel() {
         cameraDismissedForCurrentGnssLoss = false
         cameraPanelVisible = false
         testGnssSegmentOpen = false
+        offRouteSampleCount = 0
         opticalAssistSegments.clear()
         gnssTravelPathSegments.clear()
         testGnssPathSegments.clear()
@@ -287,6 +300,46 @@ class LiveRoutingViewModel : ViewModel() {
             navigation = navigation,
             speedMps = navigation?.speedMps ?: deadReckoningSpeedMps,
             assistDecision = assistDecision
+        )
+    }
+
+    fun updateRouteDeviation(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val state = routeState ?: return false
+        val point = currentPoint ?: return false
+        val destination = destinationPoint ?: return false
+        if (point.distanceToAsDouble(destination) <= ARRIVAL_DISTANCE_M) {
+            offRouteSampleCount = 0
+            return false
+        }
+
+        val offRouteDistance = distanceToRouteMeters(point, state.routePoints)
+        if (offRouteDistance <= ROUTE_DEVIATION_DISTANCE_M) {
+            offRouteSampleCount = 0
+            return false
+        }
+
+        offRouteSampleCount += 1
+        return offRouteSampleCount >= ROUTE_DEVIATION_REQUIRED_SAMPLES &&
+            nowMs - lastRouteRefreshStartedMs >= ROUTE_REFRESH_COOLDOWN_MS
+    }
+
+    fun markRouteRefreshStarted(nowMs: Long = System.currentTimeMillis()) {
+        lastRouteRefreshStartedMs = nowMs
+    }
+
+    fun applyRoute(route: RouteInfo): NavigationSnapshot? {
+        val state = routeState ?: return null
+        val point = currentPoint ?: return null
+        routeState = state.copy(
+            routePoints = route.points,
+            distanceMeters = route.distanceMeters
+        )
+        offRouteSampleCount = 0
+        return NavigationSnapshot(
+            point = point,
+            headingDeg = currentHeadingDeg,
+            speedMps = if (gnssAssistActive) deadReckoningSpeedMps else lastTrueSpeedMps,
+            remainingRoutePoints = remainingRouteFrom(point)
         )
     }
 
@@ -463,6 +516,38 @@ class LiveRoutingViewModel : ViewModel() {
         return remaining
     }
 
+    private fun distanceToRouteMeters(point: GeoPoint, routePoints: List<GeoPoint>): Double {
+        if (routePoints.isEmpty()) return Double.MAX_VALUE
+        if (routePoints.size == 1) return point.distanceToAsDouble(routePoints.first())
+
+        var minDistance = Double.MAX_VALUE
+        for (index in 0 until routePoints.lastIndex) {
+            minDistance = minDistance.coerceAtMost(
+                distanceToSegmentMeters(point, routePoints[index], routePoints[index + 1])
+            )
+        }
+        return minDistance
+    }
+
+    private fun distanceToSegmentMeters(point: GeoPoint, start: GeoPoint, end: GeoPoint): Double {
+        val metersPerDegreeLatitude = 111_132.0
+        val metersPerDegreeLongitude = 111_320.0 * cos(Math.toRadians(point.latitude))
+        val startX = (start.longitude - point.longitude) * metersPerDegreeLongitude
+        val startY = (start.latitude - point.latitude) * metersPerDegreeLatitude
+        val endX = (end.longitude - point.longitude) * metersPerDegreeLongitude
+        val endY = (end.latitude - point.latitude) * metersPerDegreeLatitude
+        val segmentX = endX - startX
+        val segmentY = endY - startY
+        val segmentLengthSq = segmentX * segmentX + segmentY * segmentY
+        if (segmentLengthSq <= 0.01) return point.distanceToAsDouble(start)
+
+        val projection = (-(startX * segmentX + startY * segmentY) / segmentLengthSq)
+            .coerceIn(0.0, 1.0)
+        val closestX = startX + segmentX * projection
+        val closestY = startY + segmentY * projection
+        return sqrt(closestX * closestX + closestY * closestY)
+    }
+
     private fun evaluateGnssAssist(nowMs: Long): AssistDecision {
         return setGnssAssistActive(!hasCurrentlyUsableGnss(nowMs))
     }
@@ -559,6 +644,10 @@ class LiveRoutingViewModel : ViewModel() {
         private const val GNSS_STATIONARY_SPEED_FLOOR_MPS = 0.20
         private const val MIN_GNSS_DISTANCE_FOR_DERIVED_SPEED_M = 1.5
         private const val MAX_NAVIGATION_SPEED_MPS = 45.0
+        private const val ROUTE_DEVIATION_DISTANCE_M = 35.0
+        private const val ROUTE_DEVIATION_REQUIRED_SAMPLES = 2
+        private const val ROUTE_REFRESH_COOLDOWN_MS = 12_000L
+        private const val ARRIVAL_DISTANCE_M = 18.0
 
         private const val FEATURE_UPDATE_INTERVAL = 30
         private const val EMA_ALPHA = 0.25
