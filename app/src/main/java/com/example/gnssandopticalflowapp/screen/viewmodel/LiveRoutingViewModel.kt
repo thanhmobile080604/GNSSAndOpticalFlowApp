@@ -65,7 +65,9 @@ class LiveRoutingViewModel : ViewModel() {
         val usable: Boolean,
         val speedMps: Double,
         val deltaHeadingDeg: Double,
+        val opticalYawRateDegPerSec: Double,
         val translationPxPerSec: Double,
+        val lateralPxPerSec: Double,
         val quality: Double
     )
 
@@ -134,6 +136,7 @@ class LiveRoutingViewModel : ViewModel() {
     private var lastFlowSampleMs = 0L
     private var lastFlowConfidence = 0.0
     private var dynamicFlowToMpsRatio = FLOW_PX_PER_SEC_TO_MPS
+    private var cameraSpeedScaleConfidence = INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE
 
     fun initialize(state: LiveRouteState, nowMs: Long = System.currentTimeMillis()): InitialRouteUi {
         routeState = state
@@ -150,6 +153,7 @@ class LiveRoutingViewModel : ViewModel() {
         lastRouteDeviationSampleMs = 0L
         lastRouteRefreshStartedMs = 0L
         resetOpticalRuntime()
+        resetCameraSpeedScale()
         resetDeadReckoningRuntime()
 
         val startPoint = GeoPoint(state.startLocation.latitude, state.startLocation.longitude)
@@ -233,12 +237,16 @@ class LiveRoutingViewModel : ViewModel() {
         weakGnssPoints.clear()
         strongGnssPoints.clear()
         opticalAssistSegments.clear()
+        resetCameraSpeedScale()
         resetDeadReckoningRuntime()
     }
 
     fun setActiveOpticalMode(mode: OpticalMode) {
+        if (activeOpticalMode == mode) return
+
         activeOpticalMode = mode
         resetOpticalRuntime()
+        resetCameraSpeedScale()
     }
 
     fun dismissCameraPanel() {
@@ -466,10 +474,20 @@ class LiveRoutingViewModel : ViewModel() {
         updateDeadReckoningUncertainty(visualOdometry, dtSec)
 
         val yawAbs = abs(yawRateDegPerSec)
-        if (yawAbs >= MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC || visualOdometry.usable) {
-            currentHeadingDeg = normalizeDeg(
-                currentHeadingDeg + visualOdometry.deltaHeadingDeg
-            )
+        val stepDistanceMeters = deadReckoningSpeedMps * dtSec
+        val headingDeltaDeg = resolveVehicleHeadingDelta(
+            origin = origin,
+            distanceMeters = stepDistanceMeters,
+            dtSec = dtSec,
+            yawRateDegPerSec = yawRateDegPerSec,
+            visualOdometry = visualOdometry
+        )
+        if (
+            abs(headingDeltaDeg) >= MIN_HEADING_DELTA_TO_APPLY_DEG ||
+            yawAbs >= MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC ||
+            visualOdometry.usable
+        ) {
+            currentHeadingDeg = normalizeDeg(currentHeadingDeg + headingDeltaDeg)
         }
 
         if (deadReckoningSpeedMps <= 0.0) {
@@ -494,7 +512,7 @@ class LiveRoutingViewModel : ViewModel() {
             origin = origin,
             predictedPoint = predictedPoint,
             predictedHeadingDeg = currentHeadingDeg,
-            distanceMeters = deadReckoningSpeedMps * dtSec,
+            distanceMeters = stepDistanceMeters,
             visualOdometry = visualOdometry
         )
         currentPoint = fusedPose.point
@@ -530,22 +548,28 @@ class LiveRoutingViewModel : ViewModel() {
     ): VisualOdometry {
         val flowFresh = nowMs - lastFlowSampleMs < FLOW_STALE_MS
         val forwardFlowPxPerSec = abs(emaFlowDyPxPerSec)
-        val lateralFlowPxPerSec = abs(emaFlowDxPxPerSec)
+        val signedLateralFlowPxPerSec = emaFlowDxPxPerSec
+        val lateralFlowPxPerSec = abs(signedLateralFlowPxPerSec)
         val yawAbs = abs(yawRateDegPerSec)
         val translationFlowPxPerSec = when {
             !flowFresh || lastFlowConfidence < MIN_FLOW_CONFIDENCE -> 0.0
-            yawAbs < ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC -> emaFlowMagPxPerSec
-            else -> max(0.0, forwardFlowPxPerSec - lateralFlowPxPerSec * ROTATION_LATERAL_FLOW_DISCOUNT)
+            yawAbs < ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC ->
+                max(emaFlowMagPxPerSec, forwardFlowPxPerSec)
+            else -> max(
+                forwardFlowPxPerSec,
+                emaFlowMagPxPerSec - lateralFlowPxPerSec * ROTATION_LATERAL_FLOW_DISCOUNT
+            )
         }
         val usable = translationFlowPxPerSec >= TRANSLATION_FLOW_STILL_PX_PER_SEC
+        val effectiveTranslationPxPerSec = effectiveTranslationFlowPxPerSec(translationFlowPxPerSec)
         val speedMps = if (usable) {
-            ((translationFlowPxPerSec - TRANSLATION_FLOW_STILL_PX_PER_SEC) * dynamicFlowToMpsRatio)
+            (effectiveTranslationPxPerSec * dynamicFlowToMpsRatio)
                 .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
         } else {
             0.0
         }
+        val confidenceScore = (lastFlowConfidence / 100.0).coerceIn(0.0, 1.0)
         val quality = if (usable) {
-            val confidenceScore = (lastFlowConfidence / 100.0).coerceIn(0.0, 1.0)
             val flowScore = (
                 translationFlowPxPerSec /
                     (TRANSLATION_FLOW_STILL_PX_PER_SEC + FLOW_FULL_QUALITY_PX_PER_SEC)
@@ -554,8 +578,13 @@ class LiveRoutingViewModel : ViewModel() {
         } else {
             0.0
         }
-        val opticalYawDeg = if (usable) {
-            emaFlowDxPxPerSec * FLOW_YAW_GAIN * dtSec
+        val lateralRatio = lateralFlowPxPerSec / translationFlowPxPerSec.coerceAtLeast(1.0)
+        val opticalYawRateDegPerSec = if (
+            usable &&
+            lateralRatio >= FLOW_TURN_MIN_LATERAL_RATIO
+        ) {
+            (signedLateralFlowPxPerSec * FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC * confidenceScore)
+                .coerceIn(-MAX_OPTICAL_YAW_RATE_DEG_SEC, MAX_OPTICAL_YAW_RATE_DEG_SEC)
         } else {
             0.0
         }
@@ -563,20 +592,35 @@ class LiveRoutingViewModel : ViewModel() {
         return VisualOdometry(
             usable = usable,
             speedMps = speedMps,
-            deltaHeadingDeg = yawRateDegPerSec * dtSec + opticalYawDeg,
+            deltaHeadingDeg = (yawRateDegPerSec + opticalYawRateDegPerSec) * dtSec,
+            opticalYawRateDegPerSec = opticalYawRateDegPerSec,
             translationPxPerSec = translationFlowPxPerSec,
+            lateralPxPerSec = signedLateralFlowPxPerSec,
             quality = quality
         )
     }
 
     private fun calibrateCameraSpeedScale(visualOdometry: VisualOdometry) {
         if (!visualOdometry.usable || lastTrueSpeedMps < MIN_CAMERA_CALIBRATION_SPEED_MPS) return
+        if (visualOdometry.translationPxPerSec < MIN_CAMERA_CALIBRATION_FLOW_PX_PER_SEC) return
 
-        val currentRatio = lastTrueSpeedMps / visualOdometry.translationPxPerSec.coerceAtLeast(1.0)
+        val currentRatio = lastTrueSpeedMps /
+            effectiveTranslationFlowPxPerSec(visualOdometry.translationPxPerSec).coerceAtLeast(1.0)
+        if (currentRatio.isNaN() || currentRatio.isInfinite()) return
+
+        val ratio = currentRatio.coerceIn(MIN_FLOW_PX_PER_SEC_TO_MPS, MAX_FLOW_PX_PER_SEC_TO_MPS)
+        val alpha = if (cameraSpeedScaleConfidence < CAMERA_SPEED_SCALE_FAST_CONFIDENCE) {
+            CAMERA_SPEED_SCALE_FAST_ALPHA
+        } else {
+            CAMERA_SPEED_SCALE_ALPHA
+        }
         dynamicFlowToMpsRatio = (
-            CAMERA_SPEED_SCALE_ALPHA * currentRatio +
-                (1.0 - CAMERA_SPEED_SCALE_ALPHA) * dynamicFlowToMpsRatio
+            alpha * ratio +
+                (1.0 - alpha) * dynamicFlowToMpsRatio
             ).coerceIn(MIN_FLOW_PX_PER_SEC_TO_MPS, MAX_FLOW_PX_PER_SEC_TO_MPS)
+        cameraSpeedScaleConfidence = (
+            cameraSpeedScaleConfidence + CAMERA_SPEED_SCALE_CONFIDENCE_STEP * visualOdometry.quality
+            ).coerceIn(0.0, 1.0)
     }
 
     private fun estimateVehicleDeadReckoningSpeed(
@@ -585,14 +629,29 @@ class LiveRoutingViewModel : ViewModel() {
         dtSec: Double
     ): Double {
         val priorSpeed = decayedLastGnssSpeed(nowMs)
-        val visualWeight = (VEHICLE_FLOW_WEIGHT * visualOdometry.quality)
+        val scaleConfidenceWeight = (
+            VEHICLE_MIN_FLOW_WEIGHT_WHEN_UNCALIBRATED +
+                (1.0 - VEHICLE_MIN_FLOW_WEIGHT_WHEN_UNCALIBRATED) * cameraSpeedScaleConfidence
+            ).coerceIn(0.0, 1.0)
+        val visualWeight = (VEHICLE_FLOW_WEIGHT * visualOdometry.quality * scaleConfidenceWeight)
             .coerceIn(0.0, VEHICLE_FLOW_WEIGHT)
-        val targetSpeed = when {
+        var targetSpeed = when {
             visualOdometry.usable ->
                 (visualWeight * visualOdometry.speedMps +
                     (1.0 - visualWeight) * priorSpeed)
                     .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
             else -> priorSpeed
+        }
+        if (
+            visualOdometry.usable &&
+            visualOdometry.speedMps < priorSpeed &&
+            cameraSpeedScaleConfidence < CAMERA_SPEED_SCALE_TRUSTED_CONFIDENCE
+        ) {
+            val priorGuard = (
+                VEHICLE_UNCALIBRATED_PRIOR_SPEED_FLOOR -
+                    VEHICLE_UNCALIBRATED_PRIOR_SPEED_FLOOR_RELIEF * cameraSpeedScaleConfidence
+                ).coerceIn(0.0, 1.0)
+            targetSpeed = targetSpeed.coerceAtLeast(priorSpeed * priorGuard)
         }
 
         val currentSpeed = vehicleDeadReckoningSpeedMps.takeIf { it > 0.0 } ?: priorSpeed
@@ -614,6 +673,77 @@ class LiveRoutingViewModel : ViewModel() {
         } else {
             vehicleDeadReckoningSpeedMps
         }
+    }
+
+    private fun effectiveTranslationFlowPxPerSec(translationPxPerSec: Double): Double {
+        return (translationPxPerSec - TRANSLATION_FLOW_STILL_PX_PER_SEC)
+            .coerceAtLeast(0.0)
+    }
+
+    private fun resolveVehicleHeadingDelta(
+        origin: GeoPoint,
+        distanceMeters: Double,
+        dtSec: Double,
+        yawRateDegPerSec: Double,
+        visualOdometry: VisualOdometry
+    ): Double {
+        val sensorDelta = visualOdometry.deltaHeadingDeg
+        val baseHeading = normalizeDeg(currentHeadingDeg + sensorDelta)
+        val routeDelta = routeHeadingAssistDelta(
+            origin = origin,
+            baseHeadingDeg = baseHeading,
+            distanceMeters = distanceMeters,
+            dtSec = dtSec,
+            yawRateDegPerSec = yawRateDegPerSec,
+            visualOdometry = visualOdometry
+        )
+        return sensorDelta + routeDelta
+    }
+
+    private fun routeHeadingAssistDelta(
+        origin: GeoPoint,
+        baseHeadingDeg: Double,
+        distanceMeters: Double,
+        dtSec: Double,
+        yawRateDegPerSec: Double,
+        visualOdometry: VisualOdometry
+    ): Double {
+        if (dtSec <= 0.0 || !visualOdometry.usable) return 0.0
+
+        val originProjection = projectOnRoute(origin) ?: return 0.0
+        val distanceGate = (
+            ROUTE_MATCH_BASE_DISTANCE_GATE_M +
+                positionUncertaintyM * ROUTE_MATCH_UNCERTAINTY_GATE_RATIO
+            ).coerceIn(ROUTE_MATCH_BASE_DISTANCE_GATE_M, ROUTE_MATCH_MAX_DISTANCE_GATE_M)
+        if (originProjection.distanceFromRouteM > distanceGate) return 0.0
+
+        val lookAheadMeters = (distanceMeters + deadReckoningSpeedMps * ROUTE_HEADING_LOOKAHEAD_SEC)
+            .coerceIn(ROUTE_HEADING_MIN_LOOKAHEAD_M, ROUTE_HEADING_MAX_LOOKAHEAD_M)
+        val routePose = pointAtRouteDistance(originProjection.distanceAlongRouteM + lookAheadMeters)
+            ?: return 0.0
+        val headingGap = signedHeadingDelta(baseHeadingDeg, routePose.segmentHeadingDeg)
+        if (abs(headingGap) < ROUTE_HEADING_ASSIST_MIN_GAP_DEG) return 0.0
+
+        val turnRateEvidence = yawRateDegPerSec + visualOdometry.opticalYawRateDegPerSec
+        val hasOppositeTurnEvidence =
+            abs(turnRateEvidence) >= ROUTE_HEADING_OPPOSITE_TURN_EVIDENCE_DEG_SEC &&
+                turnRateEvidence * headingGap < 0.0
+        if (hasOppositeTurnEvidence) return 0.0
+
+        val lateralRatio = abs(visualOdometry.lateralPxPerSec) /
+            visualOdometry.translationPxPerSec.coerceAtLeast(1.0)
+        val visualTurnStrength = (lateralRatio / ROUTE_HEADING_FULL_LATERAL_RATIO)
+            .coerceIn(0.0, 1.0)
+        val routeContinuity = (1.0 - originProjection.distanceFromRouteM / distanceGate)
+            .coerceIn(0.0, 1.0)
+        val assistStrength = (
+            ROUTE_HEADING_BASE_ASSIST_STRENGTH +
+                ROUTE_HEADING_VISUAL_ASSIST_STRENGTH * visualTurnStrength
+            ) * visualOdometry.quality * routeContinuity
+
+        val maxAssistDelta = ROUTE_HEADING_MAX_ASSIST_DEG_SEC * dtSec
+        return (headingGap * assistStrength)
+            .coerceIn(-maxAssistDelta, maxAssistDelta)
     }
 
     private fun updateDeadReckoningUncertainty(
@@ -975,6 +1105,11 @@ class LiveRoutingViewModel : ViewModel() {
         lastFlowConfidence = 0.0
     }
 
+    private fun resetCameraSpeedScale() {
+        dynamicFlowToMpsRatio = FLOW_PX_PER_SEC_TO_MPS
+        cameraSpeedScaleConfidence = INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE
+    }
+
     private fun resetDeadReckoningRuntime() {
         deadReckoningSpeedMps = 0.0
         vehicleDeadReckoningSpeedMps = 0.0
@@ -1065,20 +1200,31 @@ class LiveRoutingViewModel : ViewModel() {
         private const val TRANSLATION_FLOW_STILL_PX_PER_SEC = 4.0
         private const val FLOW_FULL_QUALITY_PX_PER_SEC = 60.0
         private const val MIN_FLOW_CONFIDENCE = 5.0
-        private const val FLOW_PX_PER_SEC_TO_MPS = 0.024
-        private const val FLOW_YAW_GAIN = 0.004
+        private const val FLOW_PX_PER_SEC_TO_MPS = 0.075
+        private const val FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC = 0.11
+        private const val FLOW_TURN_MIN_LATERAL_RATIO = 0.12
+        private const val MAX_OPTICAL_YAW_RATE_DEG_SEC = 16.0
         private const val ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC = 12.0
-        private const val ROTATION_LATERAL_FLOW_DISCOUNT = 0.35
+        private const val ROTATION_LATERAL_FLOW_DISCOUNT = 0.12
         private const val MIN_CAMERA_CALIBRATION_SPEED_MPS = 2.0
-        private const val CAMERA_SPEED_SCALE_ALPHA = 0.05
-        private const val MIN_FLOW_PX_PER_SEC_TO_MPS = 0.002
-        private const val MAX_FLOW_PX_PER_SEC_TO_MPS = 0.12
+        private const val MIN_CAMERA_CALIBRATION_FLOW_PX_PER_SEC = 10.0
+        private const val CAMERA_SPEED_SCALE_ALPHA = 0.16
+        private const val CAMERA_SPEED_SCALE_FAST_ALPHA = 0.42
+        private const val CAMERA_SPEED_SCALE_FAST_CONFIDENCE = 0.35
+        private const val CAMERA_SPEED_SCALE_CONFIDENCE_STEP = 0.10
+        private const val CAMERA_SPEED_SCALE_TRUSTED_CONFIDENCE = 0.65
+        private const val INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE = 0.15
+        private const val MIN_FLOW_PX_PER_SEC_TO_MPS = 0.006
+        private const val MAX_FLOW_PX_PER_SEC_TO_MPS = 0.30
         private const val VEHICLE_FLOW_WEIGHT = 0.78
+        private const val VEHICLE_MIN_FLOW_WEIGHT_WHEN_UNCALIBRATED = 0.28
+        private const val VEHICLE_UNCALIBRATED_PRIOR_SPEED_FLOOR = 0.88
+        private const val VEHICLE_UNCALIBRATED_PRIOR_SPEED_FLOOR_RELIEF = 0.55
         private const val VEHICLE_ACCEL_LIMIT_MPS2 = 3.5
         private const val VEHICLE_BRAKE_LIMIT_MPS2 = 6.0
         private const val VEHICLE_COAST_DECAY_MPS2 = 0.9
         private const val VEHICLE_STOP_SPEED_FLOOR_MPS = 0.20
-        private const val LAST_GNSS_SPEED_DECAY_SEC = 10.0
+        private const val LAST_GNSS_SPEED_DECAY_SEC = 14.0
         private const val DR_VISUAL_UNCERTAINTY_GROWTH_MPS = 0.8
         private const val DR_NO_CAMERA_UNCERTAINTY_GROWTH_MPS = 2.2
         private const val DR_VISUAL_DISTANCE_ERROR_RATIO = 0.08
@@ -1086,7 +1232,7 @@ class LiveRoutingViewModel : ViewModel() {
         private const val ROUTE_MATCH_BASE_DISTANCE_GATE_M = 10.0
         private const val ROUTE_MATCH_MAX_DISTANCE_GATE_M = 45.0
         private const val ROUTE_MATCH_UNCERTAINTY_GATE_RATIO = 0.6
-        private const val ROUTE_MATCH_HEADING_GATE_DEG = 65.0
+        private const val ROUTE_MATCH_HEADING_GATE_DEG = 82.0
         private const val ROUTE_MATCH_MIN_CONFIDENCE = 0.52
         private const val ROUTE_MATCH_MIN_HEADING_SCORE = 0.15
         private const val ROUTE_MATCH_DISTANCE_WEIGHT = 0.40
@@ -1099,6 +1245,16 @@ class LiveRoutingViewModel : ViewModel() {
         private const val ROUTE_MATCH_UNCERTAINTY_REDUCTION = 0.28
         private const val ROUTE_REMAINING_PROJECTION_DISTANCE_M = 60.0
         private const val MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC = 0.5
+        private const val MIN_HEADING_DELTA_TO_APPLY_DEG = 0.02
+        private const val ROUTE_HEADING_LOOKAHEAD_SEC = 1.45
+        private const val ROUTE_HEADING_MIN_LOOKAHEAD_M = 6.0
+        private const val ROUTE_HEADING_MAX_LOOKAHEAD_M = 28.0
+        private const val ROUTE_HEADING_ASSIST_MIN_GAP_DEG = 1.2
+        private const val ROUTE_HEADING_MAX_ASSIST_DEG_SEC = 18.0
+        private const val ROUTE_HEADING_OPPOSITE_TURN_EVIDENCE_DEG_SEC = 2.0
+        private const val ROUTE_HEADING_FULL_LATERAL_RATIO = 0.45
+        private const val ROUTE_HEADING_BASE_ASSIST_STRENGTH = 0.22
+        private const val ROUTE_HEADING_VISUAL_ASSIST_STRENGTH = 0.46
         private const val DEAD_RECKONING_APPEND_DISTANCE_M = 0.35
         private const val GNSS_PATH_APPEND_DISTANCE_M = 0.75
         private const val EARTH_RADIUS_M = 6_378_137.0
