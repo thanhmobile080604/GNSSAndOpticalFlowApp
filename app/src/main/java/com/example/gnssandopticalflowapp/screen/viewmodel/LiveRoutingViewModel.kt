@@ -968,14 +968,40 @@ class LiveRoutingViewModel : ViewModel() {
             mapMatchConfidence = 0.0
         )
 
-        val pointBlend = (mapMatch.confidence * ROUTE_MATCH_MAX_POINT_BLEND)
-            .coerceIn(0.0, ROUTE_MATCH_MAX_POINT_BLEND)
-        val headingBlend = pointBlend * ROUTE_MATCH_HEADING_BLEND_RATIO
+        // Vehicle snap: once we are moving fast enough to certainly be on a vehicle (> ~6 km/h), a
+        // physical constraint kicks in — a car/motorbike stays on the road and cannot drive into a
+        // building. So as speed climbs past that gate we (a) raise the cap on how strongly the path
+        // is pulled onto the matched road point, and (b) lift the effective match weight so even a
+        // moderate-confidence match still snaps firmly, instead of letting dead-reckoning drift keep
+        // the red path floating off-road. The matched point preserves the distance travelled along
+        // the route, so this corrects the lateral position/heading without corrupting the speed.
+        val snapBoost = vehicleSnapBoost(deadReckoningSpeedMps)
+        val maxPointBlend = ROUTE_MATCH_MAX_POINT_BLEND +
+            (VEHICLE_SNAP_MAX_POINT_BLEND - ROUTE_MATCH_MAX_POINT_BLEND) * snapBoost
+        val effectiveConfidence = mapMatch.confidence +
+            (1.0 - mapMatch.confidence) * VEHICLE_SNAP_CONFIDENCE_LIFT * snapBoost
+        val pointBlend = (effectiveConfidence * maxPointBlend)
+            .coerceIn(0.0, maxPointBlend)
+        val headingBlendRatio = ROUTE_MATCH_HEADING_BLEND_RATIO +
+            (VEHICLE_SNAP_HEADING_BLEND_RATIO - ROUTE_MATCH_HEADING_BLEND_RATIO) * snapBoost
+        val headingBlend = pointBlend * headingBlendRatio
         return FusedPose(
             point = interpolatePoint(predictedPoint, mapMatch.point, pointBlend),
             headingDeg = interpolateHeading(predictedHeadingDeg, mapMatch.headingDeg, headingBlend),
             mapMatchConfidence = mapMatch.confidence
         )
+    }
+
+    /**
+     * Ramps 0 -> 1 as the dead-reckoning speed climbs from the vehicle gate (~6 km/h, below which we
+     * might still be walking/pushing the bike) up to a clearly-cruising speed. Used to scale how hard
+     * the path is snapped onto the road: stationary/slow = trust the raw prediction, cruising = trust
+     * that we are on the road.
+     */
+    private fun vehicleSnapBoost(speedMps: Double): Double {
+        if (speedMps < VEHICLE_SNAP_SPEED_MPS) return 0.0
+        val range = (VEHICLE_SNAP_FULL_SPEED_MPS - VEHICLE_SNAP_SPEED_MPS).coerceAtLeast(0.01)
+        return ((speedMps - VEHICLE_SNAP_SPEED_MPS) / range).coerceIn(0.0, 1.0)
     }
 
     private fun mapMatchPredictedPose(
@@ -1562,6 +1588,14 @@ class LiveRoutingViewModel : ViewModel() {
         private const val ROUTE_MATCH_MAX_POINT_BLEND = 0.86
         private const val ROUTE_MATCH_HEADING_BLEND_RATIO = 0.45
         private const val ROUTE_MATCH_UNCERTAINTY_REDUCTION = 0.28
+        // Vehicle snap: above ~6 km/h we are certainly on a vehicle that must stay on the road, so
+        // the path is pulled almost fully onto the matched road point (and its heading), ramping in
+        // between the gate speed and a clearly-cruising speed.
+        private const val VEHICLE_SNAP_SPEED_MPS = 1.667 // ~6 km/h
+        private const val VEHICLE_SNAP_FULL_SPEED_MPS = 3.0 // ~10.8 km/h
+        private const val VEHICLE_SNAP_MAX_POINT_BLEND = 0.985
+        private const val VEHICLE_SNAP_CONFIDENCE_LIFT = 0.55
+        private const val VEHICLE_SNAP_HEADING_BLEND_RATIO = 0.72
         private const val ROUTE_REMAINING_PROJECTION_DISTANCE_M = 60.0
         private const val MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC = 0.5
         private const val MIN_HEADING_DELTA_TO_APPLY_DEG = 0.02
