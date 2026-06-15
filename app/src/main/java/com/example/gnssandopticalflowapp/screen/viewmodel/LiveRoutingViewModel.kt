@@ -22,6 +22,17 @@ class LiveRoutingViewModel : ViewModel() {
         FARNEBACK_HEATMAP
     }
 
+    /**
+     * Selects the inertial dead-reckoning tuning. MOTORBIKE assumes a loosely-held phone (e.g. on
+     * the rider's chest): more dynamic acceleration but a non-rigid, vibrating mount, so it learns
+     * the forward axis more cautiously and trusts the accelerometer less. CAR assumes a rigid
+     * windshield mount: smoother, so the inertial signal can be trusted more.
+     */
+    enum class VehicleKind {
+        MOTORBIKE,
+        CAR
+    }
+
     data class InitialRouteUi(
         val destinationPoint: GeoPoint,
         val routePoints: List<GeoPoint>,
@@ -61,6 +72,22 @@ class LiveRoutingViewModel : ViewModel() {
         val showHandle: Boolean
     )
 
+    /** Realtime internal state for the on-screen debug HUD (diagnosing GNSS-outage tracking). */
+    data class DebugSnapshot(
+        val assistActive: Boolean,
+        val vehicleKind: VehicleKind,
+        val gpsSpeedMps: Double,
+        val estSpeedMps: Double,
+        val flowSpeedMps: Double,
+        val flowUsable: Boolean,
+        val scaleRatio: Double,
+        val scaleConfidence: Double,
+        val axisConfidence: Double,
+        val accelTrust: Double,
+        val longitudinalAccelMps2: Double,
+        val uncertaintyM: Double
+    )
+
     private data class VisualOdometry(
         val usable: Boolean,
         val speedMps: Double,
@@ -91,9 +118,23 @@ class LiveRoutingViewModel : ViewModel() {
         val mapMatchConfidence: Double
     )
 
+    private data class VehicleProfile(
+        val maxDriveAccelMps2: Double,
+        val maxBrakeAccelMps2: Double,
+        val speedRiseLimitMps2: Double,
+        val speedDropLimitMps2: Double,
+        val forwardAxisAlpha: Double,
+        val forwardAxisConfidenceStep: Double,
+        val maxInertialTrust: Double,
+        val zuptEnterSpeedMps: Double,
+        val zuptAccelMps2: Double
+    )
+
     var routeState: LiveRouteState? = null
         private set
     var activeOpticalMode = OpticalMode.KLT
+        private set
+    var vehicleKind = VehicleKind.MOTORBIKE
         private set
     var gnssAssistActive = false
         private set
@@ -137,6 +178,23 @@ class LiveRoutingViewModel : ViewModel() {
     private var lastFlowConfidence = 0.0
     private var dynamicFlowToMpsRatio = FLOW_PX_PER_SEC_TO_MPS
     private var cameraSpeedScaleConfidence = INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE
+    private var lastVisualSpeedMps = 0.0
+    private var lastVisualUsable = false
+
+    // Inertial (IMU longitudinal) dead-reckoning runtime.
+    // The phone is mounted in an unknown orientation, so we learn the device-frame "vehicle
+    // forward" axis and the longitudinal accel bias online while GNSS is healthy, then use the
+    // longitudinal accelerometer to propagate speed during outages (visual-inertial fusion).
+    private val emaAccelDevice = DoubleArray(3)
+    private var hasAccelSample = false
+    private val forwardAxisDevice = DoubleArray(3)
+    private var forwardAxisConfidence = 0.0
+    private var longitudinalAccelBiasMps2 = 0.0
+    private var prevGnssSpeedForAccelMps = 0.0
+    private var prevGnssHeadingDeg = 0.0
+    private var hasPrevGnssAccelRef = false
+    private var stationaryHoldMs = 0L
+    private var vehicleProfile = MOTORBIKE_PROFILE
 
     fun initialize(state: LiveRouteState, nowMs: Long = System.currentTimeMillis()): InitialRouteUi {
         routeState = state
@@ -155,6 +213,7 @@ class LiveRoutingViewModel : ViewModel() {
         resetOpticalRuntime()
         resetCameraSpeedScale()
         resetDeadReckoningRuntime()
+        resetInertialRuntime()
 
         val startPoint = GeoPoint(state.startLocation.latitude, state.startLocation.longitude)
         val destinationPoint = GeoPoint(state.destination.latitude, state.destination.longitude)
@@ -239,6 +298,7 @@ class LiveRoutingViewModel : ViewModel() {
         opticalAssistSegments.clear()
         resetCameraSpeedScale()
         resetDeadReckoningRuntime()
+        resetInertialRuntime()
     }
 
     fun setActiveOpticalMode(mode: OpticalMode) {
@@ -247,6 +307,13 @@ class LiveRoutingViewModel : ViewModel() {
         activeOpticalMode = mode
         resetOpticalRuntime()
         resetCameraSpeedScale()
+    }
+
+    fun setVehicleKind(kind: VehicleKind) {
+        if (vehicleKind == kind) return
+
+        vehicleKind = kind
+        vehicleProfile = profileFor(kind)
     }
 
     fun dismissCameraPanel() {
@@ -327,7 +394,17 @@ class LiveRoutingViewModel : ViewModel() {
 
         currentPoint = point
         lastAcceptedGnssMs = nowMs
-        
+
+        // While GNSS is healthy, use it as ground truth to learn the phone->vehicle forward axis
+        // and the longitudinal accelerometer bias, so the inertial speed estimate is ready the
+        // moment GNSS drops out.
+        learnForwardAxisFromGnss(
+            currentSpeedMps = lastTrueSpeedMps,
+            currentHeadingDegValue = currentHeadingDeg,
+            previousGnssMs = previousGnssMs,
+            nowMs = nowMs
+        )
+
         val gnssPath = if (!gnssTravelSegmentOpen) {
             gnssTravelSegmentOpen = true
             strongGnssPoints.add(point)
@@ -355,9 +432,13 @@ class LiveRoutingViewModel : ViewModel() {
     fun onTick(
         nowMs: Long,
         dtSec: Double,
-        yawRateDegPerSec: Double
+        yawRateDegPerSec: Double,
+        horizontalAccelDevice: FloatArray = NO_ACCEL_SAMPLE
     ): TickResult {
+        updateImuAccel(horizontalAccelDevice)
         val visualOdometry = resolveVisualOdometry(nowMs, dtSec, yawRateDegPerSec)
+        lastVisualSpeedMps = visualOdometry.speedMps
+        lastVisualUsable = visualOdometry.usable
         val assistDecision = setGnssAssistActive(!hasCurrentlyUsableGnss(nowMs))
         if (!assistDecision.active) {
             calibrateCameraSpeedScale(visualOdometry)
@@ -442,6 +523,23 @@ class LiveRoutingViewModel : ViewModel() {
         return flowFrameCount % FEATURE_UPDATE_INTERVAL == 0
     }
 
+    fun debugSnapshot(): DebugSnapshot {
+        return DebugSnapshot(
+            assistActive = gnssAssistActive,
+            vehicleKind = vehicleKind,
+            gpsSpeedMps = lastTrueSpeedMps,
+            estSpeedMps = if (gnssAssistActive) deadReckoningSpeedMps else lastTrueSpeedMps,
+            flowSpeedMps = lastVisualSpeedMps,
+            flowUsable = lastVisualUsable,
+            scaleRatio = dynamicFlowToMpsRatio,
+            scaleConfidence = cameraSpeedScaleConfidence,
+            axisConfidence = forwardAxisConfidence,
+            accelTrust = longitudinalAccelTrust(),
+            longitudinalAccelMps2 = currentLongitudinalAccel(),
+            uncertaintyM = positionUncertaintyM
+        )
+    }
+
     fun onOpticalMetrics(metrics: OpticalFlowMetrics, nowMs: Long = System.currentTimeMillis()) {
         val dtMs = if (lastFlowFrameTimeMs > 0) nowMs - lastFlowFrameTimeMs else 0L
         if (dtMs in 1..500) {
@@ -466,10 +564,16 @@ class LiveRoutingViewModel : ViewModel() {
     ): NavigationSnapshot? {
         val origin = currentPoint ?: return null
 
+        val longitudinalAccelMps2 = currentLongitudinalAccel()
+        val accelTrust = longitudinalAccelTrust()
+        val stationary = detectStationary(visualOdometry, yawRateDegPerSec, nowMs)
         deadReckoningSpeedMps = estimateVehicleDeadReckoningSpeed(
             visualOdometry = visualOdometry,
             nowMs = nowMs,
-            dtSec = dtSec
+            dtSec = dtSec,
+            longitudinalAccelMps2 = longitudinalAccelMps2,
+            accelTrust = accelTrust,
+            stationary = stationary
         )
         updateDeadReckoningUncertainty(visualOdometry, dtSec)
 
@@ -578,10 +682,16 @@ class LiveRoutingViewModel : ViewModel() {
         } else {
             0.0
         }
-        val lateralRatio = lateralFlowPxPerSec / translationFlowPxPerSec.coerceAtLeast(1.0)
+        // Turn detection must keep working when the rider slows into a curve. At low speed the
+        // forward translation flow falls below the "usable" gate, yet a real turn still pans the
+        // whole scene sideways, so derive the optical yaw rate from a significant lateral flow that
+        // dominates the forward flow, independent of the translation-speed gate. This is exactly the
+        // case the gyro misses on a leaning motorbike (its gravity-projected yaw settles mid-corner).
+        val turnFlowConfident = flowFresh && lastFlowConfidence >= MIN_FLOW_CONFIDENCE
         val opticalYawRateDegPerSec = if (
-            usable &&
-            lateralRatio >= FLOW_TURN_MIN_LATERAL_RATIO
+            turnFlowConfident &&
+            lateralFlowPxPerSec >= MIN_LATERAL_FLOW_FOR_TURN_PX_PER_SEC &&
+            lateralFlowPxPerSec >= forwardFlowPxPerSec * FLOW_TURN_MIN_LATERAL_RATIO
         ) {
             (signedLateralFlowPxPerSec * FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC * confidenceScore)
                 .coerceIn(-MAX_OPTICAL_YAW_RATE_DEG_SEC, MAX_OPTICAL_YAW_RATE_DEG_SEC)
@@ -623,12 +733,43 @@ class LiveRoutingViewModel : ViewModel() {
             ).coerceIn(0.0, 1.0)
     }
 
+    /**
+     * Visual-inertial vehicle speed during a GNSS outage.
+     *
+     * The longitudinal accelerometer (projected onto the learned vehicle-forward axis) propagates
+     * speed at tick rate so braking/acceleration are tracked immediately; optical flow then pulls
+     * that prediction back toward an absolute, scale-calibrated speed to stop inertial drift; a
+     * zero-velocity update (ZUPT) snaps the speed to zero when the vehicle is detected stopped.
+     * When neither the accelerometer (low alignment confidence) nor the camera is trustworthy the
+     * estimator gracefully falls back to the decayed last-GNSS speed.
+     */
     private fun estimateVehicleDeadReckoningSpeed(
         visualOdometry: VisualOdometry,
         nowMs: Long,
-        dtSec: Double
+        dtSec: Double,
+        longitudinalAccelMps2: Double,
+        accelTrust: Double,
+        stationary: Boolean
     ): Double {
+        if (stationary) {
+            stationaryHoldMs += (dtSec * 1000.0).toLong()
+            vehicleDeadReckoningSpeedMps = 0.0
+            return 0.0
+        }
+        stationaryHoldMs = 0L
+
         val priorSpeed = decayedLastGnssSpeed(nowMs)
+        val currentSpeed = vehicleDeadReckoningSpeedMps.takeIf { it > 0.0 } ?: priorSpeed
+
+        // Inertial prediction: integrate the (trust-weighted) longitudinal acceleration so the
+        // estimate keeps moving with the vehicle's real acceleration between flow measurements.
+        val inertialSpeed = if (accelTrust > 0.0) {
+            (currentSpeed + longitudinalAccelMps2 * accelTrust * dtSec)
+                .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
+        } else {
+            currentSpeed
+        }
+
         val scaleConfidenceWeight = (
             VEHICLE_MIN_FLOW_WEIGHT_WHEN_UNCALIBRATED +
                 (1.0 - VEHICLE_MIN_FLOW_WEIGHT_WHEN_UNCALIBRATED) * cameraSpeedScaleConfidence
@@ -638,14 +779,18 @@ class LiveRoutingViewModel : ViewModel() {
         var targetSpeed = when {
             visualOdometry.usable ->
                 (visualWeight * visualOdometry.speedMps +
-                    (1.0 - visualWeight) * priorSpeed)
+                    (1.0 - visualWeight) * inertialSpeed)
                     .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
+            accelTrust > 0.0 -> inertialSpeed
             else -> priorSpeed
         }
+        // The uncalibrated-camera prior floor is only a crutch for when we have no other speed
+        // source; once the accelerometer is trusted we let it (not the stale prior) drive the value.
         if (
             visualOdometry.usable &&
             visualOdometry.speedMps < priorSpeed &&
-            cameraSpeedScaleConfidence < CAMERA_SPEED_SCALE_TRUSTED_CONFIDENCE
+            cameraSpeedScaleConfidence < CAMERA_SPEED_SCALE_TRUSTED_CONFIDENCE &&
+            accelTrust < INERTIAL_PRIOR_GUARD_DISABLE_TRUST
         ) {
             val priorGuard = (
                 VEHICLE_UNCALIBRATED_PRIOR_SPEED_FLOOR -
@@ -653,10 +798,18 @@ class LiveRoutingViewModel : ViewModel() {
                 ).coerceIn(0.0, 1.0)
             targetSpeed = targetSpeed.coerceAtLeast(priorSpeed * priorGuard)
         }
+        // Keep-up guard: optical flow under-reads at speed (motion blur / feature loss), which drags
+        // the estimate below the real speed. When the trusted accelerometer says we are NOT braking,
+        // don't let the (blurred) flow pull the speed below the inertially-consistent value.
+        if (
+            accelTrust >= INERTIAL_TRUST_FOR_BRAKE &&
+            longitudinalAccelMps2 > -INERTIAL_BRAKE_EVIDENCE_MPS2
+        ) {
+            targetSpeed = targetSpeed.coerceAtLeast(inertialSpeed)
+        }
 
-        val currentSpeed = vehicleDeadReckoningSpeedMps.takeIf { it > 0.0 } ?: priorSpeed
-        val dropLimit = if (visualOdometry.usable) {
-            VEHICLE_BRAKE_LIMIT_MPS2
+        val dropLimit = if (visualOdometry.usable || accelTrust >= INERTIAL_TRUST_FOR_BRAKE) {
+            vehicleProfile.speedDropLimitMps2
         } else {
             VEHICLE_COAST_DECAY_MPS2
         }
@@ -664,7 +817,7 @@ class LiveRoutingViewModel : ViewModel() {
             current = currentSpeed,
             target = targetSpeed,
             dtSec = dtSec,
-            maxRiseMps2 = VEHICLE_ACCEL_LIMIT_MPS2,
+            maxRiseMps2 = vehicleProfile.speedRiseLimitMps2,
             maxDropMps2 = dropLimit
         ).coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
 
@@ -708,7 +861,12 @@ class LiveRoutingViewModel : ViewModel() {
         yawRateDegPerSec: Double,
         visualOdometry: VisualOdometry
     ): Double {
-        if (dtSec <= 0.0 || !visualOdometry.usable) return 0.0
+        // Previously this bailed out whenever the camera flow was not "usable" (i.e. at low speed),
+        // which is exactly when a rider is negotiating a curve — so the heading stopped following the
+        // road and the path was drawn straight. Now we only require that the vehicle is moving; the
+        // planned route is the strongest available turn cue at low speed.
+        if (dtSec <= 0.0) return 0.0
+        if (deadReckoningSpeedMps < ROUTE_HEADING_ASSIST_MIN_SPEED_MPS) return 0.0
 
         val originProjection = projectOnRoute(origin) ?: return 0.0
         val distanceGate = (
@@ -736,10 +894,17 @@ class LiveRoutingViewModel : ViewModel() {
             .coerceIn(0.0, 1.0)
         val routeContinuity = (1.0 - originProjection.distanceFromRouteM / distanceGate)
             .coerceIn(0.0, 1.0)
+        // Keep a baseline authority when the camera is not usable so the route can still bend the
+        // heading through a slow curve; when the camera is usable, scale by its real quality.
+        val cameraQuality = if (visualOdometry.usable) {
+            visualOdometry.quality
+        } else {
+            ROUTE_HEADING_NO_CAMERA_QUALITY
+        }
         val assistStrength = (
             ROUTE_HEADING_BASE_ASSIST_STRENGTH +
                 ROUTE_HEADING_VISUAL_ASSIST_STRENGTH * visualTurnStrength
-            ) * visualOdometry.quality * routeContinuity
+            ) * cameraQuality * routeContinuity
 
         val maxAssistDelta = ROUTE_HEADING_MAX_ASSIST_DEG_SEC * dtSec
         return (headingGap * assistStrength)
@@ -1116,6 +1281,161 @@ class LiveRoutingViewModel : ViewModel() {
         positionUncertaintyM = INITIAL_POSITION_UNCERTAINTY_M
     }
 
+    private fun profileFor(kind: VehicleKind): VehicleProfile = when (kind) {
+        VehicleKind.MOTORBIKE -> MOTORBIKE_PROFILE
+        VehicleKind.CAR -> CAR_PROFILE
+    }
+
+    private fun resetInertialRuntime() {
+        emaAccelDevice.fill(0.0)
+        hasAccelSample = false
+        forwardAxisDevice.fill(0.0)
+        forwardAxisConfidence = 0.0
+        longitudinalAccelBiasMps2 = 0.0
+        prevGnssSpeedForAccelMps = 0.0
+        prevGnssHeadingDeg = 0.0
+        hasPrevGnssAccelRef = false
+        stationaryHoldMs = 0L
+    }
+
+    /** Smooths the device-frame horizontal acceleration so it represents the recent (~0.3 s) trend. */
+    private fun updateImuAccel(horizontalAccelDevice: FloatArray) {
+        if (horizontalAccelDevice.size < 3) return
+        val ax = horizontalAccelDevice[0].toDouble()
+        val ay = horizontalAccelDevice[1].toDouble()
+        val az = horizontalAccelDevice[2].toDouble()
+        if (!ax.isFinite() || !ay.isFinite() || !az.isFinite()) return
+
+        if (!hasAccelSample) {
+            emaAccelDevice[0] = ax
+            emaAccelDevice[1] = ay
+            emaAccelDevice[2] = az
+            hasAccelSample = true
+            return
+        }
+        emaAccelDevice[0] = (1.0 - ACCEL_EMA_ALPHA) * emaAccelDevice[0] + ACCEL_EMA_ALPHA * ax
+        emaAccelDevice[1] = (1.0 - ACCEL_EMA_ALPHA) * emaAccelDevice[1] + ACCEL_EMA_ALPHA * ay
+        emaAccelDevice[2] = (1.0 - ACCEL_EMA_ALPHA) * emaAccelDevice[2] + ACCEL_EMA_ALPHA * az
+    }
+
+    /**
+     * Learns the device-frame "vehicle forward" unit vector (and the longitudinal accel bias) from
+     * GNSS truth. Yaw misalignment between the phone and the car is observable whenever the
+     * longitudinal acceleration changes, so we only update on straight-line segments with a clear
+     * acceleration/braking event and align the forward axis with the measured horizontal acceleration.
+     */
+    private fun learnForwardAxisFromGnss(
+        currentSpeedMps: Double,
+        currentHeadingDegValue: Double,
+        previousGnssMs: Long,
+        nowMs: Long
+    ) {
+        val hadPrev = hasPrevGnssAccelRef
+        val prevSpeed = prevGnssSpeedForAccelMps
+        val prevHeading = prevGnssHeadingDeg
+        prevGnssSpeedForAccelMps = currentSpeedMps
+        prevGnssHeadingDeg = currentHeadingDegValue
+        hasPrevGnssAccelRef = true
+
+        if (!hadPrev || !hasAccelSample) return
+        if (previousGnssMs <= 0L || nowMs <= previousGnssMs) return
+        val dtGnssSec = (nowMs - previousGnssMs) / 1000.0
+        if (dtGnssSec < MIN_ALIGN_DT_SEC || dtGnssSec > MAX_ALIGN_DT_SEC) return
+        if (currentSpeedMps < MIN_FORWARD_AXIS_SPEED_MPS) return
+        if (abs(signedHeadingDelta(prevHeading, currentHeadingDegValue)) > MAX_FORWARD_AXIS_HEADING_CHANGE_DEG) return
+
+        val gnssLongAccel = (currentSpeedMps - prevSpeed) / dtGnssSec
+        if (abs(gnssLongAccel) < MIN_FORWARD_AXIS_ACCEL_MPS2) return
+
+        val ax = emaAccelDevice[0]
+        val ay = emaAccelDevice[1]
+        val az = emaAccelDevice[2]
+        val accelMag = sqrt(ax * ax + ay * ay + az * az)
+        if (accelMag < MIN_FORWARD_AXIS_ACCEL_MPS2) return
+
+        val sign = if (gnssLongAccel >= 0.0) 1.0 else -1.0
+        val dirX = ax / accelMag * sign
+        val dirY = ay / accelMag * sign
+        val dirZ = az / accelMag * sign
+
+        val axisAlpha = vehicleProfile.forwardAxisAlpha
+        val confidenceStep = vehicleProfile.forwardAxisConfidenceStep
+        if (forwardAxisConfidence <= 0.0) {
+            forwardAxisDevice[0] = dirX
+            forwardAxisDevice[1] = dirY
+            forwardAxisDevice[2] = dirZ
+            forwardAxisConfidence = confidenceStep
+        } else {
+            val blendedX = (1.0 - axisAlpha) * forwardAxisDevice[0] + axisAlpha * dirX
+            val blendedY = (1.0 - axisAlpha) * forwardAxisDevice[1] + axisAlpha * dirY
+            val blendedZ = (1.0 - axisAlpha) * forwardAxisDevice[2] + axisAlpha * dirZ
+            val blendedMag = sqrt(blendedX * blendedX + blendedY * blendedY + blendedZ * blendedZ)
+            if (blendedMag > 1e-6) {
+                forwardAxisDevice[0] = blendedX / blendedMag
+                forwardAxisDevice[1] = blendedY / blendedMag
+                forwardAxisDevice[2] = blendedZ / blendedMag
+            }
+            forwardAxisConfidence = (forwardAxisConfidence + confidenceStep).coerceAtMost(1.0)
+        }
+
+        if (forwardAxisConfidence >= FORWARD_AXIS_BIAS_MIN_CONFIDENCE) {
+            val measuredLongAccel = ax * forwardAxisDevice[0] +
+                ay * forwardAxisDevice[1] +
+                az * forwardAxisDevice[2]
+            val residual = measuredLongAccel - gnssLongAccel
+            longitudinalAccelBiasMps2 = (
+                (1.0 - FORWARD_AXIS_BIAS_ALPHA) * longitudinalAccelBiasMps2 +
+                    FORWARD_AXIS_BIAS_ALPHA * residual
+                ).coerceIn(-MAX_ACCEL_BIAS_MPS2, MAX_ACCEL_BIAS_MPS2)
+        }
+    }
+
+    /** Bias-corrected longitudinal acceleration (m/s^2), positive = accelerating forward. */
+    private fun currentLongitudinalAccel(): Double {
+        if (!hasAccelSample || forwardAxisConfidence <= 0.0) return 0.0
+        val projected = emaAccelDevice[0] * forwardAxisDevice[0] +
+            emaAccelDevice[1] * forwardAxisDevice[1] +
+            emaAccelDevice[2] * forwardAxisDevice[2]
+        return (projected - longitudinalAccelBiasMps2)
+            .coerceIn(-vehicleProfile.maxBrakeAccelMps2, vehicleProfile.maxDriveAccelMps2)
+    }
+
+    /** How much to trust the inertial speed propagation (0 = none, 1 = fully calibrated). */
+    private fun longitudinalAccelTrust(): Double {
+        if (!hasAccelSample) return 0.0
+        // A non-rigid mount (phone on the chest of a rider) can never be fully trusted, so the
+        // profile caps how much weight the inertial prediction may carry.
+        return forwardAxisConfidence.coerceIn(0.0, vehicleProfile.maxInertialTrust)
+    }
+
+    /**
+     * Zero-velocity detection. Requires the camera to see no translation, a low yaw rate, a small
+     * horizontal acceleration, and an already-low speed estimate — i.e. strong agreement that the
+     * vehicle has actually stopped (red light / traffic) rather than a momentary flow dropout.
+     */
+    private fun detectStationary(
+        visualOdometry: VisualOdometry,
+        yawRateDegPerSec: Double,
+        nowMs: Long
+    ): Boolean {
+        if (visualOdometry.usable) return false
+        val slowEnough = vehicleDeadReckoningSpeedMps < vehicleProfile.zuptEnterSpeedMps &&
+            decayedLastGnssSpeed(nowMs) < vehicleProfile.zuptEnterSpeedMps
+        if (!slowEnough) return false
+        if (abs(yawRateDegPerSec) > ZUPT_YAW_RATE_DEG_SEC) return false
+        if (hasAccelSample) {
+            val accelMag = sqrt(
+                emaAccelDevice[0] * emaAccelDevice[0] +
+                    emaAccelDevice[1] * emaAccelDevice[1] +
+                    emaAccelDevice[2] * emaAccelDevice[2]
+            )
+            // A motorbike idles with noticeable engine vibration, so its profile tolerates a larger
+            // residual acceleration before refusing the zero-velocity update.
+            if (accelMag > vehicleProfile.zuptAccelMps2) return false
+        }
+        return true
+    }
+
     private fun bearingBetween(from: GeoPoint, to: GeoPoint): Double {
         val results = FloatArray(2)
         Location.distanceBetween(
@@ -1203,6 +1523,7 @@ class LiveRoutingViewModel : ViewModel() {
         private const val FLOW_PX_PER_SEC_TO_MPS = 0.075
         private const val FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC = 0.11
         private const val FLOW_TURN_MIN_LATERAL_RATIO = 0.12
+        private const val MIN_LATERAL_FLOW_FOR_TURN_PX_PER_SEC = 6.0
         private const val MAX_OPTICAL_YAW_RATE_DEG_SEC = 16.0
         private const val ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC = 12.0
         private const val ROTATION_LATERAL_FLOW_DISCOUNT = 0.12
@@ -1220,8 +1541,6 @@ class LiveRoutingViewModel : ViewModel() {
         private const val VEHICLE_MIN_FLOW_WEIGHT_WHEN_UNCALIBRATED = 0.28
         private const val VEHICLE_UNCALIBRATED_PRIOR_SPEED_FLOOR = 0.88
         private const val VEHICLE_UNCALIBRATED_PRIOR_SPEED_FLOOR_RELIEF = 0.55
-        private const val VEHICLE_ACCEL_LIMIT_MPS2 = 3.5
-        private const val VEHICLE_BRAKE_LIMIT_MPS2 = 6.0
         private const val VEHICLE_COAST_DECAY_MPS2 = 0.9
         private const val VEHICLE_STOP_SPEED_FLOOR_MPS = 0.20
         private const val LAST_GNSS_SPEED_DECAY_SEC = 14.0
@@ -1255,8 +1574,55 @@ class LiveRoutingViewModel : ViewModel() {
         private const val ROUTE_HEADING_FULL_LATERAL_RATIO = 0.45
         private const val ROUTE_HEADING_BASE_ASSIST_STRENGTH = 0.22
         private const val ROUTE_HEADING_VISUAL_ASSIST_STRENGTH = 0.46
+        private const val ROUTE_HEADING_ASSIST_MIN_SPEED_MPS = 0.6
+        private const val ROUTE_HEADING_NO_CAMERA_QUALITY = 0.45
         private const val DEAD_RECKONING_APPEND_DISTANCE_M = 0.35
         private const val GNSS_PATH_APPEND_DISTANCE_M = 0.75
         private const val EARTH_RADIUS_M = 6_378_137.0
+
+        // --- Inertial (IMU longitudinal) dead-reckoning (mount-independent constants) ---
+        private const val ACCEL_EMA_ALPHA = 0.18
+        private const val MAX_ACCEL_BIAS_MPS2 = 2.5
+        private const val MIN_FORWARD_AXIS_SPEED_MPS = 3.0
+        private const val MIN_FORWARD_AXIS_ACCEL_MPS2 = 0.45
+        private const val MAX_FORWARD_AXIS_HEADING_CHANGE_DEG = 6.0
+        private const val FORWARD_AXIS_BIAS_MIN_CONFIDENCE = 0.5
+        private const val FORWARD_AXIS_BIAS_ALPHA = 0.05
+        private const val MIN_ALIGN_DT_SEC = 0.2
+        private const val MAX_ALIGN_DT_SEC = 3.0
+        private const val INERTIAL_PRIOR_GUARD_DISABLE_TRUST = 0.5
+        private const val INERTIAL_TRUST_FOR_BRAKE = 0.5
+        private const val INERTIAL_BRAKE_EVIDENCE_MPS2 = 0.6
+        private const val ZUPT_YAW_RATE_DEG_SEC = 4.0
+
+        private val NO_ACCEL_SAMPLE = FloatArray(3)
+
+        // Phone held loosely (e.g. on the chest of a motorbike rider): non-rigid, vibrating mount
+        // but harder acceleration/braking — learn the forward axis cautiously and trust accel less.
+        private val MOTORBIKE_PROFILE = VehicleProfile(
+            maxDriveAccelMps2 = 6.0,
+            maxBrakeAccelMps2 = 9.0,
+            speedRiseLimitMps2 = 6.0,
+            speedDropLimitMps2 = 8.0,
+            forwardAxisAlpha = 0.10,
+            forwardAxisConfidenceStep = 0.03,
+            maxInertialTrust = 0.70,
+            zuptEnterSpeedMps = 1.8,
+            zuptAccelMps2 = 1.2
+        )
+
+        // Phone in a rigid windshield mount in a car: smoother and consistent — the inertial signal
+        // can be learned faster and trusted fully.
+        private val CAR_PROFILE = VehicleProfile(
+            maxDriveAccelMps2 = 4.0,
+            maxBrakeAccelMps2 = 8.0,
+            speedRiseLimitMps2 = 3.5,
+            speedDropLimitMps2 = 6.0,
+            forwardAxisAlpha = 0.20,
+            forwardAxisConfidenceStep = 0.06,
+            maxInertialTrust = 1.0,
+            zuptEnterSpeedMps = 1.5,
+            zuptAccelMps2 = 0.6
+        )
     }
 }

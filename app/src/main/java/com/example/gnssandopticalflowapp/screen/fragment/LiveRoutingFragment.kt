@@ -21,6 +21,9 @@ import android.view.View
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.content.res.AppCompatResources.getDrawable
+import android.hardware.camera2.CaptureRequest
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -604,13 +607,15 @@ class LiveRoutingFragment :
                 val result = liveRoutingViewModel.onTick(
                     nowMs = nowMs,
                     dtSec = dtSec,
-                    yawRateDegPerSec = imuEstimator.getYawRate().toDouble()
+                    yawRateDegPerSec = imuEstimator.getYawRate().toDouble(),
+                    horizontalAccelDevice = imuEstimator.getHorizontalLinearAcceleration()
                 )
                 applyAssistDecision(result.assistDecision)
                 result.navigation?.let { navigation ->
                     applyNavigationSnapshot(navigation)
                     refreshRouteAfterLocationChange()
                 } ?: updateSpeedText(result.speedMps)
+                updateDebugHud()
                 delay(LiveRoutingViewModel.TICK_MS)
             }
         }
@@ -819,10 +824,14 @@ class LiveRoutingFragment :
                 .build()
                 .also { it.surfaceProvider = binding.cameraView.surfaceProvider }
 
-            val analysis = ImageAnalysis.Builder()
+            val analysisBuilder = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .setTargetRotation(rotation)
+            // Configure stabilization for optical-flow odometry (see applyStabilization() for the
+            // OIS-vs-EIS trade-off, which differs between the motorbike and car mounts).
+            applyStabilization(analysisBuilder)
+            val analysis = analysisBuilder
                 .build()
                 .also { it.setAnalyzer(cameraExecutor, ::analyzeFlowFrame) }
 
@@ -838,6 +847,29 @@ class LiveRoutingFragment :
                 Log.e(TAG, "Bind camera failed: ${e.message}", e)
             }
         }, ContextCompat.getMainExecutor(context))
+    }
+
+    @androidx.annotation.OptIn(markerClass = [ExperimentalCamera2Interop::class])
+    private fun applyStabilization(builder: ImageAnalysis.Builder) {
+        runCatching {
+            val extender = Camera2Interop.Extender(builder)
+            // EIS (digital/video) crops and warps the frame geometry every frame to make the video
+            // look smooth. That distortion corrupts optical-flow magnitude/direction AND the learned
+            // px->m/s scale, so it is always disabled for odometry.
+            extender.setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+            )
+            // OIS (optical) shifts the lens, which subtly wobbles the px->m/s scale and adds
+            // correction artifacts to the flow. We keep the raw, scale-stable signal and rely on the
+            // gyro-based rotation suppression in the estimator to clean up rotational shake instead.
+            extender.setCaptureRequestOption(
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+            )
+        }.onFailure {
+            Log.e(TAG, "Configure camera stabilization failed: ${it.message}", it)
+        }
     }
 
     private fun stopCamera() {
@@ -952,6 +984,40 @@ class LiveRoutingFragment :
         binding.tvSpeed.text = String.format(Locale.US, "%.1fkm/h", speedMps.coerceAtLeast(0.0) * 3.6)
     }
 
+    private fun updateDebugHud() {
+        if (!SHOW_DEBUG_HUD || !isAdded || view == null) return
+
+        val s = liveRoutingViewModel.debugSnapshot()
+        binding.tvDebugHud?.text = buildString {
+            append(if (s.assistActive) "DR · no GPS" else "GPS OK")
+            append("  [").append(s.vehicleKind).append("]\n")
+            append(String.format(Locale.US, "GPS %.0f   Est %.0f km/h\n", s.gpsSpeedMps * 3.6, s.estSpeedMps * 3.6))
+            append(
+                String.format(
+                    Locale.US,
+                    "flow %.0f%s  scale %.3f c%.2f\n",
+                    s.flowSpeedMps * 3.6,
+                    if (s.flowUsable) "" else "·off",
+                    s.scaleRatio,
+                    s.scaleConfidence
+                )
+            )
+            append(
+                String.format(
+                    Locale.US,
+                    "axis %.2f  aTrust %.2f  aLong %+.1f  ±%.0fm",
+                    s.axisConfidence,
+                    s.accelTrust,
+                    s.longitudinalAccelMps2,
+                    s.uncertaintyM
+                )
+            )
+        }
+        if (binding.tvDebugHud?.visibility != View.VISIBLE) {
+            binding.tvDebugHud?.visibility = View.VISIBLE
+        }
+    }
+
     private fun shortPlaceName(name: String): String {
         return name.substringBefore(",").trim().ifBlank { name }
     }
@@ -966,6 +1032,7 @@ class LiveRoutingFragment :
     }
 
     private companion object {
+        const val SHOW_DEBUG_HUD = true
         const val CAMERA_PANEL_ANIM_MS = 260L
         const val OFFLINE_ROUTE_TOAST_COOLDOWN_MS = 15_000L
         const val MESSAGE_NO_ACTIVE_ROUTE = "No active route"

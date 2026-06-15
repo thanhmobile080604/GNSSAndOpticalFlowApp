@@ -167,6 +167,23 @@
         app:layout_constraintStart_toStartOf="@id/ivBack"
         app:layout_constraintBottom_toBottomOf="parent"/>
 
+    <TextView
+        android:id="@+id/tvDebugHud"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="#AA000000"
+        android:fontFamily="monospace"
+        android:lineSpacingExtra="1dp"
+        android:padding="8dp"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp"
+        android:translationZ="120dp"
+        android:visibility="gone"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="12dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
     <ImageView
         android:id="@+id/ivShowCameraView"
         android:layout_width="42dp"

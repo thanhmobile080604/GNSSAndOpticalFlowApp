@@ -141,6 +141,28 @@ class IMUEstimator(context: Context) : SensorEventListener {
         return output
     }
 
+    /**
+     * Gravity-removed linear acceleration projected onto the horizontal (ground) plane,
+     * expressed in the device coordinate frame (m/s^2).
+     *
+     * Only gravity (which is estimated reliably from the accelerometer low-pass) is used,
+     * so this is robust even when the magnetometer is disturbed inside a vehicle. The result
+     * still lives in the device frame: the caller is responsible for resolving which horizontal
+     * direction is "vehicle forward" (e.g. by learning it online against GNSS).
+     */
+    fun getHorizontalLinearAcceleration(): FloatArray {
+        val a = getLinearAcceleration()
+        val g = gravity
+        val gMagSq = g[0] * g[0] + g[1] * g[1] + g[2] * g[2]
+        if (gMagSq < 0.1f) return a
+        val projection = (a[0] * g[0] + a[1] * g[1] + a[2] * g[2]) / gMagSq
+        return floatArrayOf(
+            a[0] - projection * g[0],
+            a[1] - projection * g[1],
+            a[2] - projection * g[2]
+        )
+    }
+
     fun getYawRate(): Float {
         // Project angular velocity onto gravity vector to get yaw rate around Earth's Z axis (UP/DOWN)
         val gMag = sqrt((gravity[0] * gravity[0] + gravity[1] * gravity[1] + gravity[2] * gravity[2]).toDouble()).toFloat()
