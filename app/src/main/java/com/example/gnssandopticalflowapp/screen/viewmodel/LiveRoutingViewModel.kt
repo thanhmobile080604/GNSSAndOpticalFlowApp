@@ -126,7 +126,8 @@ class LiveRoutingViewModel : ViewModel() {
         val forwardAxisConfidenceStep: Double,
         val maxInertialTrust: Double,
         val zuptEnterSpeedMps: Double,
-        val zuptAccelMps2: Double
+        val zuptAccelMps2: Double,
+        val lowSpeedYawGainMax: Double
     )
 
     var routeState: LiveRouteState? = null
@@ -698,10 +699,19 @@ class LiveRoutingViewModel : ViewModel() {
             0.0
         }
 
+        // Amplify the gyro yaw at low speed so a gently-steered tight corner still registers the full
+        // heading change (the gravity-projected yaw under-reads on a leaning bike, and slow corners
+        // are taken in soft multi-input steers). Optical yaw is already scaled, so it is not boosted.
+        val amplifiedGyroYaw = if (abs(yawRateDegPerSec) > GYRO_YAW_NOISE_FLOOR_DEG_SEC) {
+            yawRateDegPerSec * lowSpeedYawGain(deadReckoningSpeedMps)
+        } else {
+            yawRateDegPerSec
+        }
+
         return VisualOdometry(
             usable = usable,
             speedMps = speedMps,
-            deltaHeadingDeg = (yawRateDegPerSec + opticalYawRateDegPerSec) * dtSec,
+            deltaHeadingDeg = (amplifiedGyroYaw + opticalYawRateDegPerSec) * dtSec,
             opticalYawRateDegPerSec = opticalYawRateDegPerSec,
             translationPxPerSec = translationFlowPxPerSec,
             lateralPxPerSec = signedLateralFlowPxPerSec,
@@ -1001,6 +1011,20 @@ class LiveRoutingViewModel : ViewModel() {
         if (speedMps < VEHICLE_SNAP_SPEED_MPS) return 0.0
         val range = (VEHICLE_SNAP_FULL_SPEED_MPS - VEHICLE_SNAP_SPEED_MPS).coerceAtLeast(0.01)
         return ((speedMps - VEHICLE_SNAP_SPEED_MPS) / range).coerceIn(0.0, 1.0)
+    }
+
+    /**
+     * Gain (>= 1) applied to the gyro yaw rate, largest when nearly stopped and fading to 1.0 at the
+     * fade speed. A slow, tight corner is steered gently and (on a leaning bike) the gravity-projected
+     * gyro under-reads the turn, so amplifying the yaw the slower we go lets a gentle rotation still
+     * accumulate the real heading change instead of the map drawing a straight line through the corner.
+     */
+    private fun lowSpeedYawGain(speedMps: Double): Double {
+        val maxGain = vehicleProfile.lowSpeedYawGainMax
+        if (maxGain <= 1.0 || speedMps >= LOW_SPEED_YAW_GAIN_FADE_MPS) return 1.0
+        val slowness = ((LOW_SPEED_YAW_GAIN_FADE_MPS - speedMps) / LOW_SPEED_YAW_GAIN_FADE_MPS)
+            .coerceIn(0.0, 1.0)
+        return 1.0 + (maxGain - 1.0) * slowness
     }
 
     private fun mapMatchPredictedPose(
@@ -1603,6 +1627,11 @@ class LiveRoutingViewModel : ViewModel() {
         private const val ROUTE_REMAINING_PROJECTION_DISTANCE_M = 60.0
         private const val MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC = 0.5
         private const val MIN_HEADING_DELTA_TO_APPLY_DEG = 0.02
+        // Low-speed gyro yaw amplification (tight slow corners). Fades to unity gain at/above the
+        // fade speed; only yaw above the noise floor is amplified so straight-line gyro bias/jitter
+        // is not inflated into a phantom turn.
+        private const val LOW_SPEED_YAW_GAIN_FADE_MPS = 4.0 // ~14 km/h
+        private const val GYRO_YAW_NOISE_FLOOR_DEG_SEC = 1.2
         private const val ROUTE_HEADING_LOOKAHEAD_SEC = 1.45
         private const val ROUTE_HEADING_MIN_LOOKAHEAD_M = 6.0
         private const val ROUTE_HEADING_MAX_LOOKAHEAD_M = 28.0
@@ -1646,7 +1675,10 @@ class LiveRoutingViewModel : ViewModel() {
             forwardAxisConfidenceStep = 0.03,
             maxInertialTrust = 0.70,
             zuptEnterSpeedMps = 1.8,
-            zuptAccelMps2 = 1.2
+            zuptAccelMps2 = 1.2,
+            // A leaning two-wheeler taking a slow, tight corner: the gravity-projected gyro yaw
+            // under-reads the real heading change, so amplify it strongly the slower we go.
+            lowSpeedYawGainMax = 10.0
         )
 
         // Phone in a rigid windshield mount in a car: smoother and consistent — the inertial signal
@@ -1660,7 +1692,10 @@ class LiveRoutingViewModel : ViewModel() {
             forwardAxisConfidenceStep = 0.06,
             maxInertialTrust = 1.0,
             zuptEnterSpeedMps = 1.5,
-            zuptAccelMps2 = 0.6
+            zuptAccelMps2 = 0.6,
+            // A car does not lean, so its gyro reads the heading change faithfully — only a slight
+            // low-speed gain to offset gentle multi-input corners.
+            lowSpeedYawGainMax = 12.0
         )
     }
 }
