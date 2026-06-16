@@ -133,15 +133,10 @@ class CameraOpticalFlowFragment :
         }
     private val isAnalysisActive: Boolean
         get() = cameraViewModel.isAnalysisActive
-    private var restoreKltSensitivity: Int
-        get() = cameraViewModel.restoreKltSensitivity
+    private var restoreSensitivity: Int
+        get() = cameraViewModel.restoreSensitivity
         set(value) {
-            cameraViewModel.restoreKltSensitivity = value
-        }
-    private var restoreFarnebackSensitivity: Int
-        get() = cameraViewModel.restoreFarnebackSensitivity
-        set(value) {
-            cameraViewModel.restoreFarnebackSensitivity = value
+            cameraViewModel.restoreSensitivity = value
         }
     // Auto detection source only. Motion buttons control manual/auto at runtime.
     // true: phone IMU motion, false: GNSS location speed.
@@ -149,8 +144,7 @@ class CameraOpticalFlowFragment :
 
     override fun FragmentCameraOpticalFlowBinding.initView() {
         initVars()
-        kltSensitivityBar.progress = 50
-        farnebackSensitivityBar.progress = 50
+        sensitivityBar.progress = 50
         cameraViewModel.useFarneback = false
         cameraViewModel.useFarnebackHeatmap = false
         cameraViewModel.motionControlMode = MotionControlMode.AUTO
@@ -338,26 +332,14 @@ class CameraOpticalFlowFragment :
             updateRoiUi()
         }
 
-        kltSensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        sensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 Log.d("SEEK", progress.toString())
-                if (::opticalFlow.isInitialized && !cameraViewModel.useFarneback) {
+                if (::opticalFlow.isInitialized) {
                     opticalFlow.setSensitivity(progress)
                 }
                 if (::kltLabFlow.isInitialized) {
                     kltLabFlow.setSensitivity(progress)
-                }
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        farnebackSensitivityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                Log.d("SEEK", progress.toString())
-                if (::opticalFlow.isInitialized && cameraViewModel.useFarneback) {
-                    opticalFlow.setSensitivity(progress)
                 }
                 if (::farnebackLabFlow.isInitialized) {
                     farnebackLabFlow.setSensitivity(progress)
@@ -440,13 +422,7 @@ class CameraOpticalFlowFragment :
     private fun createSelectedOpticalFlow(): OpticalFlow {
         val flow: OpticalFlow = if (cameraViewModel.useFarneback) Farneback() else KLT()
         flow.setMovingMode(isMovingMode)
-        flow.setSensitivity(
-            if (cameraViewModel.useFarneback) {
-                binding.farnebackSensitivityBar.progress
-            } else {
-                binding.kltSensitivityBar.progress
-            }
-        )
+        flow.setSensitivity(binding.sensitivityBar.progress)
         (flow as? Farneback)?.setVisualizationMode(currentFarnebackVisualizationMode())
         return flow
     }
@@ -510,22 +486,18 @@ class CameraOpticalFlowFragment :
     }
 
     private fun applyOpticalFlowModeUi(useFarneback: Boolean) {
-        binding.kltSensitivityBar.isEnabled = !useFarneback
-        binding.kltSensitivityBar.alpha = if (useFarneback) 0.5f else 1.0f
-        binding.farnebackSensitivityBar.isEnabled = useFarneback
-        binding.farnebackSensitivityBar.alpha = if (useFarneback) 1.0f else 0.5f
-        binding.farnebackViewCard.alpha = if (useFarneback) 1.0f else 0.45f
+        // The "Display" (Vector/Heatmap) card only applies to Farneback; hide it for KLT.
+        binding.farnebackViewCard.visibility = if (useFarneback) View.VISIBLE else View.GONE
         binding.ofAlgorithm.text = if (useFarneback) "Farneback" else "KLT"
         updateAlgorithmModeUi()
         updateFarnebackDisplayUi()
     }
 
     private fun applyCurrentSensitivity() {
-        val kltSensitivity = binding.kltSensitivityBar.progress
-        val farnebackSensitivity = binding.farnebackSensitivityBar.progress
-        if (::kltLabFlow.isInitialized) kltLabFlow.setSensitivity(kltSensitivity)
-        if (::farnebackLabFlow.isInitialized) farnebackLabFlow.setSensitivity(farnebackSensitivity)
-        opticalFlow.setSensitivity(if (cameraViewModel.useFarneback) farnebackSensitivity else kltSensitivity)
+        val sensitivity = binding.sensitivityBar.progress
+        if (::kltLabFlow.isInitialized) kltLabFlow.setSensitivity(sensitivity)
+        if (::farnebackLabFlow.isInitialized) farnebackLabFlow.setSensitivity(sensitivity)
+        opticalFlow.setSensitivity(sensitivity)
         (opticalFlow as? Farneback)?.setVisualizationMode(currentFarnebackVisualizationMode())
     }
 
@@ -693,18 +665,15 @@ class CameraOpticalFlowFragment :
 
     private fun startAnalysis() {
         resetObjectTracker()
-        cameraViewModel.startAnalysis(
-            kltSensitivity = binding.kltSensitivityBar.progress,
-            farnebackSensitivity = binding.farnebackSensitivityBar.progress
-        )
+        cameraViewModel.startAnalysis(sensitivity = binding.sensitivityBar.progress)
         applyAnalysisSensitivityLock(locked = true)
 
         kltLabFlow = KLT().apply {
-            setSensitivity(binding.kltSensitivityBar.progress)
+            setSensitivity(binding.sensitivityBar.progress)
             setMovingMode(isMovingMode)
         }
         farnebackLabFlow = Farneback().apply {
-            setSensitivity(binding.farnebackSensitivityBar.progress)
+            setSensitivity(binding.sensitivityBar.progress)
             setMovingMode(isMovingMode)
         }
 
@@ -1367,18 +1336,16 @@ class CameraOpticalFlowFragment :
 
     private fun applyAnalysisSensitivityLock(locked: Boolean) {
         if (locked) {
-            binding.kltSensitivityBar.progress = ANALYSIS_SENSITIVITY
-            binding.farnebackSensitivityBar.progress = ANALYSIS_SENSITIVITY
-            binding.kltSensitivityBar.isEnabled = false
-            binding.farnebackSensitivityBar.isEnabled = false
-            binding.kltSensitivityBar.alpha = 0.45f
-            binding.farnebackSensitivityBar.alpha = 0.45f
+            binding.sensitivityBar.progress = ANALYSIS_SENSITIVITY
+            binding.sensitivityBar.isEnabled = false
+            binding.sensitivityBar.alpha = 0.45f
             kltLabFlow.setSensitivity(ANALYSIS_SENSITIVITY)
             farnebackLabFlow.setSensitivity(ANALYSIS_SENSITIVITY)
             opticalFlow.setSensitivity(ANALYSIS_SENSITIVITY)
         } else {
-            binding.kltSensitivityBar.progress = restoreKltSensitivity
-            binding.farnebackSensitivityBar.progress = restoreFarnebackSensitivity
+            binding.sensitivityBar.isEnabled = true
+            binding.sensitivityBar.alpha = 1.0f
+            binding.sensitivityBar.progress = restoreSensitivity
             applyOpticalFlowModeUi(useFarneback = cameraViewModel.useFarneback)
             applyCurrentSensitivity()
         }

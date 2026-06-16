@@ -56,8 +56,7 @@ class CameraOpticalFlowViewModel : ViewModel() {
     @Volatile
     var isAnalysisActive = false
         private set
-    var restoreKltSensitivity = 50
-    var restoreFarnebackSensitivity = 50
+    var restoreSensitivity = 50
 
     private var analysisStartedAtWallMs = 0L
     private var analysisStartedAtElapsedMs = 0L
@@ -109,7 +108,7 @@ class CameraOpticalFlowViewModel : ViewModel() {
         return detectedMoving.takeIf { it != isMovingMode }
     }
 
-    fun startAnalysis(kltSensitivity: Int, farnebackSensitivity: Int) {
+    fun startAnalysis(sensitivity: Int) {
         synchronized(analysisLock) {
             analysisSamples.clear()
             analysisFrameIndex = 0L
@@ -117,8 +116,7 @@ class CameraOpticalFlowViewModel : ViewModel() {
         }
         analysisStartedAtWallMs = System.currentTimeMillis()
         analysisStartedAtElapsedMs = SystemClock.elapsedRealtime()
-        restoreKltSensitivity = kltSensitivity
-        restoreFarnebackSensitivity = farnebackSensitivity
+        restoreSensitivity = sensitivity
         isAnalysisActive = true
     }
 

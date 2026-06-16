@@ -459,38 +459,16 @@
                 android:paddingVertical="12dp">
 
                 <TextView
-                    android:id="@+id/tvKltSensitivity"
+                    android:id="@+id/tvSensitivity"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="@font/inter_extra_bold"
-                    android:text="KLT Sensitivity"
+                    android:text="Sensitivity"
                     android:textColor="@color/white"
                     android:textSize="13sp" />
 
                 <SeekBar
-                    android:id="@+id/klt_sensitivity_bar"
-                    android:layout_width="match_parent"
-                    android:layout_height="34dp"
-                    android:layout_marginTop="4dp"
-                    android:max="100"
-                    android:maxHeight="7dp"
-                    android:minHeight="7dp"
-                    android:progress="50"
-                    android:progressDrawable="@drawable/seekbar_glass_purple"
-                    android:thumb="@drawable/ripple_glow_purple_thumb" />
-
-                <TextView
-                    android:id="@+id/tvFarnebackSensitivity"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:fontFamily="@font/inter_extra_bold"
-                    android:text="Farneback Sensitivity"
-                    android:textColor="@color/white"
-                    android:textSize="13sp" />
-
-                <SeekBar
-                    android:id="@+id/farneback_sensitivity_bar"
+                    android:id="@+id/sensitivity_bar"
                     android:layout_width="match_parent"
                     android:layout_height="34dp"
                     android:layout_marginTop="4dp"
