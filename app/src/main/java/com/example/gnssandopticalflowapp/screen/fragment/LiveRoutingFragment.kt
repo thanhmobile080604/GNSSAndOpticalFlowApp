@@ -44,7 +44,7 @@ import com.example.gnssandopticalflowapp.common.dp
 import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.databinding.FragmentLiveRoutingBinding
-import com.example.gnssandopticalflowapp.function.gnss.MapRouteRepository
+import com.example.gnssandopticalflowapp.function.gnss.MapRepository
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.Farneback
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.IMUEstimator
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.KLT
@@ -76,7 +76,9 @@ class LiveRoutingFragment :
     BaseFragment<FragmentLiveRoutingBinding>(FragmentLiveRoutingBinding::inflate) {
 
     private val liveRoutingViewModel: LiveRoutingViewModel by activityViewModels()
-    private val routeRepository = MapRouteRepository()
+    private val mapRepository by lazy {
+        MapRepository(requireContext().applicationContext)
+    }
     private val connectivityObserver by lazy {
         AndroidConnectivityObserver(requireContext().applicationContext)
     }
@@ -554,7 +556,7 @@ class LiveRoutingFragment :
     private suspend fun fetchRoute(origin: GeoPoint, destination: GeoPoint): RouteInfo? {
         return withContext(Dispatchers.IO) {
             runCatching {
-                routeRepository.fetchRoute(origin, destination)
+                mapRepository.fetchRoute(origin, destination)
             }.getOrNull()
         }
     }

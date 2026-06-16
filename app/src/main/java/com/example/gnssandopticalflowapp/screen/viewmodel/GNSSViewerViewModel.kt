@@ -4,8 +4,7 @@ import android.app.Application
 import android.location.GnssStatus
 import android.location.Location
 import androidx.lifecycle.AndroidViewModel
-import com.example.gnssandopticalflowapp.function.gnss.MapPlaceRepository
-import com.example.gnssandopticalflowapp.function.gnss.MapRouteRepository
+import com.example.gnssandopticalflowapp.function.gnss.MapRepository
 import com.example.gnssandopticalflowapp.function.gnss.GnssSatelliteTracker
 import com.example.gnssandopticalflowapp.model.RouteInfo
 import com.example.gnssandopticalflowapp.model.SatelliteInfo
@@ -15,8 +14,7 @@ import kotlinx.coroutines.withContext
 import org.osmdroid.util.GeoPoint
 
 class GNSSViewerViewModel(application: Application) : AndroidViewModel(application) {
-    private val placeRepository = MapPlaceRepository(application)
-    private val routeRepository = MapRouteRepository()
+    private val mapRepository = MapRepository(application)
 
     val satelliteTracker = GnssSatelliteTracker()
 
@@ -36,20 +34,20 @@ class GNSSViewerViewModel(application: Application) : AndroidViewModel(applicati
 
     suspend fun searchPlaces(query: String): List<SearchPlace> {
         return withContext(Dispatchers.IO) {
-            placeRepository.searchPlaces(query)
+            mapRepository.searchPlaces(query)
         }
     }
 
     suspend fun reverseGeocode(latitude: Double, longitude: Double): String? {
         return withContext(Dispatchers.IO) {
-            placeRepository.reverseGeocode(latitude, longitude)
+            mapRepository.reverseGeocode(latitude, longitude)
         }
     }
 
-    fun getRecentSearches(): List<SearchPlace> = placeRepository.getRecentSearches()
+    fun getRecentSearches(): List<SearchPlace> = mapRepository.getRecentSearches()
 
     fun saveRecentSearch(place: SearchPlace) {
-        placeRepository.saveRecentSearch(place)
+        mapRepository.saveRecentSearch(place)
     }
 
     fun selectPlace(place: SearchPlace) {
@@ -66,7 +64,7 @@ class GNSSViewerViewModel(application: Application) : AndroidViewModel(applicati
 
     suspend fun fetchRoute(origin: GeoPoint, destination: GeoPoint): RouteInfo? {
         return withContext(Dispatchers.IO) {
-            routeRepository.fetchRoute(origin, destination)
+            mapRepository.fetchRoute(origin, destination)
         }
     }
 

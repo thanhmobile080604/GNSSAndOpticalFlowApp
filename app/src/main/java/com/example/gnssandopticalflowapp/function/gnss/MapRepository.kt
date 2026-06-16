@@ -2,14 +2,16 @@ package com.example.gnssandopticalflowapp.function.gnss
 
 import android.content.Context
 import androidx.core.content.edit
+import com.example.gnssandopticalflowapp.model.RouteInfo
 import com.example.gnssandopticalflowapp.model.SearchPlace
 import org.json.JSONArray
 import org.json.JSONObject
+import org.osmdroid.util.GeoPoint
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-class MapPlaceRepository(context: Context) {
+class MapRepository(context: Context) {
     private val appContext = context.applicationContext
 
     fun searchPlaces(query: String): List<SearchPlace> {
@@ -58,6 +60,42 @@ class MapPlaceRepository(context: Context) {
             }
         } catch (e: Exception) {
             null
+        }
+    }
+
+    fun fetchRoute(origin: GeoPoint, destination: GeoPoint): RouteInfo? {
+        val url = URL(
+            "https://router.project-osrm.org/route/v1/driving/" +
+                "${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}" +
+                "?overview=full&geometries=geojson"
+        )
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10000
+            readTimeout = 10000
+            requestMethod = "GET"
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "GNSSAndOpticalFlowApp/1.0")
+        }
+
+        return connection.useTextResponse { body ->
+            val root = JSONObject(body)
+            val routes = root.optJSONArray("routes") ?: return@useTextResponse null
+            if (routes.length() == 0) return@useTextResponse null
+
+            val firstRoute = routes.getJSONObject(0)
+            val geometry = firstRoute.getJSONObject("geometry")
+            val coordinates = geometry.getJSONArray("coordinates")
+            val points = buildList {
+                for (index in 0 until coordinates.length()) {
+                    val coordinate = coordinates.getJSONArray(index)
+                    add(GeoPoint(coordinate.getDouble(1), coordinate.getDouble(0)))
+                }
+            }
+            RouteInfo(
+                points = points,
+                distanceMeters = firstRoute.optDouble("distance", 0.0),
+                durationSeconds = firstRoute.optDouble("duration", 0.0)
+            )
         }
     }
 
