@@ -142,6 +142,19 @@ class LiveRoutingViewModel : ViewModel() {
         private set
     var cameraPanelVisible = false
         private set
+
+    /**
+     * Top boundary of the optical-flow metrics band, as a fraction of the frame height, driven by
+     * the draggable red horizon guide. The user drags it onto the real horizon so everything above
+     * it (sky / far vanishing point, near-zero or misleading flow) is excluded from the speed
+     * estimate. Clamped to [FLOW_METRICS_TOP_FRACTION_MIN, FLOW_METRICS_TOP_FRACTION_MAX] so the
+     * band can never collapse or swallow the whole frame.
+     */
+    var flowMetricsTopFraction: Double = FLOW_METRICS_TOP_FRACTION
+        set(value) {
+            field = value.coerceIn(FLOW_METRICS_TOP_FRACTION_MIN, FLOW_METRICS_TOP_FRACTION_MAX)
+        }
+
     val currentRouteOrigin: GeoPoint?
         get() = currentPoint
     val destinationPoint: GeoPoint?
@@ -702,8 +715,18 @@ class LiveRoutingViewModel : ViewModel() {
         // Amplify the gyro yaw at low speed so a gently-steered tight corner still registers the full
         // heading change (the gravity-projected yaw under-reads on a leaning bike, and slow corners
         // are taken in soft multi-input steers). Optical yaw is already scaled, so it is not boosted.
-        val amplifiedGyroYaw = if (abs(yawRateDegPerSec) > GYRO_YAW_NOISE_FLOOR_DEG_SEC) {
-            yawRateDegPerSec * lowSpeedYawGain(deadReckoningSpeedMps)
+        //
+        // Only the magnitude ABOVE the noise floor is amplified — the floor itself passes through at
+        // unity gain. This lets the gain be set very high for sensitivity (a real steer is well above
+        // the floor and gets blown up into a clear turn) while a straight-line gyro bias sitting just
+        // above the floor is NOT inflated into a phantom curve. So the noise floor, not the gain, is
+        // the knob that decides "is this a turn or just drift".
+        val yawMag = abs(yawRateDegPerSec)
+        val amplifiedGyroYaw = if (yawMag > GYRO_YAW_NOISE_FLOOR_DEG_SEC) {
+            val gain = lowSpeedYawGain(deadReckoningSpeedMps)
+            val excess = yawMag - GYRO_YAW_NOISE_FLOOR_DEG_SEC
+            val boostedMag = GYRO_YAW_NOISE_FLOOR_DEG_SEC + excess * gain
+            if (yawRateDegPerSec >= 0.0) boostedMag else -boostedMag
         } else {
             yawRateDegPerSec
         }
@@ -1543,10 +1566,13 @@ class LiveRoutingViewModel : ViewModel() {
         const val TEST_GNSS_DROPOUT = true
         const val TEST_GNSS_DROPOUT_INTERVAL_MS = 10_000L
         const val FLOW_SENSITIVITY = 85
-        // Optical-flow speed is read only from BELOW the centre horizon guide line: the user levels
-        // the mount so the real horizon sits on that line, so everything above it (sky / far
-        // vanishing point, near-zero or misleading flow) is excluded. 0.5 == the centre guide line.
+        // Optical-flow speed is read only from BELOW the red horizon guide line: the user drags it
+        // onto the real horizon, so everything above it (sky / far vanishing point, near-zero or
+        // misleading flow) is excluded. 0.5 == the centre line (the guide's default position); the
+        // live, user-adjusted value lives in [flowMetricsTopFraction], clamped to [MIN, MAX].
         const val FLOW_METRICS_TOP_FRACTION = 0.5
+        const val FLOW_METRICS_TOP_FRACTION_MIN = 0.15
+        const val FLOW_METRICS_TOP_FRACTION_MAX = 0.85
         const val FLOW_METRICS_BOTTOM_FRACTION = 1.0
 
         private const val GNSS_LOCATION_STALE_MS = 5_000L
@@ -1631,7 +1657,7 @@ class LiveRoutingViewModel : ViewModel() {
         // fade speed; only yaw above the noise floor is amplified so straight-line gyro bias/jitter
         // is not inflated into a phantom turn.
         private const val LOW_SPEED_YAW_GAIN_FADE_MPS = 4.0 // ~14 km/h
-        private const val GYRO_YAW_NOISE_FLOOR_DEG_SEC = 1.2
+        private const val GYRO_YAW_NOISE_FLOOR_DEG_SEC = 1.5
         private const val ROUTE_HEADING_LOOKAHEAD_SEC = 1.45
         private const val ROUTE_HEADING_MIN_LOOKAHEAD_M = 6.0
         private const val ROUTE_HEADING_MAX_LOOKAHEAD_M = 28.0
@@ -1677,8 +1703,10 @@ class LiveRoutingViewModel : ViewModel() {
             zuptEnterSpeedMps = 1.8,
             zuptAccelMps2 = 1.2,
             // A leaning two-wheeler taking a slow, tight corner: the gravity-projected gyro yaw
-            // under-reads the real heading change, so amplify it strongly the slower we go.
-            lowSpeedYawGainMax = 10.0
+            // under-reads the real heading change, so amplify it strongly the slower we go. Set high
+            // for "treat any gentle steer as a real turn"; safe to push higher because only the yaw
+            // above GYRO_YAW_NOISE_FLOOR_DEG_SEC is amplified (straight-line drift stays at the floor).
+            lowSpeedYawGainMax = 6.0
         )
 
         // Phone in a rigid windshield mount in a car: smoother and consistent — the inertial signal
