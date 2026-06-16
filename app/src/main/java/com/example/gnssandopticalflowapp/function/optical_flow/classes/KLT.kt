@@ -27,6 +27,7 @@ class KLT : OpticalFlow {
     private val status: MatOfByte = statusInit()
     private val err: MatOfFloat = MatOfFloat()
     private val color: Scalar = Scalar(240.0, 230.0, 140.0)
+    private val outlierColor: Scalar = Scalar(255.0, 60.0, 60.0)
     private val displayVectorLengthMultiplier = 4.8
     private val minDisplayVectorLength = 9.0
     private val vectorThickness = 4
@@ -41,6 +42,9 @@ class KLT : OpticalFlow {
     private var prevMv: Point? = null
     private var currMv: Point? = null
     private var currentSensitivity: Int = 50
+    private var metricsRegionTop = 0.0
+    private var metricsRegionBottom = 1.0
+    private var rejectMovingObjects = false
     private var frameIndex: Long = 0L
     // LK parameters for improved tracking
     private val lkWinSize: Size = Size(21.0, 21.0)
@@ -81,6 +85,17 @@ class KLT : OpticalFlow {
     override fun setMovingMode(isMoving: Boolean) {
         vectorDirectionSign = if (isMoving) 1.0 else -1.0
         subtractDominantMotion = !isMoving
+    }
+
+    override fun setMetricsRegion(topFraction: Double, bottomFraction: Double) {
+        val top = topFraction.coerceIn(0.0, 1.0)
+        val bottom = bottomFraction.coerceIn(0.0, 1.0)
+        metricsRegionTop = if (bottom > top) top else 0.0
+        metricsRegionBottom = if (bottom > top) bottom else 1.0
+    }
+
+    override fun setRejectMovingObjects(enabled: Boolean) {
+        rejectMovingObjects = enabled
     }
 
     private fun updatePoints(prevGray: Mat, currGray: Mat, prevPts: MatOfPoint2f) {
@@ -177,6 +192,11 @@ class KLT : OpticalFlow {
         val currPtsArray = currPts.toArray()
         val backwardPtsArray = backwardPts.toArray()
 
+        // Active vertical band for metrics + drawing (live routing drops the sky / far region).
+        val frameHeight = currGray.rows()
+        val regionTopPx = frameHeight * metricsRegionTop
+        val regionBottomPx = frameHeight * metricsRegionBottom
+
         // Track all reliable points first so feature refresh is not driven by display filtering.
         val trackedMotions = ArrayList<TrackMotion>()
         val allDxList = ArrayList<Double>()
@@ -186,27 +206,32 @@ class KLT : OpticalFlow {
 
         for (i in statusArray.indices) {
             if (statusArray[i].toInt() == 1) {
+                val pt1 = prevPtsArray[i]
+                val inMetricsRegion = pt1.y >= regionTopPx && pt1.y < regionBottomPx
+
                 // Check FBE
                 var fbeValid = false
                 if (statusBackArray.size > i && statusBackArray[i].toInt() == 1) {
-                    val ptStart = prevPtsArray[i]
                     val ptBack = backwardPtsArray[i]
-                    val errX = ptStart.x - ptBack.x
-                    val errY = ptStart.y - ptBack.y
+                    val errX = pt1.x - ptBack.x
+                    val errY = pt1.y - ptBack.y
                     val fbeSquared = errX * errX + errY * errY
                     if (fbeSquared <= 2.25) { // Threshold 1.5 pixels
                         fbeValid = true
                     }
                 }
 
-                fbeTotalTracked++
-                if (fbeValid) {
-                    fbeInliers++
+                // Confidence reflects only the active band, matching avgDx/avgDy and Farneback.
+                if (inMetricsRegion) {
+                    fbeTotalTracked++
+                    if (fbeValid) {
+                        fbeInliers++
+                    }
                 }
 
-                // Use FBE to filter reliable points for motion calculation
+                // Use FBE to filter reliable points for motion calculation. Tracking/refresh stays
+                // full-frame (flowPts) so the band does not change feature-refresh cadence.
                 if (fbeValid) {
-                    val pt1 = prevPtsArray[i]
                     val pt2 = currPtsArray[i]
                     val dx = pt2.x - pt1.x
                     val dy = pt2.y - pt1.y
@@ -221,33 +246,60 @@ class KLT : OpticalFlow {
         val dominantDx = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDxList) else 0.0
         val dominantDy = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDyList) else 0.0
 
-        // Only draw and aggregate motion above the jitter floor.
-        val dxList = ArrayList<Double>()
-        val dyList = ArrayList<Double>()
+        // Collect motion above the jitter floor, inside the active band.
+        val bandMotions = ArrayList<TrackMotion>()
+        for (motion in trackedMotions) {
+            if (motion.start.y < regionTopPx || motion.start.y >= regionBottomPx) {
+                continue
+            }
+            val dx = motion.dx - dominantDx
+            val dy = motion.dy - dominantDy
+            if (sqrt((dx * dx) + (dy * dy)) < minTrackedMotionMagnitude) {
+                continue
+            }
+            bandMotions.add(TrackMotion(motion.start, dx, dy))
+        }
+
+        // Reject independently-moving objects (e.g. the car ahead): keep only vectors that agree
+        // with the dominant background motion, and measure speed from that consensus.
+        val inlierFlags: BooleanArray
+        val centerDx: Double
+        val centerDy: Double
+        var movingInlierRatio = 1.0
+        if (rejectMovingObjects && bandMotions.size >= MIN_CONSENSUS_POINTS) {
+            val consensus = MotionConsensus.dominantMotion(
+                DoubleArray(bandMotions.size) { bandMotions[it].dx },
+                DoubleArray(bandMotions.size) { bandMotions[it].dy },
+                CONSENSUS_GATE_MULTIPLIER,
+                CONSENSUS_ABS_GATE_PX
+            )
+            inlierFlags = consensus.inliers
+            centerDx = consensus.centerDx
+            centerDy = consensus.centerDy
+            movingInlierRatio = consensus.inlierRatio
+        } else {
+            inlierFlags = BooleanArray(bandMotions.size) { true }
+            centerDx = median(bandMotions.map { it.dx })
+            centerDy = median(bandMotions.map { it.dy })
+        }
+
         var motionPts = 0
         var metricDx = 0.0
         var metricDy = 0.0
         var metricMagnitude = 0.0
-        for (motion in trackedMotions) {
-            val dx = motion.dx - dominantDx
-            val dy = motion.dy - dominantDy
-            val rawMagnitude = sqrt((dx * dx) + (dy * dy))
-            if (rawMagnitude < minTrackedMotionMagnitude) {
-                continue
-            }
-
-            dxList.add(dx)
-            dyList.add(dy)
-            val displayDx = dx * vectorDirectionSign * displayVectorLengthMultiplier
-            val displayDy = dy * vectorDirectionSign * displayVectorLengthMultiplier
+        for (index in bandMotions.indices) {
+            val motion = bandMotions[index]
+            val isInlier = inlierFlags[index]
+            val displayDx = motion.dx * vectorDirectionSign * displayVectorLengthMultiplier
+            val displayDy = motion.dy * vectorDirectionSign * displayVectorLengthMultiplier
             val displayEnd = Point(motion.start.x + displayDx, motion.start.y + displayDy)
-            Imgproc.line(currFrame, motion.start, displayEnd, color, vectorThickness)
-            motionPts++
+            Imgproc.line(currFrame, motion.start, displayEnd, if (isInlier) color else outlierColor, vectorThickness)
+            if (isInlier) motionPts++
         }
 
         if (motionPts > 0) {
-            val medDx = median(dxList)
-            val medDy = median(dyList)
+            val medDx = centerDx
+            val medDy = centerDy
             val medianMagnitude = sqrt((medDx * medDx) + (medDy * medDy))
             metricDx = medDx * vectorDirectionSign
             metricDy = medDy * vectorDirectionSign
@@ -292,7 +344,7 @@ class KLT : OpticalFlow {
             confidence = computeConfidence(
                 inliers = fbeInliers,
                 totalTracked = fbeTotalTracked
-            )
+            ) * movingInlierRatio
         )
     }
 
@@ -338,5 +390,11 @@ class KLT : OpticalFlow {
     private fun List<Double>.averageOrZero(): Double {
         if (isEmpty()) return 0.0
         return average().takeIf { it.isFinite() } ?: 0.0
+    }
+
+    private companion object {
+        const val MIN_CONSENSUS_POINTS = 6
+        const val CONSENSUS_GATE_MULTIPLIER = 2.5
+        const val CONSENSUS_ABS_GATE_PX = 2.0
     }
 }

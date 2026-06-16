@@ -71,6 +71,7 @@ import org.osmdroid.views.overlay.Polyline
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.time.Duration.Companion.milliseconds
 
 class LiveRoutingFragment :
     BaseFragment<FragmentLiveRoutingBinding>(FragmentLiveRoutingBinding::inflate) {
@@ -169,9 +170,6 @@ class LiveRoutingFragment :
         }
         btnFBVector.setSingleClick {
             setActiveOpticalMode(OpticalMode.FARNEBACK_VECTOR)
-        }
-        btnFBHeatmap.setSingleClick {
-            setActiveOpticalMode(OpticalMode.FARNEBACK_HEATMAP)
         }
     }
 
@@ -618,7 +616,7 @@ class LiveRoutingFragment :
                     refreshRouteAfterLocationChange()
                 } ?: updateSpeedText(result.speedMps)
                 updateDebugHud()
-                delay(LiveRoutingViewModel.TICK_MS)
+                delay(LiveRoutingViewModel.TICK_MS.milliseconds)
             }
         }
     }
@@ -628,7 +626,7 @@ class LiveRoutingFragment :
 
         testDropoutJob = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
-                delay(LiveRoutingViewModel.TEST_GNSS_DROPOUT_INTERVAL_MS)
+                delay(LiveRoutingViewModel.TEST_GNSS_DROPOUT_INTERVAL_MS.milliseconds)
                 applyAssistDecision(liveRoutingViewModel.toggleTestGnssDropout())
             }
         }
@@ -744,19 +742,20 @@ class LiveRoutingFragment :
             OpticalMode.FARNEBACK_VECTOR -> Farneback().apply {
                 setVisualizationMode(Farneback.VisualizationMode.VECTORS)
             }
-            OpticalMode.FARNEBACK_HEATMAP -> Farneback().apply {
-                setVisualizationMode(Farneback.VisualizationMode.HEATMAP)
-            }
         }
         flow.setMovingMode(true)
         flow.setSensitivity(LiveRoutingViewModel.FLOW_SENSITIVITY)
+        flow.setMetricsRegion(
+            LiveRoutingViewModel.FLOW_METRICS_TOP_FRACTION,
+            LiveRoutingViewModel.FLOW_METRICS_BOTTOM_FRACTION
+        )
+        flow.setRejectMovingObjects(true)
         return flow
     }
 
     private fun applyOpticalModeUi() = with(binding) {
         setModeButtonSelected(btnKLT, liveRoutingViewModel.activeOpticalMode == OpticalMode.KLT)
         setModeButtonSelected(btnFBVector, liveRoutingViewModel.activeOpticalMode == OpticalMode.FARNEBACK_VECTOR)
-        setModeButtonSelected(btnFBHeatmap, liveRoutingViewModel.activeOpticalMode == OpticalMode.FARNEBACK_HEATMAP)
     }
 
     private fun setModeButtonSelected(view: TextView, selected: Boolean) {
@@ -990,7 +989,7 @@ class LiveRoutingFragment :
         if (!SHOW_DEBUG_HUD || !isAdded || view == null) return
 
         val s = liveRoutingViewModel.debugSnapshot()
-        binding.tvDebugHud?.text = buildString {
+        binding.tvDebugHud.text = buildString {
             append(if (s.assistActive) "DR · no GPS" else "GPS OK")
             append("  [").append(s.vehicleKind).append("]\n")
             append(String.format(Locale.US, "GPS %.0f   Est %.0f km/h\n", s.gpsSpeedMps * 3.6, s.estSpeedMps * 3.6))
@@ -1015,8 +1014,8 @@ class LiveRoutingFragment :
                 )
             )
         }
-        if (binding.tvDebugHud?.visibility != View.VISIBLE) {
-            binding.tvDebugHud?.visibility = View.VISIBLE
+        if (binding.tvDebugHud.visibility != View.VISIBLE) {
+            binding.tvDebugHud.visibility = View.VISIBLE
         }
     }
 

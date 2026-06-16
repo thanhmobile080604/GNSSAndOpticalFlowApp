@@ -18,8 +18,7 @@ import kotlin.math.sqrt
 class LiveRoutingViewModel : ViewModel() {
     enum class OpticalMode {
         KLT,
-        FARNEBACK_VECTOR,
-        FARNEBACK_HEATMAP
+        FARNEBACK_VECTOR
     }
 
     /**
@@ -1520,6 +1519,11 @@ class LiveRoutingViewModel : ViewModel() {
         const val TEST_GNSS_DROPOUT = true
         const val TEST_GNSS_DROPOUT_INTERVAL_MS = 10_000L
         const val FLOW_SENSITIVITY = 85
+        // Optical-flow speed is read only from BELOW the centre horizon guide line: the user levels
+        // the mount so the real horizon sits on that line, so everything above it (sky / far
+        // vanishing point, near-zero or misleading flow) is excluded. 0.5 == the centre guide line.
+        const val FLOW_METRICS_TOP_FRACTION = 0.5
+        const val FLOW_METRICS_BOTTOM_FRACTION = 1.0
 
         private const val GNSS_LOCATION_STALE_MS = 5_000L
         private const val GNSS_STATUS_STALE_MS = 5_000L

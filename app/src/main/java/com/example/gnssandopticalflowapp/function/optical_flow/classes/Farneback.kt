@@ -41,10 +41,14 @@ class Farneback : OpticalFlow {
     private val minDisplayVectorLength = 9.0
     private var vectorDirectionSign = -1.0
     private var currentSensitivity = 50
+    private var metricsRegionTop = 0.0
+    private var metricsRegionBottom = 1.0
+    private var rejectMovingObjects = false
     private var frameIndex = 0L
     private var visualizationMode = VisualizationMode.VECTORS
     private val ofOutput: OFOutput = OFOutput()
     private val flowColor = Scalar(0.0, 255.0, 0.0)
+    private val outlierColor = Scalar(255.0, 60.0, 60.0)
 
     private data class FlowStats(
         val avgMotion: Point?,
@@ -132,6 +136,17 @@ class Farneback : OpticalFlow {
         vectorDirectionSign = if (isMoving) 1.0 else -1.0
     }
 
+    override fun setMetricsRegion(topFraction: Double, bottomFraction: Double) {
+        val top = topFraction.coerceIn(0.0, 1.0)
+        val bottom = bottomFraction.coerceIn(0.0, 1.0)
+        metricsRegionTop = if (bottom > top) top else 0.0
+        metricsRegionBottom = if (bottom > top) bottom else 1.0
+    }
+
+    override fun setRejectMovingObjects(enabled: Boolean) {
+        rejectMovingObjects = enabled
+    }
+
     override fun setSensitivity(value: Int) {
         currentSensitivity = value.coerceIn(0, 100)
         val normalized = (currentSensitivity / 100.0)
@@ -184,15 +199,24 @@ class Farneback : OpticalFlow {
         val yScale = mapRows.toDouble() / flowRows
         val startX = computeCenteredGridStart(mapCols, step)
         val startY = computeCenteredGridStart(mapRows, step)
+        // Confine drawing + metrics to the active vertical band (live routing drops the sky).
+        val regionTopY = mapRows * metricsRegionTop
+        val regionBottomY = mapRows * metricsRegionBottom
         val minMotionSquared = minMotionMagnitude * minMotionMagnitude
-        var sumX = 0.0
-        var sumY = 0.0
-        var totalMagnitude = 0.0
+
+        // Pass 1: collect grid samples with significant motion inside the active band.
+        val sampleScreenX = ArrayList<Int>()
+        val sampleScreenY = ArrayList<Int>()
+        val sampleFx = ArrayList<Double>()
+        val sampleFy = ArrayList<Double>()
+        val sampleFbe = ArrayList<Boolean>()
         var gridSampleCount = 0
-        var sampleCount = 0
-        var fbeInliers = 0
         var screenY = startY
         while (screenY < mapRows) {
+            if (screenY < regionTopY || screenY >= regionBottomY) {
+                screenY += step
+                continue
+            }
             var screenX = startX
             while (screenX < mapCols) {
                 gridSampleCount++
@@ -202,7 +226,6 @@ class Farneback : OpticalFlow {
                 val fx = vector[0] * xScale
                 val fy = vector[1] * yScale
                 val magnitudeSquared = (fx * fx) + (fy * fy)
-                val magnitude = sqrt(magnitudeSquared)
 
                 if (magnitudeSquared >= minMotionSquared) {
                     // Check FBE
@@ -220,32 +243,62 @@ class Farneback : OpticalFlow {
                             fbeValid = true
                         }
                     }
-
-                    if (fbeValid) {
-                        fbeInliers++
-                    }
-
-                    if (visualizationMode == VisualizationMode.VECTORS) {
-                        val start = Point(screenX.toDouble(), screenY.toDouble())
-                        val displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
-                        val displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
-                        val end = Point(
-                            start.x + displayFx,
-                            start.y + displayFy
-                        )
-
-                        Imgproc.line(flowmap, start, end, color, vectorThickness)
-                        Imgproc.circle(flowmap, start, dotRadius, color, -1)
-                    }
-                    sumX += fx * vectorDirectionSign
-                    sumY += fy * vectorDirectionSign
-                    totalMagnitude += magnitude
-                    sampleCount++
+                    sampleScreenX.add(screenX)
+                    sampleScreenY.add(screenY)
+                    sampleFx.add(fx)
+                    sampleFy.add(fy)
+                    sampleFbe.add(fbeValid)
                 }
 
                 screenX += step
             }
             screenY += step
+        }
+
+        // Reject independently-moving objects: keep only the dominant-background consensus.
+        val inlierFlags: BooleanArray
+        var movingInlierRatio = 1.0
+        if (rejectMovingObjects && sampleFx.size >= MIN_CONSENSUS_POINTS) {
+            val consensus = MotionConsensus.dominantMotion(
+                DoubleArray(sampleFx.size) { sampleFx[it] },
+                DoubleArray(sampleFy.size) { sampleFy[it] },
+                CONSENSUS_GATE_MULTIPLIER,
+                CONSENSUS_ABS_GATE_PX
+            )
+            inlierFlags = consensus.inliers
+            movingInlierRatio = consensus.inlierRatio
+        } else {
+            inlierFlags = BooleanArray(sampleFx.size) { true }
+        }
+
+        // Pass 2: draw + accumulate over inliers only.
+        var sumX = 0.0
+        var sumY = 0.0
+        var totalMagnitude = 0.0
+        var sampleCount = 0
+        var fbeInliers = 0
+        for (index in sampleFx.indices) {
+            val fx = sampleFx[index]
+            val fy = sampleFy[index]
+            val isInlier = inlierFlags[index]
+            if (visualizationMode == VisualizationMode.VECTORS) {
+                val start = Point(sampleScreenX[index].toDouble(), sampleScreenY[index].toDouble())
+                val displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
+                val displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
+                val end = Point(start.x + displayFx, start.y + displayFy)
+                val drawColor = if (isInlier) color else outlierColor
+                Imgproc.line(flowmap, start, end, drawColor, vectorThickness)
+                Imgproc.circle(flowmap, start, dotRadius, drawColor, -1)
+            }
+            if (isInlier) {
+                sumX += fx * vectorDirectionSign
+                sumY += fy * vectorDirectionSign
+                totalMagnitude += sqrt((fx * fx) + (fy * fy))
+                sampleCount++
+                if (sampleFbe[index]) {
+                    fbeInliers++
+                }
+            }
         }
         if (visualizationMode == VisualizationMode.HEATMAP) {
             drawDenseHeatmap(flow, flowmap, xScale, yScale)
@@ -254,7 +307,7 @@ class Farneback : OpticalFlow {
         return if (sampleCount > 0) {
             val avgDx = sumX / sampleCount
             val avgDy = sumY / sampleCount
-            val confidence = if (sampleCount > 0) (fbeInliers.toDouble() / sampleCount.toDouble()) * 100.0 else 0.0
+            val confidence = if (sampleCount > 0) (fbeInliers.toDouble() / sampleCount.toDouble()) * 100.0 * movingInlierRatio else 0.0
             FlowStats(
                 avgMotion = Point(avgDx, avgDy),
                 sampleCount = gridSampleCount,
@@ -374,6 +427,9 @@ class Farneback : OpticalFlow {
         const val HEATMAP_NORMALIZE_MULTIPLIER = 9.0
         const val HEATMAP_INPUT_THRESHOLD_MULTIPLIER = 0.40
         const val HEATMAP_MASK_THRESHOLD_MULTIPLIER = 0.32
+        const val MIN_CONSENSUS_POINTS = 6
+        const val CONSENSUS_GATE_MULTIPLIER = 2.5
+        const val CONSENSUS_ABS_GATE_PX = 2.0
     }
 
     private fun buildOutput(

@@ -78,6 +78,15 @@
                 android:layout_height="match_parent"
                 android:scaleType="centerCrop" />
 
+            <!-- Horizon guide: user adjusts the mount so the real horizon sits on this centre line.
+                 The optical-flow speed is then measured only below it (see FLOW_METRICS_TOP_FRACTION). -->
+            <View
+                android:id="@+id/horizonGuide"
+                android:layout_width="match_parent"
+                android:layout_height="2dp"
+                android:layout_gravity="center_vertical"
+                android:background="#FFFF3B30" />
+
         </androidx.cardview.widget.CardView>
 
         <androidx.constraintlayout.widget.ConstraintLayout
@@ -108,33 +117,20 @@
                 android:id="@+id/btnFBVector"
                 android:layout_width="0dp"
                 android:layout_height="34dp"
-                android:layout_marginHorizontal="4dp"
+                android:layout_marginStart="4dp"
                 android:background="@drawable/bg_glass_chip"
                 android:gravity="center"
                 android:text="Fb Vector"
                 android:textColor="@color/white"
                 android:textSize="14sp"
                 app:layout_constraintStart_toEndOf="@id/btnKLT"
-                app:layout_constraintEnd_toStartOf="@id/btnFBHeatmap"
-                app:layout_constraintTop_toTopOf="parent"
-                app:layout_constraintBottom_toBottomOf="parent" />
-
-            <TextView
-                android:id="@+id/btnFBHeatmap"
-                android:layout_width="0dp"
-                android:layout_height="34dp"
-                android:layout_marginStart="4dp"
-                android:background="@drawable/bg_glass_chip"
-                android:gravity="center"
-                android:text="Fb Heatmap"
-                android:textColor="@color/white"
-                android:textSize="12sp"
-                app:layout_constraintStart_toEndOf="@id/btnFBVector"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintBottom_toBottomOf="parent" />
 
         </androidx.constraintlayout.widget.ConstraintLayout>
+
+
     </androidx.constraintlayout.widget.ConstraintLayout>
 
     <ImageView
