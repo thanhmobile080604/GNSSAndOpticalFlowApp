@@ -113,15 +113,6 @@
                 android:layout_height="match_parent"
                 android:scaleType="centerCrop" />
 
-            <!-- Horizon guide: user adjusts the mount so the real horizon sits on this centre line.
-                 The optical-flow speed is then measured only below it (see FLOW_METRICS_TOP_FRACTION). -->
-            <View
-                android:id="@+id/horizonGuide"
-                android:layout_width="match_parent"
-                android:layout_height="2dp"
-                android:layout_gravity="center_vertical"
-                android:background="#FFFF3B30" />
-
         </androidx.cardview.widget.CardView>
 
     </androidx.constraintlayout.widget.ConstraintLayout>

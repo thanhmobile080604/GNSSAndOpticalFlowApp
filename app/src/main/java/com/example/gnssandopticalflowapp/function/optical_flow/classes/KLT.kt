@@ -16,6 +16,7 @@ import org.opencv.core.TermCriteria
 import org.opencv.imgproc.Imgproc
 import org.opencv.video.Video
 import java.util.concurrent.Semaphore
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -27,7 +28,6 @@ class KLT : OpticalFlow {
     private val status: MatOfByte = statusInit()
     private val err: MatOfFloat = MatOfFloat()
     private val color: Scalar = Scalar(240.0, 230.0, 140.0)
-    private val outlierColor: Scalar = Scalar(255.0, 60.0, 60.0)
     private val displayVectorLengthMultiplier = 4.8
     private val minDisplayVectorLength = 9.0
     private val vectorThickness = 4
@@ -42,9 +42,6 @@ class KLT : OpticalFlow {
     private var prevMv: Point? = null
     private var currMv: Point? = null
     private var currentSensitivity: Int = 50
-    private var metricsRegionTop = 0.0
-    private var metricsRegionBottom = 1.0
-    private var rejectMovingObjects = false
     private var frameIndex: Long = 0L
     // LK parameters for improved tracking
     private val lkWinSize: Size = Size(21.0, 21.0)
@@ -85,17 +82,6 @@ class KLT : OpticalFlow {
     override fun setMovingMode(isMoving: Boolean) {
         vectorDirectionSign = if (isMoving) 1.0 else -1.0
         subtractDominantMotion = !isMoving
-    }
-
-    override fun setMetricsRegion(topFraction: Double, bottomFraction: Double) {
-        val top = topFraction.coerceIn(0.0, 1.0)
-        val bottom = bottomFraction.coerceIn(0.0, 1.0)
-        metricsRegionTop = if (bottom > top) top else 0.0
-        metricsRegionBottom = if (bottom > top) bottom else 1.0
-    }
-
-    override fun setRejectMovingObjects(enabled: Boolean) {
-        rejectMovingObjects = enabled
     }
 
     private fun updatePoints(prevGray: Mat, currGray: Mat, prevPts: MatOfPoint2f) {
@@ -192,12 +178,8 @@ class KLT : OpticalFlow {
         val currPtsArray = currPts.toArray()
         val backwardPtsArray = backwardPts.toArray()
 
-        // Active vertical band for metrics + drawing (live routing drops the sky / far region).
-        val frameHeight = currGray.rows()
-        val regionTopPx = frameHeight * metricsRegionTop
-        val regionBottomPx = frameHeight * metricsRegionBottom
-
-        // Track all reliable points first so feature refresh is not driven by display filtering.
+        // Keep EVERY tracked vector — no rejection. The forward-backward error is still measured,
+        // but only as a confidence signal; it no longer drops any vector. The whole frame is used.
         val trackedMotions = ArrayList<TrackMotion>()
         val allDxList = ArrayList<Double>()
         val allDyList = ArrayList<Double>()
@@ -207,115 +189,74 @@ class KLT : OpticalFlow {
         for (i in statusArray.indices) {
             if (statusArray[i].toInt() == 1) {
                 val pt1 = prevPtsArray[i]
-                val inMetricsRegion = pt1.y >= regionTopPx && pt1.y < regionBottomPx
 
-                // Check FBE
                 var fbeValid = false
                 if (statusBackArray.size > i && statusBackArray[i].toInt() == 1) {
                     val ptBack = backwardPtsArray[i]
                     val errX = pt1.x - ptBack.x
                     val errY = pt1.y - ptBack.y
-                    val fbeSquared = errX * errX + errY * errY
-                    if (fbeSquared <= 2.25) { // Threshold 1.5 pixels
-                        fbeValid = true
-                    }
+                    if (errX * errX + errY * errY <= 2.25) fbeValid = true // confidence only, no drop
                 }
+                fbeTotalTracked++
+                if (fbeValid) fbeInliers++
 
-                // Confidence reflects only the active band, matching avgDx/avgDy and Farneback.
-                if (inMetricsRegion) {
-                    fbeTotalTracked++
-                    if (fbeValid) {
-                        fbeInliers++
-                    }
-                }
-
-                // Use FBE to filter reliable points for motion calculation. Tracking/refresh stays
-                // full-frame (flowPts) so the band does not change feature-refresh cadence.
-                if (fbeValid) {
-                    val pt2 = currPtsArray[i]
-                    val dx = pt2.x - pt1.x
-                    val dy = pt2.y - pt1.y
-                    flowPts++
-                    trackedMotions.add(TrackMotion(pt1, dx, dy))
-                    allDxList.add(dx)
-                    allDyList.add(dy)
-                }
+                val pt2 = currPtsArray[i]
+                val dx = pt2.x - pt1.x
+                val dy = pt2.y - pt1.y
+                flowPts++
+                trackedMotions.add(TrackMotion(pt1, dx, dy))
+                allDxList.add(dx)
+                allDyList.add(dy)
             }
         }
 
         val dominantDx = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDxList) else 0.0
         val dominantDy = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDyList) else 0.0
 
-        // Collect motion above the jitter floor, inside the active band.
-        val bandMotions = ArrayList<TrackMotion>()
+        // Keep motion above the jitter floor (still "all vectors" — only sensor noise is ignored).
+        val motions = ArrayList<TrackMotion>()
         for (motion in trackedMotions) {
-            if (motion.start.y < regionTopPx || motion.start.y >= regionBottomPx) {
-                continue
-            }
             val dx = motion.dx - dominantDx
             val dy = motion.dy - dominantDy
-            if (sqrt((dx * dx) + (dy * dy)) < minTrackedMotionMagnitude) {
-                continue
-            }
-            bandMotions.add(TrackMotion(motion.start, dx, dy))
+            if (sqrt((dx * dx) + (dy * dy)) < minTrackedMotionMagnitude) continue
+            motions.add(TrackMotion(motion.start, dx, dy))
         }
 
-        // Reject independently-moving objects (e.g. the car ahead): keep only vectors that agree
-        // with the dominant background motion, and measure speed from that consensus.
-        val inlierFlags: BooleanArray
-        val centerDx: Double
-        val centerDy: Double
-        var movingInlierRatio = 1.0
-        if (rejectMovingObjects && bandMotions.size >= MIN_CONSENSUS_POINTS) {
-            val consensus = MotionConsensus.dominantMotion(
-                DoubleArray(bandMotions.size) { bandMotions[it].dx },
-                DoubleArray(bandMotions.size) { bandMotions[it].dy },
-                CONSENSUS_GATE_MULTIPLIER,
-                CONSENSUS_ABS_GATE_PX
-            )
-            inlierFlags = consensus.inliers
-            centerDx = consensus.centerDx
-            centerDy = consensus.centerDy
-            movingInlierRatio = consensus.inlierRatio
-        } else {
-            inlierFlags = BooleanArray(bandMotions.size) { true }
-            centerDx = median(bandMotions.map { it.dx })
-            centerDy = median(bandMotions.map { it.dy })
-        }
-
-        var motionPts = 0
-        var metricDx = 0.0
-        var metricDy = 0.0
-        var metricMagnitude = 0.0
-        for (index in bandMotions.indices) {
-            val motion = bandMotions[index]
-            val isInlier = inlierFlags[index]
+        // Draw every vector in one colour. vectorDirectionSign flips the DRAWN arrow only (a view
+        // choice); the metrics below use the TRUE flow direction so the turn logic is not reversed.
+        var coherenceSumDx = 0.0
+        var coherenceSumAbsDx = 0.0
+        for (motion in motions) {
             val displayDx = motion.dx * vectorDirectionSign * displayVectorLengthMultiplier
             val displayDy = motion.dy * vectorDirectionSign * displayVectorLengthMultiplier
             val displayEnd = Point(motion.start.x + displayDx, motion.start.y + displayDy)
-            Imgproc.line(currFrame, motion.start, displayEnd, if (isInlier) color else outlierColor, vectorThickness)
-            if (isInlier) motionPts++
+            Imgproc.line(currFrame, motion.start, displayEnd, color, vectorThickness)
+            coherenceSumDx += motion.dx
+            coherenceSumAbsDx += abs(motion.dx)
         }
+        val lateralCoherence = if (coherenceSumAbsDx > 1e-3) coherenceSumDx / coherenceSumAbsDx else 0.0
 
+        val motionPts = motions.size
+        var metricDx = 0.0
+        var metricDy = 0.0
+        var metricMagnitude = 0.0
         if (motionPts > 0) {
-            val medDx = centerDx
-            val medDy = centerDy
-            val medianMagnitude = sqrt((medDx * medDx) + (medDy * medDy))
-            metricDx = medDx * vectorDirectionSign
-            metricDy = medDy * vectorDirectionSign
-            metricMagnitude = medianMagnitude
+            val medDx = median(motions.map { it.dx })
+            val medDy = median(motions.map { it.dy })
+            metricMagnitude = sqrt((medDx * medDx) + (medDy * medDy))
+            metricDx = medDx // TRUE flow direction (display sign is applied to the drawn arrow only)
+            metricDy = medDy
 
-            if (medianMagnitude >= minTrackedMotionMagnitude) {
-                // smooth motion vector with previous estimate
+            if (metricMagnitude >= minTrackedMotionMagnitude) {
+                // smooth motion vector with previous estimate (display-direction, for position out)
                 val newMv = Point(
                     medDx * vectorDirectionSign / 5.0,
                     medDy * vectorDirectionSign / 5.0
                 )
-                if (prevMv == null) {
-                    currMv = newMv
+                currMv = if (prevMv == null) {
+                    newMv
                 } else {
-                    // exponential smoothing
-                    currMv = Point(prevMv!!.x * 0.85 + newMv.x * 0.15, prevMv!!.y * 0.85 + newMv.y * 0.15)
+                    Point(prevMv!!.x * 0.85 + newMv.x * 0.15, prevMv!!.y * 0.85 + newMv.y * 0.15)
                 }
                 prevMv = currMv
             } else {
@@ -344,7 +285,8 @@ class KLT : OpticalFlow {
             confidence = computeConfidence(
                 inliers = fbeInliers,
                 totalTracked = fbeTotalTracked
-            ) * movingInlierRatio
+            ),
+            lateralCoherence = lateralCoherence
         )
     }
 
@@ -357,7 +299,8 @@ class KLT : OpticalFlow {
         avgDx: Double,
         avgDy: Double,
         avgMagnitude: Double,
-        confidence: Double
+        confidence: Double,
+        lateralCoherence: Double = 0.0
     ): OFOutput {
         val processTimeMs = ((System.nanoTime() - startNanos) / 1_000_000.0).coerceAtLeast(0.001)
         ofOutput.ofFrame = frame
@@ -374,7 +317,8 @@ class KLT : OpticalFlow {
             avgMagnitude = avgMagnitude,
             confidence = confidence.coerceIn(0.0, 100.0),
             threshold = minTrackedMotionMagnitude,
-            sensitivity = currentSensitivity
+            sensitivity = currentSensitivity,
+            lateralCoherence = lateralCoherence.coerceIn(-1.0, 1.0)
         )
         return ofOutput
     }
@@ -387,14 +331,4 @@ class KLT : OpticalFlow {
         return (inliers.toDouble() / totalTracked.toDouble() * 100.0).coerceIn(0.0, 100.0)
     }
 
-    private fun List<Double>.averageOrZero(): Double {
-        if (isEmpty()) return 0.0
-        return average().takeIf { it.isFinite() } ?: 0.0
-    }
-
-    private companion object {
-        const val MIN_CONSENSUS_POINTS = 6
-        const val CONSENSUS_GATE_MULTIPLIER = 2.5
-        const val CONSENSUS_ABS_GATE_PX = 2.0
-    }
 }

@@ -84,7 +84,10 @@ class LiveRoutingViewModel : ViewModel() {
         val axisConfidence: Double,
         val accelTrust: Double,
         val longitudinalAccelMps2: Double,
-        val uncertaintyM: Double
+        val uncertaintyM: Double,
+        val lateralCoherence: Double,
+        val opticalYawRateDegPerSec: Double,
+        val yawScale: Double
     )
 
     private data class VisualOdometry(
@@ -143,18 +146,6 @@ class LiveRoutingViewModel : ViewModel() {
     var cameraPanelVisible = false
         private set
 
-    /**
-     * Top boundary of the optical-flow metrics band, as a fraction of the frame height, driven by
-     * the draggable red horizon guide. The user drags it onto the real horizon so everything above
-     * it (sky / far vanishing point, near-zero or misleading flow) is excluded from the speed
-     * estimate. Clamped to [FLOW_METRICS_TOP_FRACTION_MIN, FLOW_METRICS_TOP_FRACTION_MAX] so the
-     * band can never collapse or swallow the whole frame.
-     */
-    var flowMetricsTopFraction: Double = FLOW_METRICS_TOP_FRACTION
-        set(value) {
-            field = value.coerceIn(FLOW_METRICS_TOP_FRACTION_MIN, FLOW_METRICS_TOP_FRACTION_MAX)
-        }
-
     val currentRouteOrigin: GeoPoint?
         get() = currentPoint
     val destinationPoint: GeoPoint?
@@ -187,12 +178,18 @@ class LiveRoutingViewModel : ViewModel() {
     private var emaFlowMagPxPerSec = 0.0
     private var emaFlowDxPxPerSec = 0.0
     private var emaFlowDyPxPerSec = 0.0
+    private var emaFlowCoherence = 0.0
     private var lastFlowSampleMs = 0L
     private var lastFlowConfidence = 0.0
     private var dynamicFlowToMpsRatio = FLOW_PX_PER_SEC_TO_MPS
+    // px/s -> deg/s scale for the optical turn rate, self-calibrated against the gyro on clear
+    // turns (mirrors dynamicFlowToMpsRatio for speed). Defaults high enough that turns register
+    // before calibration converges; the coherence gate keeps straight driving from firing.
+    private var dynamicFlowToYawRatio = FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC
     private var cameraSpeedScaleConfidence = INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE
     private var lastVisualSpeedMps = 0.0
     private var lastVisualUsable = false
+    private var lastOpticalYawRateDegPerSec = 0.0
 
     // Inertial (IMU longitudinal) dead-reckoning runtime.
     // The phone is mounted in an unknown orientation, so we learn the device-frame "vehicle
@@ -549,7 +546,10 @@ class LiveRoutingViewModel : ViewModel() {
             axisConfidence = forwardAxisConfidence,
             accelTrust = longitudinalAccelTrust(),
             longitudinalAccelMps2 = currentLongitudinalAccel(),
-            uncertaintyM = positionUncertaintyM
+            uncertaintyM = positionUncertaintyM,
+            lateralCoherence = emaFlowCoherence,
+            opticalYawRateDegPerSec = lastOpticalYawRateDegPerSec,
+            yawScale = dynamicFlowToYawRatio
         )
     }
 
@@ -563,6 +563,7 @@ class LiveRoutingViewModel : ViewModel() {
             emaFlowMagPxPerSec = EMA_ALPHA * mag + (1 - EMA_ALPHA) * emaFlowMagPxPerSec
             emaFlowDxPxPerSec = EMA_ALPHA * dx + (1 - EMA_ALPHA) * emaFlowDxPxPerSec
             emaFlowDyPxPerSec = EMA_ALPHA * dy + (1 - EMA_ALPHA) * emaFlowDyPxPerSec
+            emaFlowCoherence = EMA_ALPHA * metrics.lateralCoherence + (1 - EMA_ALPHA) * emaFlowCoherence
             lastFlowConfidence = metrics.confidence
             lastFlowSampleMs = nowMs
         }
@@ -695,22 +696,31 @@ class LiveRoutingViewModel : ViewModel() {
         } else {
             0.0
         }
-        // Turn detection must keep working when the rider slows into a curve. At low speed the
-        // forward translation flow falls below the "usable" gate, yet a real turn still pans the
-        // whole scene sideways, so derive the optical yaw rate from a significant lateral flow that
-        // dominates the forward flow, independent of the translation-speed gate. This is exactly the
-        // case the gyro misses on a leaning motorbike (its gravity-projected yaw settles mid-corner).
+        // Turn detection from the flow-field STRUCTURE rather than the gyro alone (which under-reads
+        // on a leaning motorbike). Driving straight, the field diverges symmetrically from the
+        // vanishing point on the horizon, so the per-vector horizontal directions cancel and the
+        // coherence sits near 0; in a turn the whole field pans one way and coherence heads to ±1.
+        // We gate on that coherence instead of the old "lateral must beat the forward flow" rule,
+        // which wrongly suppressed turns taken at speed (where the forward flow is naturally large).
         val turnFlowConfident = flowFresh && lastFlowConfidence >= MIN_FLOW_CONFIDENCE
-        val opticalYawRateDegPerSec = if (
-            turnFlowConfident &&
-            lateralFlowPxPerSec >= MIN_LATERAL_FLOW_FOR_TURN_PX_PER_SEC &&
-            lateralFlowPxPerSec >= forwardFlowPxPerSec * FLOW_TURN_MIN_LATERAL_RATIO
-        ) {
-            (signedLateralFlowPxPerSec * FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC * confidenceScore)
+        val lateralCoherence = emaFlowCoherence
+        val opticalTurnDetected = turnFlowConfident &&
+            abs(lateralCoherence) >= FLOW_TURN_MIN_COHERENCE &&
+            lateralFlowPxPerSec >= MIN_LATERAL_FLOW_FOR_TURN_PX_PER_SEC
+        // Anchor the px/s -> deg/s scale to the gyro on clear, near-upright turns it can still read.
+        calibrateOpticalYawScale(
+            signedLateralPxPerSec = signedLateralFlowPxPerSec,
+            coherence = lateralCoherence,
+            rawGyroYawDegPerSec = yawRateDegPerSec,
+            flowConfident = turnFlowConfident
+        )
+        val opticalYawRateDegPerSec = if (opticalTurnDetected) {
+            (FLOW_YAW_SIGN * signedLateralFlowPxPerSec * dynamicFlowToYawRatio)
                 .coerceIn(-MAX_OPTICAL_YAW_RATE_DEG_SEC, MAX_OPTICAL_YAW_RATE_DEG_SEC)
         } else {
             0.0
         }
+        lastOpticalYawRateDegPerSec = opticalYawRateDegPerSec
 
         // Amplify the gyro yaw at low speed so a gently-steered tight corner still registers the full
         // heading change (the gravity-projected yaw under-reads on a leaning bike, and slow corners
@@ -734,12 +744,62 @@ class LiveRoutingViewModel : ViewModel() {
         return VisualOdometry(
             usable = usable,
             speedMps = speedMps,
-            deltaHeadingDeg = (amplifiedGyroYaw + opticalYawRateDegPerSec) * dtSec,
+            deltaHeadingDeg = fuseYawRate(
+                gyroYawDegPerSec = amplifiedGyroYaw,
+                opticalYawDegPerSec = opticalYawRateDegPerSec,
+                opticalTurnDetected = opticalTurnDetected
+            ) * dtSec,
             opticalYawRateDegPerSec = opticalYawRateDegPerSec,
             translationPxPerSec = translationFlowPxPerSec,
             lateralPxPerSec = signedLateralFlowPxPerSec,
             quality = quality
         )
+    }
+
+    /**
+     * Fuses the gyro and optical yaw rates. Optical flow is the trusted turn cue because the
+     * gravity-projected gyro under-reads (or flat-lines) on a leaning motorbike. When the two agree
+     * in sign we take the larger magnitude, so an under-reading gyro is pulled up by optical without
+     * either source capping the other; when they disagree we follow optical (a coherent one-sided
+     * flow field is a real turn). With no confident optical turn we fall back to the gyro alone.
+     */
+    private fun fuseYawRate(
+        gyroYawDegPerSec: Double,
+        opticalYawDegPerSec: Double,
+        opticalTurnDetected: Boolean
+    ): Double {
+        if (!opticalTurnDetected || opticalYawDegPerSec == 0.0) return gyroYawDegPerSec
+        return if (gyroYawDegPerSec * opticalYawDegPerSec >= 0.0) {
+            if (abs(opticalYawDegPerSec) >= abs(gyroYawDegPerSec)) opticalYawDegPerSec else gyroYawDegPerSec
+        } else {
+            opticalYawDegPerSec
+        }
+    }
+
+    /**
+     * Learns the px/s -> deg/s optical-yaw scale from the gyro on clear turns the gyro can still
+     * measure reliably (well above its noise floor, scene panning coherently the same way). Slowly
+     * EMA-blended and clamped so it anchors the absolute turn rate without trusting any single noisy
+     * frame; calibration is skipped unless both signals are strong and agree on the turn direction.
+     */
+    private fun calibrateOpticalYawScale(
+        signedLateralPxPerSec: Double,
+        coherence: Double,
+        rawGyroYawDegPerSec: Double,
+        flowConfident: Boolean
+    ) {
+        if (!flowConfident) return
+        if (abs(rawGyroYawDegPerSec) < OPTICAL_YAW_CALIB_MIN_GYRO_DEG_SEC) return
+        if (abs(signedLateralPxPerSec) < OPTICAL_YAW_CALIB_MIN_FLOW_PX_PER_SEC) return
+        if (abs(coherence) < FLOW_TURN_MIN_COHERENCE) return
+        if (rawGyroYawDegPerSec * (FLOW_YAW_SIGN * signedLateralPxPerSec) <= 0.0) return
+
+        val observed = (abs(rawGyroYawDegPerSec) / abs(signedLateralPxPerSec))
+            .coerceIn(MIN_FLOW_YAW_RATE_GAIN, MAX_FLOW_YAW_RATE_GAIN)
+        dynamicFlowToYawRatio = (
+            OPTICAL_YAW_SCALE_ALPHA * observed +
+                (1.0 - OPTICAL_YAW_SCALE_ALPHA) * dynamicFlowToYawRatio
+            ).coerceIn(MIN_FLOW_YAW_RATE_GAIN, MAX_FLOW_YAW_RATE_GAIN)
     }
 
     private fun calibrateCameraSpeedScale(visualOdometry: VisualOdometry) {
@@ -1338,12 +1398,15 @@ class LiveRoutingViewModel : ViewModel() {
         emaFlowMagPxPerSec = 0.0
         emaFlowDxPxPerSec = 0.0
         emaFlowDyPxPerSec = 0.0
+        emaFlowCoherence = 0.0
         lastFlowSampleMs = 0L
         lastFlowConfidence = 0.0
+        lastOpticalYawRateDegPerSec = 0.0
     }
 
     private fun resetCameraSpeedScale() {
         dynamicFlowToMpsRatio = FLOW_PX_PER_SEC_TO_MPS
+        dynamicFlowToYawRatio = FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC
         cameraSpeedScaleConfidence = INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE
     }
 
@@ -1565,15 +1628,7 @@ class LiveRoutingViewModel : ViewModel() {
         const val TICK_MS = 50L
         const val TEST_GNSS_DROPOUT = true
         const val TEST_GNSS_DROPOUT_INTERVAL_MS = 10_000L
-        const val FLOW_SENSITIVITY = 85
-        // Optical-flow speed is read only from BELOW the red horizon guide line: the user drags it
-        // onto the real horizon, so everything above it (sky / far vanishing point, near-zero or
-        // misleading flow) is excluded. 0.5 == the centre line (the guide's default position); the
-        // live, user-adjusted value lives in [flowMetricsTopFraction], clamped to [MIN, MAX].
-        const val FLOW_METRICS_TOP_FRACTION = 0.5
-        const val FLOW_METRICS_TOP_FRACTION_MIN = 0.15
-        const val FLOW_METRICS_TOP_FRACTION_MAX = 0.85
-        const val FLOW_METRICS_BOTTOM_FRACTION = 1.0
+        const val FLOW_SENSITIVITY = 100
 
         private const val GNSS_LOCATION_STALE_MS = 5_000L
         private const val GNSS_STATUS_STALE_MS = 5_000L
@@ -1601,10 +1656,24 @@ class LiveRoutingViewModel : ViewModel() {
         private const val FLOW_FULL_QUALITY_PX_PER_SEC = 60.0
         private const val MIN_FLOW_CONFIDENCE = 5.0
         private const val FLOW_PX_PER_SEC_TO_MPS = 0.075
-        private const val FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC = 0.11
-        private const val FLOW_TURN_MIN_LATERAL_RATIO = 0.12
+        // Default px/s -> deg/s optical-yaw scale, used until calibrateOpticalYawScale() anchors it
+        // to the gyro. Set well above the old 0.11 so turns register immediately; the coherence gate
+        // (FLOW_TURN_MIN_COHERENCE) is what stops straight driving from registering, not this gain.
+        private const val FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC = 0.40
+        private const val MIN_FLOW_YAW_RATE_GAIN = 0.08
+        private const val MAX_FLOW_YAW_RATE_GAIN = 1.6
+        // Minimum |sum(dx)/sum(|dx|)| for the flow field to count as a one-sided pan (a turn) rather
+        // than the symmetric expansion of straight driving.
+        private const val FLOW_TURN_MIN_COHERENCE = 0.35
+        // Maps the sign of the optical lateral pan to the heading-turn direction. Set to -1.0 because
+        // on-device the heading was steering OPPOSITE to the optical flow; flip back to 1.0 if a
+        // future camera/mount change reverses the flow's horizontal sign again.
+        private const val FLOW_YAW_SIGN = -1.0
+        private const val OPTICAL_YAW_CALIB_MIN_GYRO_DEG_SEC = 6.0
+        private const val OPTICAL_YAW_CALIB_MIN_FLOW_PX_PER_SEC = 8.0
+        private const val OPTICAL_YAW_SCALE_ALPHA = 0.12
         private const val MIN_LATERAL_FLOW_FOR_TURN_PX_PER_SEC = 6.0
-        private const val MAX_OPTICAL_YAW_RATE_DEG_SEC = 16.0
+        private const val MAX_OPTICAL_YAW_RATE_DEG_SEC = 45.0
         private const val ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC = 12.0
         private const val ROTATION_LATERAL_FLOW_DISCOUNT = 0.12
         private const val MIN_CAMERA_CALIBRATION_SPEED_MPS = 2.0

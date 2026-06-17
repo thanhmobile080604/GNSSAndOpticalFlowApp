@@ -12,5 +12,12 @@ data class OpticalFlowMetrics(
     val avgMagnitude: Double,
     val confidence: Double,
     val threshold: Double,
-    val sensitivity: Int
+    val sensitivity: Int,
+    /**
+     * Signed horizontal directional consensus of the inlier flow vectors, `sum(dx) / sum(|dx|)`,
+     * in [-1, 1]. Near 0 when the field diverges symmetrically from the vanishing point (driving
+     * straight: left vectors go left, right vectors go right, so they cancel); approaches ±1 when
+     * the whole field pans one way (turning). Used as the primary, speed-independent turn cue.
+     */
+    val lateralCoherence: Double = 0.0
 )

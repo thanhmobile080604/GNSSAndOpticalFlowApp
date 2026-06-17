@@ -11,6 +11,7 @@ import org.opencv.core.Scalar
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 import org.opencv.video.Video
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -41,14 +42,10 @@ class Farneback : OpticalFlow {
     private val minDisplayVectorLength = 9.0
     private var vectorDirectionSign = -1.0
     private var currentSensitivity = 50
-    private var metricsRegionTop = 0.0
-    private var metricsRegionBottom = 1.0
-    private var rejectMovingObjects = false
     private var frameIndex = 0L
     private var visualizationMode = VisualizationMode.VECTORS
     private val ofOutput: OFOutput = OFOutput()
     private val flowColor = Scalar(0.0, 255.0, 0.0)
-    private val outlierColor = Scalar(255.0, 60.0, 60.0)
 
     private data class FlowStats(
         val avgMotion: Point?,
@@ -57,7 +54,8 @@ class Farneback : OpticalFlow {
         val avgDx: Double,
         val avgDy: Double,
         val avgMagnitude: Double,
-        val confidence: Double
+        val confidence: Double,
+        val lateralCoherence: Double = 0.0
     )
 
     override fun run(newFrame: Mat): OFOutput {
@@ -136,17 +134,6 @@ class Farneback : OpticalFlow {
         vectorDirectionSign = if (isMoving) 1.0 else -1.0
     }
 
-    override fun setMetricsRegion(topFraction: Double, bottomFraction: Double) {
-        val top = topFraction.coerceIn(0.0, 1.0)
-        val bottom = bottomFraction.coerceIn(0.0, 1.0)
-        metricsRegionTop = if (bottom > top) top else 0.0
-        metricsRegionBottom = if (bottom > top) bottom else 1.0
-    }
-
-    override fun setRejectMovingObjects(enabled: Boolean) {
-        rejectMovingObjects = enabled
-    }
-
     override fun setSensitivity(value: Int) {
         currentSensitivity = value.coerceIn(0, 100)
         val normalized = (currentSensitivity / 100.0)
@@ -199,12 +186,9 @@ class Farneback : OpticalFlow {
         val yScale = mapRows.toDouble() / flowRows
         val startX = computeCenteredGridStart(mapCols, step)
         val startY = computeCenteredGridStart(mapRows, step)
-        // Confine drawing + metrics to the active vertical band (live routing drops the sky).
-        val regionTopY = mapRows * metricsRegionTop
-        val regionBottomY = mapRows * metricsRegionBottom
         val minMotionSquared = minMotionMagnitude * minMotionMagnitude
 
-        // Pass 1: collect grid samples with significant motion inside the active band.
+        // Pass 1: collect every grid sample with significant motion, across the whole frame.
         val sampleScreenX = ArrayList<Int>()
         val sampleScreenY = ArrayList<Int>()
         val sampleFx = ArrayList<Double>()
@@ -213,10 +197,6 @@ class Farneback : OpticalFlow {
         var gridSampleCount = 0
         var screenY = startY
         while (screenY < mapRows) {
-            if (screenY < regionTopY || screenY >= regionBottomY) {
-                screenY += step
-                continue
-            }
             var screenX = startX
             while (screenX < mapCols) {
                 gridSampleCount++
@@ -255,49 +235,29 @@ class Farneback : OpticalFlow {
             screenY += step
         }
 
-        // Reject independently-moving objects: keep only the dominant-background consensus.
-        val inlierFlags: BooleanArray
-        var movingInlierRatio = 1.0
-        if (rejectMovingObjects && sampleFx.size >= MIN_CONSENSUS_POINTS) {
-            val consensus = MotionConsensus.dominantMotion(
-                DoubleArray(sampleFx.size) { sampleFx[it] },
-                DoubleArray(sampleFy.size) { sampleFy[it] },
-                CONSENSUS_GATE_MULTIPLIER,
-                CONSENSUS_ABS_GATE_PX
-            )
-            inlierFlags = consensus.inliers
-            movingInlierRatio = consensus.inlierRatio
-        } else {
-            inlierFlags = BooleanArray(sampleFx.size) { true }
-        }
-
-        // Pass 2: draw + accumulate over inliers only.
+        // Pass 2: draw + accumulate over EVERY sample (no rejection, one colour). vectorDirectionSign
+        // flips the DRAWN arrow only (a view choice); the metrics use the TRUE flow direction so the
+        // turn logic is not reversed. FBE is kept solely as a confidence signal.
         var sumX = 0.0
-        var sumY = 0.0
-        var totalMagnitude = 0.0
+        var sumAbsX = 0.0
         var sampleCount = 0
         var fbeInliers = 0
         for (index in sampleFx.indices) {
             val fx = sampleFx[index]
             val fy = sampleFy[index]
-            val isInlier = inlierFlags[index]
             if (visualizationMode == VisualizationMode.VECTORS) {
                 val start = Point(sampleScreenX[index].toDouble(), sampleScreenY[index].toDouble())
                 val displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
                 val displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
                 val end = Point(start.x + displayFx, start.y + displayFy)
-                val drawColor = if (isInlier) color else outlierColor
-                Imgproc.line(flowmap, start, end, drawColor, vectorThickness)
-                Imgproc.circle(flowmap, start, dotRadius, drawColor, -1)
+                Imgproc.line(flowmap, start, end, color, vectorThickness)
+                Imgproc.circle(flowmap, start, dotRadius, color, -1)
             }
-            if (isInlier) {
-                sumX += fx * vectorDirectionSign
-                sumY += fy * vectorDirectionSign
-                totalMagnitude += sqrt((fx * fx) + (fy * fy))
-                sampleCount++
-                if (sampleFbe[index]) {
-                    fbeInliers++
-                }
+            sumX += fx
+            sumAbsX += abs(fx)
+            sampleCount++
+            if (sampleFbe[index]) {
+                fbeInliers++
             }
         }
         if (visualizationMode == VisualizationMode.HEATMAP) {
@@ -305,17 +265,22 @@ class Farneback : OpticalFlow {
         }
 
         return if (sampleCount > 0) {
-            val avgDx = sumX / sampleCount
-            val avgDy = sumY / sampleCount
-            val confidence = if (sampleCount > 0) (fbeInliers.toDouble() / sampleCount.toDouble()) * 100.0 * movingInlierRatio else 0.0
+            // Use the MEDIAN flow vector (like KLT) so a few wrong/foreground vectors — e.g. a vehicle
+            // crossing the frame — cannot drag the speed/direction the way a mean would. avgMagnitude
+            // is the magnitude of that median vector, matching KLT.
+            val avgDx = median(sampleFx)
+            val avgDy = median(sampleFy)
+            val confidence = (fbeInliers.toDouble() / sampleCount.toDouble()) * 100.0
+            val lateralCoherence = if (sumAbsX > 1e-3) (sumX / sumAbsX).coerceIn(-1.0, 1.0) else 0.0
             FlowStats(
                 avgMotion = Point(avgDx, avgDy),
                 sampleCount = gridSampleCount,
                 activeVectorCount = sampleCount,
                 avgDx = avgDx,
                 avgDy = avgDy,
-                avgMagnitude = totalMagnitude / sampleCount,
-                confidence = confidence.coerceIn(0.0, 100.0)
+                avgMagnitude = sqrt((avgDx * avgDx) + (avgDy * avgDy)),
+                confidence = confidence.coerceIn(0.0, 100.0),
+                lateralCoherence = lateralCoherence
             )
         } else {
             FlowStats(
@@ -328,6 +293,13 @@ class Farneback : OpticalFlow {
                 confidence = 0.0
             )
         }
+    }
+
+    private fun median(values: List<Double>): Double {
+        if (values.isEmpty()) return 0.0
+        val sorted = values.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
     }
 
     private fun drawDenseHeatmap(flow: Mat, flowmap: Mat, xScale: Double, yScale: Double) {
@@ -427,9 +399,6 @@ class Farneback : OpticalFlow {
         const val HEATMAP_NORMALIZE_MULTIPLIER = 9.0
         const val HEATMAP_INPUT_THRESHOLD_MULTIPLIER = 0.40
         const val HEATMAP_MASK_THRESHOLD_MULTIPLIER = 0.32
-        const val MIN_CONSENSUS_POINTS = 6
-        const val CONSENSUS_GATE_MULTIPLIER = 2.5
-        const val CONSENSUS_ABS_GATE_PX = 2.0
     }
 
     private fun buildOutput(
@@ -453,7 +422,8 @@ class Farneback : OpticalFlow {
             avgMagnitude = stats.avgMagnitude,
             confidence = stats.confidence.coerceIn(0.0, 100.0),
             threshold = minMotionMagnitude,
-            sensitivity = currentSensitivity
+            sensitivity = currentSensitivity,
+            lateralCoherence = stats.lateralCoherence
         )
         return ofOutput
     }

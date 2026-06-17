@@ -16,7 +16,6 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.util.Log
-import android.view.MotionEvent
 import android.view.Surface
 import android.view.View
 import android.widget.TextView
@@ -72,7 +71,6 @@ import org.osmdroid.views.overlay.Polyline
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import kotlin.math.abs
 import kotlin.time.Duration.Companion.milliseconds
 
 class LiveRoutingFragment :
@@ -105,8 +103,6 @@ class LiveRoutingFragment :
     private var lastTickMs = 0L
     private var lastOfflineRouteToastMs = 0L
     private var hasInternetConnection = true
-
-    private var horizonDragging = false
 
     private var opticalFlow: OpticalFlow? = null
     private var cameraProvider: ProcessCameraProvider? = null
@@ -154,9 +150,7 @@ class LiveRoutingFragment :
         initializeRuntimeDependencies()
         setupMap()
         bindInitialRoute(liveRoutingViewModel.restoreOrInitialize(state))
-        liveRoutingViewModel.flowMetricsTopFraction = loadHorizonFraction()
         rebuildActiveOpticalFlow()
-        setupHorizonGuide()
         prepareCameraPanelFromState()
         ensureLocationPermission()
     }
@@ -751,91 +745,8 @@ class LiveRoutingFragment :
         }
         flow.setMovingMode(true)
         flow.setSensitivity(LiveRoutingViewModel.FLOW_SENSITIVITY)
-        flow.setMetricsRegion(
-            liveRoutingViewModel.flowMetricsTopFraction,
-            LiveRoutingViewModel.FLOW_METRICS_BOTTOM_FRACTION
-        )
-        flow.setRejectMovingObjects(true)
         return flow
     }
-
-    /**
-     * Lets the user drag the red horizon guide up/down to level it with the real horizon. The guide
-     * is the top edge of the optical-flow metrics band, so moving it re-points where speed is
-     * sampled (everything below the line). The chosen position is remembered across sessions because
-     * the phone mount stays fixed.
-     */
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupHorizonGuide() = with(binding) {
-        // Re-anchor the guide to the stored fraction whenever the camera card is (re)sized:
-        // first layout, panel reveal, orientation change.
-        cvCamera.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
-            if (bottom - top != oldBottom - oldTop) {
-                applyHorizonFraction(liveRoutingViewModel.flowMetricsTopFraction)
-            }
-        }
-
-        val grabThresholdPx = HORIZON_GRAB_THRESHOLD_DP.dp.toFloat()
-        cvCamera.setOnTouchListener { _, event ->
-            val cardHeight = cvCamera.height
-            if (cardHeight <= 0) return@setOnTouchListener false
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    val lineCenterY = horizonGuide.y + horizonGuide.height / 2f
-                    horizonDragging = abs(event.y - lineCenterY) <= grabThresholdPx
-                    if (horizonDragging) {
-                        cvCamera.parent?.requestDisallowInterceptTouchEvent(true)
-                    }
-                    horizonDragging
-                }
-
-                MotionEvent.ACTION_MOVE -> {
-                    if (!horizonDragging) return@setOnTouchListener false
-                    updateHorizonFraction(event.y.toDouble() / cardHeight)
-                    true
-                }
-
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (!horizonDragging) return@setOnTouchListener false
-                    horizonDragging = false
-                    saveHorizonFraction(liveRoutingViewModel.flowMetricsTopFraction)
-                    true
-                }
-
-                else -> false
-            }
-        }
-    }
-
-    /** Moves the guide to [fraction] of the card height and re-points the flow metrics band at it. */
-    private fun updateHorizonFraction(fraction: Double) {
-        liveRoutingViewModel.flowMetricsTopFraction = fraction // setter clamps to [MIN, MAX]
-        val clamped = liveRoutingViewModel.flowMetricsTopFraction
-        applyHorizonFraction(clamped)
-        opticalFlow?.setMetricsRegion(clamped, LiveRoutingViewModel.FLOW_METRICS_BOTTOM_FRACTION)
-    }
-
-    /** Positions the guide line. The XML centres it (fraction 0.5), so we offset from the centre. */
-    private fun applyHorizonFraction(fraction: Double) = with(binding) {
-        val cardHeight = cvCamera.height
-        if (cardHeight <= 0) return@with
-        horizonGuide.translationY = ((fraction - 0.5) * cardHeight).toFloat()
-    }
-
-    private fun loadHorizonFraction(): Double {
-        val stored = horizonPrefs().getFloat(
-            KEY_HORIZON_FRACTION,
-            LiveRoutingViewModel.FLOW_METRICS_TOP_FRACTION.toFloat()
-        )
-        return stored.toDouble()
-    }
-
-    private fun saveHorizonFraction(fraction: Double) {
-        horizonPrefs().edit().putFloat(KEY_HORIZON_FRACTION, fraction.toFloat()).apply()
-    }
-
-    private fun horizonPrefs() =
-        safeContext().getSharedPreferences(HORIZON_PREFS_NAME, Context.MODE_PRIVATE)
 
     private fun applyOpticalModeUi() = with(binding) {
         setModeButtonSelected(btnKLT, liveRoutingViewModel.activeOpticalMode == OpticalMode.KLT)
@@ -1090,11 +1001,20 @@ class LiveRoutingFragment :
             append(
                 String.format(
                     Locale.US,
-                    "axis %.2f  aTrust %.2f  aLong %+.1f  ±%.0fm",
+                    "axis %.2f  aTrust %.2f  aLong %+.1f  ±%.0fm\n",
                     s.axisConfidence,
                     s.accelTrust,
                     s.longitudinalAccelMps2,
                     s.uncertaintyM
+                )
+            )
+            append(
+                String.format(
+                    Locale.US,
+                    "turn coh %+.2f  optYaw %+.0f°/s  yawScale %.2f",
+                    s.lateralCoherence,
+                    s.opticalYawRateDegPerSec,
+                    s.yawScale
                 )
             )
         }
@@ -1119,9 +1039,6 @@ class LiveRoutingFragment :
     private companion object {
         const val SHOW_DEBUG_HUD = true
         const val CAMERA_PANEL_ANIM_MS = 260L
-        const val HORIZON_GRAB_THRESHOLD_DP = 40
-        const val HORIZON_PREFS_NAME = "live_routing_horizon"
-        const val KEY_HORIZON_FRACTION = "horizon_top_fraction"
         const val OFFLINE_ROUTE_TOAST_COOLDOWN_MS = 15_000L
         const val MESSAGE_NO_ACTIVE_ROUTE = "No active route"
         const val MESSAGE_LOCATION_PERMISSION_REQUIRED = "Location permission is required"
