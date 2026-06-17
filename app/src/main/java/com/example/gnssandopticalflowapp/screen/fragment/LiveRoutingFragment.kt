@@ -151,6 +151,7 @@ class LiveRoutingFragment :
         setupMap()
         bindInitialRoute(liveRoutingViewModel.restoreOrInitialize(state))
         rebuildActiveOpticalFlow()
+        renderTestModeButton()
         prepareCameraPanelFromState()
         ensureLocationPermission()
     }
@@ -171,6 +172,7 @@ class LiveRoutingFragment :
         btnFBVector.setSingleClick {
             setActiveOpticalMode(OpticalMode.FARNEBACK_VECTOR)
         }
+        btnTestMode.setSingleClick { onTestModeTapped() }
     }
 
     override fun initObserver() = Unit
@@ -180,9 +182,9 @@ class LiveRoutingFragment :
         binding.mapView.onResume()
         if (::imuEstimator.isInitialized) imuEstimator.register()
         startLiveRuntime()
-        if (liveRoutingViewModel.cameraPanelVisible || liveRoutingViewModel.gnssAssistActive) {
-            ensureAssistCameraStarted()
-        }
+        // Camera runs the whole time in live routing so the speed scale (vs GNSS) and yaw scale
+        // (vs gyro) keep calibrating even while GNSS is healthy — ready the moment GNSS drops.
+        ensureAssistCameraStarted()
     }
 
     override fun onPause() {
@@ -621,37 +623,29 @@ class LiveRoutingFragment :
                     applyNavigationSnapshot(navigation)
                     refreshRouteAfterLocationChange()
                 } ?: updateSpeedText(result.speedMps)
-                updateDebugHud()
                 delay(LiveRoutingViewModel.TICK_MS.milliseconds)
             }
         }
     }
 
     private fun startTestDropoutTicker() {
-        if (!LiveRoutingViewModel.TEST_GNSS_DROPOUT || testDropoutJob?.isActive == true) return
+        if (liveRoutingViewModel.testMode != LiveRoutingViewModel.TestMode.GNSS_DROPOUT) return
+        if (testDropoutJob?.isActive == true) return
 
         testDropoutJob = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
-                // GNSS present window.
-                delay(LiveRoutingViewModel.TEST_GNSS_PRESENT_MS.milliseconds)
                 applyAssistDecision(liveRoutingViewModel.setTestGnssSuppressed(true))
-                // GNSS outage window.
                 delay(LiveRoutingViewModel.TEST_GNSS_ABSENT_MS.milliseconds)
+
                 applyAssistDecision(liveRoutingViewModel.setTestGnssSuppressed(false))
+                delay(LiveRoutingViewModel.TEST_GNSS_PRESENT_MS.milliseconds)
             }
         }
     }
 
     private fun applyAssistDecision(decision: LiveRoutingViewModel.AssistDecision) {
         if (!decision.changed) return
-
-        if (decision.active) {
-            ensureAssistCameraStarted()
-            renderCameraPanelState(animated = true)
-        } else {
-            renderCameraPanelState(animated = true)
-            stopCamera()
-        }
+        ensureAssistCameraStarted()
     }
 
     private fun prepareCameraPanelFromState() {
@@ -834,8 +828,7 @@ class LiveRoutingFragment :
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .setTargetRotation(rotation)
-            // Configure stabilization for optical-flow odometry (see applyStabilization() for the
-            // OIS-vs-EIS trade-off, which differs between the motorbike and car mounts).
+
             applyStabilization(analysisBuilder)
             val analysis = analysisBuilder
                 .build()
@@ -859,16 +852,11 @@ class LiveRoutingFragment :
     private fun applyStabilization(builder: ImageAnalysis.Builder) {
         runCatching {
             val extender = Camera2Interop.Extender(builder)
-            // EIS (digital/video) crops and warps the frame geometry every frame to make the video
-            // look smooth. That distortion corrupts optical-flow magnitude/direction AND the learned
-            // px->m/s scale, so it is always disabled for odometry.
             extender.setCaptureRequestOption(
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
             )
-            // OIS (optical) shifts the lens, which subtly wobbles the px->m/s scale and adds
-            // correction artifacts to the flow. We keep the raw, scale-stable signal and rely on the
-            // gyro-based rotation suppression in the estimator to clean up rotational shake instead.
+
             extender.setCaptureRequestOption(
                 CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
                 CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
@@ -990,47 +978,22 @@ class LiveRoutingFragment :
         binding.tvSpeed.text = String.format(Locale.US, "%.1fkm/h", speedMps.coerceAtLeast(0.0) * 3.6)
     }
 
-    private fun updateDebugHud() {
-        if (!SHOW_DEBUG_HUD || !isAdded || view == null) return
+    private fun onTestModeTapped() {
+        val mode = liveRoutingViewModel.cycleTestMode()
+        renderTestModeButton(mode)
+        restartTestDropout()
+    }
 
-        val s = liveRoutingViewModel.debugSnapshot()
-        binding.tvDebugHud.text = buildString {
-            append(if (s.assistActive) "DR · no GPS" else "GPS OK")
-            append("\n")
-            append(String.format(Locale.US, "GPS %.0f   Est %.0f km/h\n", s.gpsSpeedMps * 3.6, s.estSpeedMps * 3.6))
-            append(
-                String.format(
-                    Locale.US,
-                    "flow %.0f%s  scale %.3f c%.2f\n",
-                    s.flowSpeedMps * 3.6,
-                    if (s.flowUsable) "" else "·off",
-                    s.scaleRatio,
-                    s.scaleConfidence
-                )
-            )
-            append(
-                String.format(
-                    Locale.US,
-                    "axis %.2f  aTrust %.2f  aLong %+.1f  ±%.0fm\n",
-                    s.axisConfidence,
-                    s.accelTrust,
-                    s.longitudinalAccelMps2,
-                    s.uncertaintyM
-                )
-            )
-            append(
-                String.format(
-                    Locale.US,
-                    "turn coh %+.2f  optYaw %+.0f°/s  yawScale %.2f",
-                    s.lateralCoherence,
-                    s.opticalYawRateDegPerSec,
-                    s.yawScale
-                )
-            )
+    private fun renderTestModeButton(mode: LiveRoutingViewModel.TestMode = liveRoutingViewModel.testMode) {
+        binding.btnTestMode.text = when (mode) {
+            LiveRoutingViewModel.TestMode.REAL_LIFE -> "REAL"
+            LiveRoutingViewModel.TestMode.GNSS_DROPOUT -> "DROP"
         }
-        if (binding.tvDebugHud.visibility != View.VISIBLE) {
-            binding.tvDebugHud.visibility = View.VISIBLE
-        }
+    }
+
+    private fun restartTestDropout() {
+        testDropoutJob = testDropoutJob.cancelAndClear()
+        startTestDropoutTicker()
     }
 
     private fun shortPlaceName(name: String): String {
@@ -1047,7 +1010,6 @@ class LiveRoutingFragment :
     }
 
     private companion object {
-        const val SHOW_DEBUG_HUD = true
         const val CAMERA_PANEL_ANIM_MS = 260L
         const val OFFLINE_ROUTE_TOAST_COOLDOWN_MS = 15_000L
         const val MESSAGE_NO_ACTIVE_ROUTE = "No active route"

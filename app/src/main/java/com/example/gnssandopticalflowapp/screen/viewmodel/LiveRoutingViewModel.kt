@@ -21,6 +21,12 @@ class LiveRoutingViewModel : ViewModel() {
         FARNEBACK_VECTOR
     }
 
+    /** Test harness mode (see [testMode] / [cycleTestMode]). */
+    enum class TestMode {
+        REAL_LIFE,
+        GNSS_DROPOUT
+    }
+
     data class InitialRouteUi(
         val destinationPoint: GeoPoint,
         val routePoints: List<GeoPoint>,
@@ -58,24 +64,6 @@ class LiveRoutingViewModel : ViewModel() {
     data class CameraPanelState(
         val visible: Boolean,
         val showHandle: Boolean
-    )
-
-    /** Realtime internal state for the on-screen debug HUD (diagnosing GNSS-outage tracking). */
-    data class DebugSnapshot(
-        val assistActive: Boolean,
-        val gpsSpeedMps: Double,
-        val estSpeedMps: Double,
-        val flowSpeedMps: Double,
-        val flowUsable: Boolean,
-        val scaleRatio: Double,
-        val scaleConfidence: Double,
-        val axisConfidence: Double,
-        val accelTrust: Double,
-        val longitudinalAccelMps2: Double,
-        val uncertaintyM: Double,
-        val lateralCoherence: Double,
-        val opticalYawRateDegPerSec: Double,
-        val yawScale: Double
     )
 
     private data class VisualOdometry(
@@ -125,11 +113,13 @@ class LiveRoutingViewModel : ViewModel() {
         private set
     var activeOpticalMode = OpticalMode.KLT
         private set
+    var testMode = TestMode.REAL_LIFE
+        private set
     var gnssAssistActive = false
         private set
-    var cameraDismissedForCurrentGnssLoss = false
-        private set
-    var cameraPanelVisible = false
+    // Camera panel is purely user-controlled (opens on entry, user can hide it); the camera keeps
+    // running either way. NOT tied to GNSS state.
+    var cameraPanelVisible = true
         private set
 
     val currentRouteOrigin: GeoPoint?
@@ -159,6 +149,13 @@ class LiveRoutingViewModel : ViewModel() {
     private var lastRouteDeviationSampleMs = 0L
     private var lastRouteRefreshStartedMs = 0L
 
+    /** Whether GNSS is treated as unavailable right now, per the active [testMode]. */
+    private val gnssTestSuppressed: Boolean
+        get() = when (testMode) {
+            TestMode.REAL_LIFE -> false
+            TestMode.GNSS_DROPOUT -> testGnssSuppressed
+        }
+
     private var flowFrameCount = 0
     private var lastFlowFrameTimeMs = 0L
     private var emaFlowMagPxPerSec = 0.0
@@ -170,9 +167,6 @@ class LiveRoutingViewModel : ViewModel() {
     private var dynamicFlowToMpsRatio = FLOW_PX_PER_SEC_TO_MPS
     private var dynamicFlowToYawRatio = FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC
     private var cameraSpeedScaleConfidence = INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE
-    private var lastVisualSpeedMps = 0.0
-    private var lastVisualUsable = false
-    private var lastOpticalYawRateDegPerSec = 0.0
     private val emaAccelDevice = DoubleArray(3)
     private var hasAccelSample = false
     private val forwardAxisDevice = DoubleArray(3)
@@ -191,8 +185,7 @@ class LiveRoutingViewModel : ViewModel() {
         strongGnssPoints.clear()
         opticalAssistSegments.clear()
         gnssAssistActive = false
-        cameraDismissedForCurrentGnssLoss = false
-        cameraPanelVisible = false
+        cameraPanelVisible = true
         testGnssSuppressed = false
         gnssTravelSegmentOpen = true
         offRouteSampleCount = 0
@@ -275,8 +268,7 @@ class LiveRoutingViewModel : ViewModel() {
     fun clearRoute() {
         routeState = null
         gnssAssistActive = false
-        cameraDismissedForCurrentGnssLoss = false
-        cameraPanelVisible = false
+        cameraPanelVisible = true
         gnssTravelSegmentOpen = true
         offRouteSampleCount = 0
         lastRouteDeviationSampleMs = 0L
@@ -297,20 +289,27 @@ class LiveRoutingViewModel : ViewModel() {
         resetCameraSpeedScale()
     }
 
+    fun cycleTestMode(): TestMode {
+        testMode = when (testMode) {
+            TestMode.REAL_LIFE -> TestMode.GNSS_DROPOUT
+            TestMode.GNSS_DROPOUT -> TestMode.REAL_LIFE
+        }
+        if (testMode != TestMode.GNSS_DROPOUT) testGnssSuppressed = false
+        return testMode
+    }
+
     fun dismissCameraPanel() {
-        cameraDismissedForCurrentGnssLoss = true
         cameraPanelVisible = false
     }
 
     fun requestCameraPanel() {
-        cameraDismissedForCurrentGnssLoss = false
         cameraPanelVisible = true
     }
 
     fun cameraPanelState(): CameraPanelState {
         return CameraPanelState(
             visible = cameraPanelVisible,
-            showHandle = !cameraPanelVisible && gnssAssistActive && cameraDismissedForCurrentGnssLoss
+            showHandle = !cameraPanelVisible // re-open handle whenever the user has hidden the panel
         )
     }
 
@@ -334,7 +333,7 @@ class LiveRoutingViewModel : ViewModel() {
         }
 
         val point = GeoPoint(location.latitude, location.longitude)
-        if (TEST_GNSS_DROPOUT && testGnssSuppressed) {
+        if (gnssTestSuppressed) {
             return GnssUpdateResult(
                 accepted = false,
                 navigation = null,
@@ -415,8 +414,6 @@ class LiveRoutingViewModel : ViewModel() {
     ): TickResult {
         updateImuAccel(horizontalAccelDevice)
         val visualOdometry = resolveVisualOdometry(nowMs, dtSec, yawRateDegPerSec)
-        lastVisualSpeedMps = visualOdometry.speedMps
-        lastVisualUsable = visualOdometry.usable
         val assistDecision = setGnssAssistActive(!hasCurrentlyUsableGnss(nowMs))
         if (!assistDecision.active) {
             calibrateCameraSpeedScale(visualOdometry)
@@ -504,25 +501,6 @@ class LiveRoutingViewModel : ViewModel() {
     fun onFlowFrameStarted(): Boolean {
         flowFrameCount++
         return flowFrameCount % FEATURE_UPDATE_INTERVAL == 0
-    }
-
-    fun debugSnapshot(): DebugSnapshot {
-        return DebugSnapshot(
-            assistActive = gnssAssistActive,
-            gpsSpeedMps = lastTrueSpeedMps,
-            estSpeedMps = if (gnssAssistActive) deadReckoningSpeedMps else lastTrueSpeedMps,
-            flowSpeedMps = lastVisualSpeedMps,
-            flowUsable = lastVisualUsable,
-            scaleRatio = dynamicFlowToMpsRatio,
-            scaleConfidence = cameraSpeedScaleConfidence,
-            axisConfidence = forwardAxisConfidence,
-            accelTrust = longitudinalAccelTrust(),
-            longitudinalAccelMps2 = currentLongitudinalAccel(),
-            uncertaintyM = positionUncertaintyM,
-            lateralCoherence = emaFlowCoherence,
-            opticalYawRateDegPerSec = lastOpticalYawRateDegPerSec,
-            yawScale = dynamicFlowToYawRatio
-        )
     }
 
     fun onOpticalMetrics(metrics: OpticalFlowMetrics, nowMs: Long = System.currentTimeMillis()) {
@@ -686,7 +664,6 @@ class LiveRoutingViewModel : ViewModel() {
         } else {
             0.0
         }
-        lastOpticalYawRateDegPerSec = opticalYawRateDegPerSec
 
         val yawMag = abs(yawRateDegPerSec)
         val amplifiedGyroYaw = if (yawMag > GYRO_YAW_NOISE_FLOOR_DEG_SEC) {
@@ -1276,18 +1253,11 @@ class LiveRoutingViewModel : ViewModel() {
             gnssAssistActive = active
             if (active) {
                 positionUncertaintyM = positionUncertaintyM.coerceAtLeast(GNSS_TO_DR_INITIAL_UNCERTAINTY_M)
-                currentPoint?.let { 
+                currentPoint?.let {
                     startNewSegment(opticalAssistSegments, it)
                     weakGnssPoints.add(it)
                 }
                 gnssTravelSegmentOpen = false
-            }
-            if (active && !cameraDismissedForCurrentGnssLoss) {
-                cameraPanelVisible = true
-            }
-            if (!active) {
-                cameraDismissedForCurrentGnssLoss = false
-                cameraPanelVisible = false
             }
         }
         return AssistDecision(active = gnssAssistActive, changed = changed)
@@ -1301,7 +1271,7 @@ class LiveRoutingViewModel : ViewModel() {
     }
 
     private fun hasCurrentlyUsableGnss(nowMs: Long): Boolean {
-        if (TEST_GNSS_DROPOUT && testGnssSuppressed) return false
+        if (gnssTestSuppressed) return false
         val ageMs = nowMs - lastAcceptedGnssMs
         return lastAcceptedGnssMs > 0L && ageMs <= GNSS_LOCATION_STALE_MS
     }
@@ -1315,7 +1285,6 @@ class LiveRoutingViewModel : ViewModel() {
         emaFlowCoherence = 0.0
         lastFlowSampleMs = 0L
         lastFlowConfidence = 0.0
-        lastOpticalYawRateDegPerSec = 0.0
     }
 
     private fun resetCameraSpeedScale() {
@@ -1527,8 +1496,7 @@ class LiveRoutingViewModel : ViewModel() {
         // === Runtime cadence & GNSS-dropout simulation — tune when changing update rate / test ===
         const val LOCATION_UPDATE_MS = 1000L
         const val TICK_MS = 50L
-        const val TEST_GNSS_DROPOUT = true
-        const val TEST_GNSS_PRESENT_MS = 3_000L
+        const val TEST_GNSS_PRESENT_MS = 10_000L
         const val TEST_GNSS_ABSENT_MS = 10_000L
 
         // === GNSS gating & quality — tune when fixes are wrongly accepted/rejected ===

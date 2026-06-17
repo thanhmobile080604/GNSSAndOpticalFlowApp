@@ -150,24 +150,20 @@
         app:layout_constraintTop_toTopOf="@id/ivBack" />
 
     <TextView
-        android:id="@+id/tvDebugHud"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:layout_marginTop="8dp"
-        android:background="#AA000000"
-        android:fontFamily="monospace"
-        android:lineSpacingExtra="1dp"
-        android:padding="8dp"
-        android:textColor="#FFFFFF"
-        android:textSize="11sp"
-        android:translationZ="120dp"
-        android:visibility="gone"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/tvSpeed"
-        app:layout_constraintWidth_max="wrap" />
+        android:id="@+id/btnTestMode"
+        android:layout_width="54dp"
+        android:layout_height="54dp"
+        android:layout_marginTop="14dp"
+        android:background="@drawable/bg_glass_black_button"
+        android:gravity="center"
+        android:text="REAL"
+        android:textColor="@color/black"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:translationZ="100dp"
+        app:layout_constraintEnd_toEndOf="@id/ivBack"
+        app:layout_constraintStart_toStartOf="@id/ivBack"
+        app:layout_constraintTop_toBottomOf="@id/ivBack" />
 
     <ImageView
         android:id="@+id/ivShowCameraView"
