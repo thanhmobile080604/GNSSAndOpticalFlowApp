@@ -632,8 +632,12 @@ class LiveRoutingFragment :
 
         testDropoutJob = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
-                delay(LiveRoutingViewModel.TEST_GNSS_DROPOUT_INTERVAL_MS.milliseconds)
-                applyAssistDecision(liveRoutingViewModel.toggleTestGnssDropout())
+                // GNSS present window.
+                delay(LiveRoutingViewModel.TEST_GNSS_PRESENT_MS.milliseconds)
+                applyAssistDecision(liveRoutingViewModel.setTestGnssSuppressed(true))
+                // GNSS outage window.
+                delay(LiveRoutingViewModel.TEST_GNSS_ABSENT_MS.milliseconds)
+                applyAssistDecision(liveRoutingViewModel.setTestGnssSuppressed(false))
             }
         }
     }
@@ -992,7 +996,7 @@ class LiveRoutingFragment :
         val s = liveRoutingViewModel.debugSnapshot()
         binding.tvDebugHud.text = buildString {
             append(if (s.assistActive) "DR · no GPS" else "GPS OK")
-            append("  [").append(s.vehicleKind).append("]\n")
+            append("\n")
             append(String.format(Locale.US, "GPS %.0f   Est %.0f km/h\n", s.gpsSpeedMps * 3.6, s.estSpeedMps * 3.6))
             append(
                 String.format(

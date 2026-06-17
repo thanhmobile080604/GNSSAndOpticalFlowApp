@@ -21,17 +21,6 @@ class LiveRoutingViewModel : ViewModel() {
         FARNEBACK_VECTOR
     }
 
-    /**
-     * Selects the inertial dead-reckoning tuning. MOTORBIKE assumes a loosely-held phone (e.g. on
-     * the rider's chest): more dynamic acceleration but a non-rigid, vibrating mount, so it learns
-     * the forward axis more cautiously and trusts the accelerometer less. CAR assumes a rigid
-     * windshield mount: smoother, so the inertial signal can be trusted more.
-     */
-    enum class VehicleKind {
-        MOTORBIKE,
-        CAR
-    }
-
     data class InitialRouteUi(
         val destinationPoint: GeoPoint,
         val routePoints: List<GeoPoint>,
@@ -74,7 +63,6 @@ class LiveRoutingViewModel : ViewModel() {
     /** Realtime internal state for the on-screen debug HUD (diagnosing GNSS-outage tracking). */
     data class DebugSnapshot(
         val assistActive: Boolean,
-        val vehicleKind: VehicleKind,
         val gpsSpeedMps: Double,
         val estSpeedMps: Double,
         val flowSpeedMps: Double,
@@ -136,8 +124,6 @@ class LiveRoutingViewModel : ViewModel() {
     var routeState: LiveRouteState? = null
         private set
     var activeOpticalMode = OpticalMode.KLT
-        private set
-    var vehicleKind = VehicleKind.MOTORBIKE
         private set
     var gnssAssistActive = false
         private set
@@ -204,7 +190,7 @@ class LiveRoutingViewModel : ViewModel() {
     private var prevGnssHeadingDeg = 0.0
     private var hasPrevGnssAccelRef = false
     private var stationaryHoldMs = 0L
-    private var vehicleProfile = MOTORBIKE_PROFILE
+    private val vehicleProfile = VEHICLE_PROFILE
 
     fun initialize(state: LiveRouteState, nowMs: Long = System.currentTimeMillis()): InitialRouteUi {
         routeState = state
@@ -317,13 +303,6 @@ class LiveRoutingViewModel : ViewModel() {
         activeOpticalMode = mode
         resetOpticalRuntime()
         resetCameraSpeedScale()
-    }
-
-    fun setVehicleKind(kind: VehicleKind) {
-        if (vehicleKind == kind) return
-
-        vehicleKind = kind
-        vehicleProfile = profileFor(kind)
     }
 
     fun dismissCameraPanel() {
@@ -523,8 +502,8 @@ class LiveRoutingViewModel : ViewModel() {
         )
     }
 
-    fun toggleTestGnssDropout(nowMs: Long = System.currentTimeMillis()): AssistDecision {
-        testGnssSuppressed = !testGnssSuppressed
+    fun setTestGnssSuppressed(suppressed: Boolean, nowMs: Long = System.currentTimeMillis()): AssistDecision {
+        testGnssSuppressed = suppressed
         return evaluateGnssAssist(nowMs)
     }
 
@@ -546,7 +525,6 @@ class LiveRoutingViewModel : ViewModel() {
     fun debugSnapshot(): DebugSnapshot {
         return DebugSnapshot(
             assistActive = gnssAssistActive,
-            vehicleKind = vehicleKind,
             gpsSpeedMps = lastTrueSpeedMps,
             estSpeedMps = if (gnssAssistActive) deadReckoningSpeedMps else lastTrueSpeedMps,
             flowSpeedMps = lastVisualSpeedMps,
@@ -1426,11 +1404,6 @@ class LiveRoutingViewModel : ViewModel() {
         positionUncertaintyM = INITIAL_POSITION_UNCERTAINTY_M
     }
 
-    private fun profileFor(kind: VehicleKind): VehicleProfile = when (kind) {
-        VehicleKind.MOTORBIKE -> MOTORBIKE_PROFILE
-        VehicleKind.CAR -> CAR_PROFILE
-    }
-
     private fun resetInertialRuntime() {
         emaAccelDevice.fill(0.0)
         hasAccelSample = false
@@ -1637,7 +1610,9 @@ class LiveRoutingViewModel : ViewModel() {
         const val LOCATION_UPDATE_MS = 1000L
         const val TICK_MS = 50L
         const val TEST_GNSS_DROPOUT = true
-        const val TEST_GNSS_DROPOUT_INTERVAL_MS = 10_000L
+        // Test cycle: GNSS present for 3s, then suppressed (outage) for 10s, repeating.
+        const val TEST_GNSS_PRESENT_MS = 3_000L
+        const val TEST_GNSS_ABSENT_MS = 10_000L
         const val FLOW_SENSITIVITY = 100
 
         private const val GNSS_LOCATION_STALE_MS = 5_000L
@@ -1769,9 +1744,12 @@ class LiveRoutingViewModel : ViewModel() {
 
         private val NO_ACCEL_SAMPLE = FloatArray(3)
 
-        // Phone held loosely (e.g. on the chest of a motorbike rider): non-rigid, vibrating mount
-        // but harder acceleration/braking — learn the forward axis cautiously and trust accel less.
-        private val MOTORBIKE_PROFILE = VehicleProfile(
+        // Single vehicle profile (motorbike/car treated alike: the phone mount stays upright, so no
+        // lean-specific handling is needed). Tuned for a phone in a handlebar/dashboard holder:
+        // allows hard acceleration/braking and learns the forward axis cautiously (vibrating mount).
+        // lowSpeedYawGainMax amplifies only the yaw ABOVE GYRO_YAW_NOISE_FLOOR_DEG_SEC, so a gentle
+        // low-speed steer still registers as a real turn while straight-line gyro drift stays put.
+        private val VEHICLE_PROFILE = VehicleProfile(
             maxDriveAccelMps2 = 6.0,
             maxBrakeAccelMps2 = 9.0,
             speedRiseLimitMps2 = 6.0,
@@ -1781,28 +1759,7 @@ class LiveRoutingViewModel : ViewModel() {
             maxInertialTrust = 0.70,
             zuptEnterSpeedMps = 1.8,
             zuptAccelMps2 = 1.2,
-            // A leaning two-wheeler taking a slow, tight corner: the gravity-projected gyro yaw
-            // under-reads the real heading change, so amplify it strongly the slower we go. Set high
-            // for "treat any gentle steer as a real turn"; safe to push higher because only the yaw
-            // above GYRO_YAW_NOISE_FLOOR_DEG_SEC is amplified (straight-line drift stays at the floor).
             lowSpeedYawGainMax = 6.0
-        )
-
-        // Phone in a rigid windshield mount in a car: smoother and consistent — the inertial signal
-        // can be learned faster and trusted fully.
-        private val CAR_PROFILE = VehicleProfile(
-            maxDriveAccelMps2 = 4.0,
-            maxBrakeAccelMps2 = 8.0,
-            speedRiseLimitMps2 = 3.5,
-            speedDropLimitMps2 = 6.0,
-            forwardAxisAlpha = 0.20,
-            forwardAxisConfidenceStep = 0.06,
-            maxInertialTrust = 1.0,
-            zuptEnterSpeedMps = 1.5,
-            zuptAccelMps2 = 0.6,
-            // A car does not lean, so its gyro reads the heading change faithfully — only a slight
-            // low-speed gain to offset gentle multi-input corners.
-            lowSpeedYawGainMax = 12.0
         )
     }
 }
