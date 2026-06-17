@@ -79,6 +79,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Overlay
 import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import java.util.Locale
 
 @RequiresApi(Build.VERSION_CODES.R)
@@ -202,6 +203,7 @@ class GNSSViewerFragment :
 
         binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
         binding.mapView.setMultiTouchControls(true)
+        binding.mapView.overlays.add(RotationGestureOverlay(binding.mapView).apply { isEnabled = true })
         binding.mapView.zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
         binding.mapView.controller.setZoom(18.0)
         // Default position before location arrives
@@ -1614,8 +1616,8 @@ class GNSSViewerFragment :
                 earthRenderer.smoothScrollTo(loc.latitude.toFloat(), loc.longitude.toFloat(), 1.0f)
             }
         } else {
-            // Animate to user location on 2D map
             val point = GeoPoint(loc.latitude, loc.longitude)
+            binding.mapView.mapOrientation = 0f
             binding.mapView.controller.animateTo(point)
             if (binding.mapView.zoomLevelDouble < 15.0) {
                 binding.mapView.controller.setZoom(18.0)
