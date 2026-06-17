@@ -604,6 +604,12 @@ class LiveRoutingFragment :
                 val dtSec = ((nowMs - lastTickMs).coerceIn(1L, 500L)) / 1000.0
                 lastTickMs = nowMs
 
+                // Re-learn the gyro zero-rate bias whenever the vehicle is confidently stopped, so
+                // getYawRate() stays drift-free going into the next GNSS outage.
+                if (liveRoutingViewModel.isStationaryForBias(nowMs)) {
+                    imuEstimator.learnGyroBias()
+                }
+
                 val result = liveRoutingViewModel.onTick(
                     nowMs = nowMs,
                     dtSec = dtSec,

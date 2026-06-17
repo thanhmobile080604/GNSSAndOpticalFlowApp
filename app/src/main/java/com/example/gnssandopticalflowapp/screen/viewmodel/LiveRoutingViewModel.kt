@@ -528,6 +528,16 @@ class LiveRoutingViewModel : ViewModel() {
         return evaluateGnssAssist(nowMs)
     }
 
+    /**
+     * True when the vehicle is confidently stationary — GNSS is healthy and reporting ~zero speed.
+     * This is the only safe moment to (re)learn the gyro zero-rate bias: true rotation is zero, so
+     * the gyro reading is pure bias. During an outage we coast on the last learned bias rather than
+     * risk a wrong estimate from an ambiguous "no-flow" frame (which can also mean camera-off).
+     */
+    fun isStationaryForBias(nowMs: Long = System.currentTimeMillis()): Boolean {
+        return hasCurrentlyUsableGnss(nowMs) && lastTrueSpeedMps < GNSS_STATIONARY_SPEED_FLOOR_MPS
+    }
+
     fun onFlowFrameStarted(): Boolean {
         flowFrameCount++
         return flowFrameCount % FEATURE_UPDATE_INTERVAL == 0
