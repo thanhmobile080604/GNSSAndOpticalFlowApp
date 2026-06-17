@@ -123,11 +123,9 @@ class Farneback : OpticalFlow {
     }
 
     override fun resetMotionVector() {
-        // TBD
     }
 
     override fun updateFeatures() {
-        // Do nothing
     }
 
     override fun setMovingMode(isMoving: Boolean) {
@@ -235,9 +233,8 @@ class Farneback : OpticalFlow {
             screenY += step
         }
 
-        // Pass 2: draw + accumulate over EVERY sample (no rejection, one colour). vectorDirectionSign
-        // flips the DRAWN arrow only (a view choice); the metrics use the TRUE flow direction so the
-        // turn logic is not reversed. FBE is kept solely as a confidence signal.
+        // Pass 2: accumulate over EVERY sample (no rejection); draw arrow uses vectorDirectionSign,
+        // metrics use true flow. FBE is a confidence signal only.
         var sumX = 0.0
         var sumAbsX = 0.0
         var sampleCount = 0
@@ -265,9 +262,7 @@ class Farneback : OpticalFlow {
         }
 
         return if (sampleCount > 0) {
-            // Use the MEDIAN flow vector (like KLT) so a few wrong/foreground vectors — e.g. a vehicle
-            // crossing the frame — cannot drag the speed/direction the way a mean would. avgMagnitude
-            // is the magnitude of that median vector, matching KLT.
+            // Median (like KLT): robust to a few wrong/foreground vectors that a mean would follow.
             val avgDx = median(sampleFx)
             val avgDy = median(sampleFy)
             val confidence = (fbeInliers.toDouble() / sampleCount.toDouble()) * 100.0

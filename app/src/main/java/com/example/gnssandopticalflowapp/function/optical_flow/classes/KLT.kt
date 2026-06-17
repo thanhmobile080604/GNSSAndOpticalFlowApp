@@ -43,7 +43,6 @@ class KLT : OpticalFlow {
     private var currMv: Point? = null
     private var currentSensitivity: Int = 50
     private var frameIndex: Long = 0L
-    // LK parameters for improved tracking
     private val lkWinSize: Size = Size(21.0, 21.0)
     private val lkMaxLevel: Int = 3
     private val lkCriteria: TermCriteria = TermCriteria(TermCriteria.COUNT + TermCriteria.EPS, 30, 0.01)
@@ -178,8 +177,7 @@ class KLT : OpticalFlow {
         val currPtsArray = currPts.toArray()
         val backwardPtsArray = backwardPts.toArray()
 
-        // Keep EVERY tracked vector — no rejection. The forward-backward error is still measured,
-        // but only as a confidence signal; it no longer drops any vector. The whole frame is used.
+        // Keep EVERY tracked vector (whole frame); FBE is measured for confidence only, drops nothing.
         val trackedMotions = ArrayList<TrackMotion>()
         val allDxList = ArrayList<Double>()
         val allDyList = ArrayList<Double>()
@@ -195,7 +193,7 @@ class KLT : OpticalFlow {
                     val ptBack = backwardPtsArray[i]
                     val errX = pt1.x - ptBack.x
                     val errY = pt1.y - ptBack.y
-                    if (errX * errX + errY * errY <= 2.25) fbeValid = true // confidence only, no drop
+                    if (errX * errX + errY * errY <= 2.25) fbeValid = true
                 }
                 fbeTotalTracked++
                 if (fbeValid) fbeInliers++
@@ -213,7 +211,6 @@ class KLT : OpticalFlow {
         val dominantDx = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDxList) else 0.0
         val dominantDy = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDyList) else 0.0
 
-        // Keep motion above the jitter floor (still "all vectors" — only sensor noise is ignored).
         val motions = ArrayList<TrackMotion>()
         for (motion in trackedMotions) {
             val dx = motion.dx - dominantDx
@@ -222,8 +219,6 @@ class KLT : OpticalFlow {
             motions.add(TrackMotion(motion.start, dx, dy))
         }
 
-        // Draw every vector in one colour. vectorDirectionSign flips the DRAWN arrow only (a view
-        // choice); the metrics below use the TRUE flow direction so the turn logic is not reversed.
         var coherenceSumDx = 0.0
         var coherenceSumAbsDx = 0.0
         for (motion in motions) {
