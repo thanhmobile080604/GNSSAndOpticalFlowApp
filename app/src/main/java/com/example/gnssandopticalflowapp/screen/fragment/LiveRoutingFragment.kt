@@ -16,6 +16,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.util.Log
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.View
 import android.widget.TextView
@@ -68,6 +69,7 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -103,6 +105,10 @@ class LiveRoutingFragment :
     private var lastTickMs = 0L
     private var lastOfflineRouteToastMs = 0L
     private var hasInternetConnection = true
+    private var isFollowingNavigation = true
+    private var lastNavPoint: GeoPoint? = null
+    private var lastNavHeadingDeg = 0.0
+    private var lastSatellitesInFix = 0
 
     private var opticalFlow: OpticalFlow? = null
     private var cameraProvider: ProcessCameraProvider? = null
@@ -132,7 +138,13 @@ class LiveRoutingFragment :
 
     private val gnssStatusCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
+            var used = 0
+            for (i in 0 until status.satelliteCount) {
+                if (status.usedInFix(i)) used++
+            }
+            lastSatellitesInFix = used
             applyAssistDecision(liveRoutingViewModel.onGnssStatusChanged(status.satelliteCount))
+            updateGnssStrengthText()
         }
     }
 
@@ -152,6 +164,7 @@ class LiveRoutingFragment :
         bindInitialRoute(liveRoutingViewModel.restoreOrInitialize(state))
         rebuildActiveOpticalFlow()
         renderTestModeButton()
+        updateGnssStrengthText()
         prepareCameraPanelFromState()
         ensureLocationPermission()
     }
@@ -173,6 +186,7 @@ class LiveRoutingFragment :
             setActiveOpticalMode(OpticalMode.FARNEBACK_VECTOR)
         }
         btnTestMode.setSingleClick { onTestModeTapped() }
+        ivRecenter.setSingleClick { setFollowing(true) }
     }
 
     override fun initObserver() = Unit
@@ -256,6 +270,7 @@ class LiveRoutingFragment :
         orientationUnlocked = false
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupMap() {
         val ctx = safeContext()
         OsmConfiguration.getInstance().userAgentValue = ctx.packageName
@@ -266,7 +281,28 @@ class LiveRoutingFragment :
 
         binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
         binding.mapView.setMultiTouchControls(true)
+        // Two-finger rotation, plus a touch hook that drops auto-follow the moment the user drags or
+        // rotates the map (programmatic recenters don't fire touch events, so following stays intact).
+        binding.mapView.overlays.add(RotationGestureOverlay(binding.mapView).apply { isEnabled = true })
+        binding.mapView.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_MOVE) setFollowing(false)
+            false
+        }
         binding.mapView.controller.setZoom(18.0)
+    }
+
+    private fun setFollowing(follow: Boolean) {
+        if (isFollowingNavigation == follow) return
+        isFollowingNavigation = follow
+        binding.ivRecenter.visibility = if (follow) View.GONE else View.VISIBLE
+        if (follow) {
+            lastNavPoint?.let { point ->
+                binding.mapView.mapOrientation = (-lastNavHeadingDeg).toFloat()
+                navigationMarker?.rotation = lastNavHeadingDeg.toFloat()
+                binding.mapView.controller.animateTo(point)
+                binding.mapView.invalidate()
+            }
+        }
     }
 
     private fun bindInitialRoute(initialRoute: LiveRoutingViewModel.InitialRouteUi) {
@@ -400,14 +436,19 @@ class LiveRoutingFragment :
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                 icon = buildMarkerIcon(R.drawable.ic_arrow_navigation, 46)
                 title = "Navigation"
+                isFlat = true
             }
             binding.mapView.overlays.add(navigationMarker)
         }
 
+        lastNavPoint = point
+        lastNavHeadingDeg = headingDeg
         navigationMarker?.position = point
-        navigationMarker?.rotation = 0f
-        binding.mapView.mapOrientation = (-headingDeg).toFloat()
-        binding.mapView.controller.setCenter(point)
+        navigationMarker?.rotation = headingDeg.toFloat()
+        if (isFollowingNavigation) {
+            binding.mapView.mapOrientation = (-headingDeg).toFloat()
+            binding.mapView.controller.setCenter(point)
+        }
         binding.mapView.invalidate()
     }
 
@@ -646,6 +687,17 @@ class LiveRoutingFragment :
     private fun applyAssistDecision(decision: LiveRoutingViewModel.AssistDecision) {
         if (!decision.changed) return
         ensureAssistCameraStarted()
+        updateGnssStrengthText()
+    }
+
+    private fun updateGnssStrengthText() {
+        if (!isAdded || view == null) return
+        val label = when {
+            liveRoutingViewModel.gnssAssistActive -> "weak"
+            lastSatellitesInFix >= STRONG_FIX_SATELLITES -> "strong"
+            else -> "medium"
+        }
+        binding.tvGnssStatus.text = "GNSS: $label"
     }
 
     private fun prepareCameraPanelFromState() {
@@ -667,6 +719,7 @@ class LiveRoutingFragment :
         binding.cameraViewGroup.visibility = View.VISIBLE
         binding.cameraViewGroup.animate().cancel()
         binding.ivShowCameraView.animate().cancel()
+        binding.ivRecenter.animate().cancel()
         if (animated) {
             binding.cameraViewGroup.animate()
                 .translationX(0f)
@@ -681,12 +734,19 @@ class LiveRoutingFragment :
                     binding.ivShowCameraView.visibility = View.GONE
                 }
                 .start()
+            binding.ivRecenter.animate()
+                .translationX(0f)
+                .translationY(0f)
+                .setDuration(CAMERA_PANEL_ANIM_MS)
+                .start()
         } else {
             binding.cameraViewGroup.translationX = 0f
             binding.cameraViewGroup.translationY = 0f
             binding.ivShowCameraView.translationX = 0f
             binding.ivShowCameraView.translationY = 0f
             binding.ivShowCameraView.visibility = View.GONE
+            binding.ivRecenter.translationX = 0f
+            binding.ivRecenter.translationY = 0f
         }
     }
 
@@ -701,6 +761,7 @@ class LiveRoutingFragment :
         binding.ivShowCameraView.visibility = if (showHandle) View.VISIBLE else View.GONE
         binding.cameraViewGroup.animate().cancel()
         binding.ivShowCameraView.animate().cancel()
+        binding.ivRecenter.animate().cancel()
         if (animated) {
             binding.cameraViewGroup.animate()
                 .translationX(hiddenX)
@@ -717,11 +778,18 @@ class LiveRoutingFragment :
                 binding.ivShowCameraView.translationX = hiddenX
                 binding.ivShowCameraView.translationY = hiddenY
             }
+            binding.ivRecenter.animate()
+                .translationX(hiddenX)
+                .translationY(hiddenY)
+                .setDuration(CAMERA_PANEL_ANIM_MS)
+                .start()
         } else {
             binding.cameraViewGroup.translationX = hiddenX
             binding.cameraViewGroup.translationY = hiddenY
             binding.ivShowCameraView.translationX = hiddenX
             binding.ivShowCameraView.translationY = hiddenY
+            binding.ivRecenter.translationX = hiddenX
+            binding.ivRecenter.translationY = hiddenY
         }
     }
 
@@ -1011,6 +1079,7 @@ class LiveRoutingFragment :
 
     private companion object {
         const val CAMERA_PANEL_ANIM_MS = 260L
+        const val STRONG_FIX_SATELLITES = 7
         const val OFFLINE_ROUTE_TOAST_COOLDOWN_MS = 15_000L
         const val MESSAGE_NO_ACTIVE_ROUTE = "No active route"
         const val MESSAGE_LOCATION_PERMISSION_REQUIRED = "Location permission is required"
