@@ -4,6 +4,7 @@ import android.media.MediaMetadataRetriever
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -11,6 +12,7 @@ import com.example.gnssandopticalflowapp.R
 import com.example.gnssandopticalflowapp.databinding.ItemVideoThumbBinding
 import com.example.gnssandopticalflowapp.model.ImageInfo
 import com.example.gnssandopticalflowapp.model.MediaInfo
+import com.example.gnssandopticalflowapp.model.RouteSessionInfo
 import com.example.gnssandopticalflowapp.model.VideoInfo
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -133,30 +135,45 @@ class MediaListAdapter(
     ) : RecyclerView.ViewHolder(binding.root) {
 
         fun bind(media: MediaInfo, isSelected: Boolean) {
-            val requestOptions = RequestOptions()
-                .centerCrop()
-                .placeholder(R.drawable.ic_video_placeholder)
-                .error(R.drawable.ic_video_error)
+            val ctx = binding.thumbGallery.context
+            when (media) {
+                is RouteSessionInfo -> {
+                    // A saved live-routing session: no file thumbnail — show the map icon + ROUTE badge.
+                    Glide.with(ctx).clear(binding.thumbGallery)
+                    binding.thumbGallery.scaleType = ImageView.ScaleType.FIT_CENTER
+                    binding.thumbGallery.setImageResource(R.drawable.ic_map)
+                    binding.tvMediaBadge.text = "ROUTE"
+                    // "start - end" range, e.g. "7:58 29/10/2025 - 8:38 29/10/2025".
+                    val start = routeRangeFormat.format(Date(media.timestamp))
+                    val end = routeRangeFormat.format(Date(media.timestamp + media.durationMs))
+                    binding.tvTitle.text = "$start - $end"
+                }
 
-            val glideRequest = Glide.with(binding.thumbGallery.context)
-                .load(media.path)
+                is ImageInfo -> {
+                    binding.thumbGallery.scaleType = ImageView.ScaleType.CENTER_CROP
+                    Glide.with(ctx).load(media.path).apply(mediaRequestOptions())
+                        .into(binding.thumbGallery)
+                    binding.tvMediaBadge.text = "PHOTO"
+                    binding.tvTitle.text = dateFormat.format(Date(media.timestamp))
+                }
 
-            if (media is VideoInfo) {
-                glideRequest.apply(requestOptions.frame(1_000_000)).into(binding.thumbGallery)
-            } else {
-                glideRequest.apply(requestOptions).into(binding.thumbGallery)
+                is VideoInfo -> {
+                    binding.thumbGallery.scaleType = ImageView.ScaleType.CENTER_CROP
+                    Glide.with(ctx).load(media.path).apply(mediaRequestOptions().frame(1_000_000))
+                        .into(binding.thumbGallery)
+                    binding.tvMediaBadge.text = formatDuration(resolveVideoDurationMs(media))
+                    binding.tvTitle.text = dateFormat.format(Date(media.timestamp))
+                }
             }
 
             binding.blackOverlay.visibility = if (isSelected) View.VISIBLE else View.GONE
             binding.check.visibility = if (isSelected) View.VISIBLE else View.GONE
-            binding.tvMediaBadge.text = when (media) {
-                is ImageInfo -> "PHOTO"
-                is VideoInfo -> formatDuration(resolveVideoDurationMs(media))
-            }
-
-            val simpleDateFormat = SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault())
-            binding.tvTitle.text = simpleDateFormat.format(Date(media.timestamp))
         }
+
+        private fun mediaRequestOptions(): RequestOptions = RequestOptions()
+            .centerCrop()
+            .placeholder(R.drawable.ic_video_placeholder)
+            .error(R.drawable.ic_video_error)
 
         private fun resolveVideoDurationMs(video: VideoInfo): Long {
             if (video.durationMs > 0L) return video.durationMs
@@ -192,6 +209,8 @@ class MediaListAdapter(
 
         private companion object {
             val durationCache = mutableMapOf<String, Long>()
+            val dateFormat = SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault())
+            val routeRangeFormat = SimpleDateFormat("H:mm dd/MM/yyyy", Locale.getDefault())
         }
     }
 }

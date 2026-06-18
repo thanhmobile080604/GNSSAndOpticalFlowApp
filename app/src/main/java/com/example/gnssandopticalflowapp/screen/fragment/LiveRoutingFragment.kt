@@ -52,6 +52,7 @@ import com.example.gnssandopticalflowapp.function.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.function.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.model.RouteInfo
 import com.example.gnssandopticalflowapp.util.RouteDebugLogger
+import com.example.gnssandopticalflowapp.util.RouteStorageUtil
 import com.example.gnssandopticalflowapp.screen.viewmodel.LiveRoutingViewModel
 import com.example.gnssandopticalflowapp.screen.viewmodel.LiveRoutingViewModel.OpticalMode
 import kotlinx.coroutines.Dispatchers
@@ -235,11 +236,21 @@ class LiveRoutingFragment :
     }
 
     override fun onBack() {
+        saveSessionIfAny()
         liveRoutingViewModel.clearRoute()
         mainViewModel.liveRouteState = null
         mainViewModel.resetGnssViewerRouteOnResume = true
         restorePortrait()
         super.onBack()
+    }
+
+    /** Persist the just-finished session (red/black paths + pins) so it can be replayed later. */
+    private fun saveSessionIfAny() {
+        val session = liveRoutingViewModel.exportSession() ?: return
+        runCatching {
+            RouteStorageUtil.saveSession(safeContext().applicationContext, session)
+            mainViewModel.routeLibraryUpdated.postValue(System.currentTimeMillis())
+        }.onFailure { Log.e(TAG, "Save route session failed: ${it.message}", it) }
     }
 
     override fun onDestroyView() {

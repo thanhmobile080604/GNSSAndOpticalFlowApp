@@ -30,8 +30,10 @@ class MainViewModel :
     val selectedAnalyticsSessionId = MutableLiveData<String>()
     val selectedAnalyticsSampleIndex = MutableLiveData<Int>()
     val selectedAnalyticsMetric = MutableLiveData<String>()
+    val selectedRouteSessionId = MutableLiveData<String>()
     val videoLibraryUpdated = MutableLiveData<Long>()
     val analyticsLibraryUpdated = MutableLiveData<Long>()
+    val routeLibraryUpdated = MutableLiveData<Long>()
     val videoProcessingMessage = MutableLiveData<String?>()
     val processedVideoPathToOpen = MutableLiveData<String?>()
     var liveRouteState: LiveRouteState? = null

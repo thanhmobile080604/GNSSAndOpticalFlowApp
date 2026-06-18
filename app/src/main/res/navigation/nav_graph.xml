@@ -40,7 +40,7 @@
         tools:layout="@layout/fragment_live_routing" />
     <fragment
         android:id="@+id/videoListFragment"
-        android:name="com.example.gnssandopticalflowapp.screen.fragment.MediaListFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.StorageListFragment"
         android:label="VideoListFragment" />
     <fragment
         android:id="@+id/analyticsListFragment"
@@ -57,6 +57,11 @@
         android:name="com.example.gnssandopticalflowapp.screen.fragment.AnalyticsSampleDetailFragment"
         android:label="AnalyticsChartDetailFragment"
         tools:layout="@layout/fragment_analytics_sample_detail" />
+    <fragment
+        android:id="@+id/routeReplayFragment"
+        android:name="com.example.gnssandopticalflowapp.screen.fragment.RouteReplayFragment"
+        android:label="RouteReplayFragment"
+        tools:layout="@layout/fragment_route_replay" />
     <fragment
         android:id="@+id/gnssARFragment"
         android:name="com.example.gnssandopticalflowapp.screen.fragment.GNSSARFragment"

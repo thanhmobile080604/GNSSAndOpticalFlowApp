@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/black">
+
+    <org.osmdroid.views.MapView
+        android:id="@+id/mapView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="1.0"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="1.0" />
+
+    <ImageView
+        android:id="@+id/ivBack"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="38dp"
+        android:background="@drawable/bg_glass_black_button"
+        android:contentDescription="@null"
+        android:padding="12dp"
+        android:scaleX="-1"
+        android:src="@drawable/ic_arrow_right"
+        android:translationZ="100dp"
+        android:tint="@color/black"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="4dp"
+        android:background="@drawable/bg_black_chip"
+        android:ellipsize="end"
+        android:fontFamily="@font/inter_extra_bold"
+        android:gravity="start"
+        android:lineSpacingExtra="1dp"
+        android:maxLines="2"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="7dp"
+        android:textColor="@color/black"
+        android:textSize="14sp"
+        android:translationZ="100dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@id/ivBack"
+        app:layout_constraintTop_toTopOf="@id/ivBack"
+        tools:text="Hoan Kiem Lake" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

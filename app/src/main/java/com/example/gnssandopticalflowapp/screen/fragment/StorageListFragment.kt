@@ -11,15 +11,19 @@ import com.example.gnssandopticalflowapp.common.hide
 import com.example.gnssandopticalflowapp.common.safeContext
 import com.example.gnssandopticalflowapp.common.setSingleClick
 import com.example.gnssandopticalflowapp.common.show
-import com.example.gnssandopticalflowapp.databinding.FragmentVideoListBinding
+import com.example.gnssandopticalflowapp.databinding.FragmentStorageListBinding
 import com.example.gnssandopticalflowapp.model.ImageInfo
+import com.example.gnssandopticalflowapp.model.MediaInfo
+import com.example.gnssandopticalflowapp.model.RouteSessionInfo
+import com.example.gnssandopticalflowapp.model.RouteSessionSummary
 import com.example.gnssandopticalflowapp.model.VideoInfo
-import com.example.gnssandopticalflowapp.util.ShareHelper
 import com.example.gnssandopticalflowapp.util.MediaStorageUtil
+import com.example.gnssandopticalflowapp.util.RouteStorageUtil
+import com.example.gnssandopticalflowapp.util.ShareHelper
 import java.io.File
 
-class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoListBinding::inflate) {
-    
+class StorageListFragment : BaseFragment<FragmentStorageListBinding>(FragmentStorageListBinding::inflate) {
+
     private lateinit var adapter: MediaListAdapter
 
     private enum class Mode {
@@ -28,24 +32,29 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
 
     private var currentMode = Mode.NORMAL
 
-    override fun FragmentVideoListBinding.initView() {
+    override fun FragmentStorageListBinding.initView() {
         adapter = MediaListAdapter {
             updateToolbarState()
         }
         rcvAllPhoto.layoutManager = GridLayoutManager(safeContext(), 3)
         rcvAllPhoto.adapter = adapter
         (rcvAllPhoto.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.supportsChangeAnimations = false
-        loadMedia()
+        loadItems()
         updateToolbarState()
     }
 
-    private fun loadMedia() {
-        val media = MediaStorageUtil.getMedia(safeContext())
-        if(media.isEmpty()) binding.tvEmpty.show()
-        else adapter.setData(media)
+    /** Media (videos + images) AND saved live-routing sessions, one mixed grid sorted newest-first. */
+    private fun loadItems() {
+        val items = buildList {
+            addAll(MediaStorageUtil.getMedia(safeContext()))
+            addAll(RouteStorageUtil.getSessionSummaries(safeContext()).map { it.toMediaInfo() })
+        }.sortedByDescending { it.timestamp }
+
+        adapter.setData(items)
+        if (items.isEmpty()) binding.tvEmpty.show() else binding.tvEmpty.hide()
     }
 
-    override fun FragmentVideoListBinding.initListener() {
+    override fun FragmentStorageListBinding.initListener() {
         ivBack.setSingleClick {
             if (currentMode == Mode.EDIT) {
                 exitEditMode()
@@ -55,15 +64,16 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         }
 
         ivVideoCheck.setSingleClick {
-            when (val selectedMedia = adapter.getSelectedMedia()) {
-                is ImageInfo -> openImageDetail(selectedMedia)
+            when (val selected = adapter.getSelectedMedia()) {
+                is RouteSessionInfo -> openRoute(selected)
+                is ImageInfo -> openImageDetail(selected)
                 is VideoInfo -> {
-                    if (!isValidVideo(selectedMedia.path)) {
+                    if (!isValidVideo(selected.path)) {
                         showToast("Video is invalid")
                         return@setSingleClick
                     }
 
-                    mainViewModel.selectedVideoPath.value = selectedMedia.path
+                    mainViewModel.selectedVideoPath.value = selected.path
                     navigateTo(R.id.videoOpticalFlowFragment)
                 }
                 null -> Unit
@@ -79,11 +89,11 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         }
 
         ivTrash.setSingleClick {
-            deleteSelectedMedia()
+            deleteSelectedItems()
         }
 
         ivShare.setSingleClick {
-            shareSelectedMedia()
+            shareSelectedItems()
         }
     }
 
@@ -99,35 +109,49 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         updateToolbarState()
     }
 
-    private fun deleteSelectedMedia() {
-        val selectedMedia = adapter.getSelectedMediaItems()
-        if (selectedMedia.isEmpty()) {
+    private fun deleteSelectedItems() {
+        val selected = adapter.getSelectedMediaItems()
+        if (selected.isEmpty()) {
             showToast("Select files to delete")
             return
         }
 
-        val deletedCount = MediaStorageUtil.deleteMedia(safeContext(), selectedMedia)
-        adapter.removeMedia(selectedMedia)
+        val routes = selected.filterIsInstance<RouteSessionInfo>()
+        val media = selected.filterNot { it is RouteSessionInfo }
+
+        var deletedCount = 0
+        if (media.isNotEmpty()) deletedCount += MediaStorageUtil.deleteMedia(safeContext(), media)
+        if (routes.isNotEmpty()) {
+            deletedCount += RouteStorageUtil.deleteSessions(safeContext(), routes.map { it.toSummary() })
+        }
+        adapter.removeMedia(selected)
         showToast("Deleted $deletedCount item(s)")
 
         if (adapter.itemCount == 0) {
             exitEditMode()
+            binding.tvEmpty.show()
         } else {
             updateToolbarState()
         }
     }
 
-    private fun shareSelectedMedia() {
-        val selectedMedia = adapter.getSelectedMediaItems()
-        if (selectedMedia.isEmpty()) {
+    private fun shareSelectedItems() {
+        // Route sessions have no shareable file — share only the real media files.
+        val media = adapter.getSelectedMediaItems().filterNot { it is RouteSessionInfo }
+        if (media.isEmpty()) {
             showToast("Select files to share")
             return
         }
 
-        val shared = ShareHelper.shareFiles(safeContext(), selectedMedia.map { File(it.path) })
+        val shared = ShareHelper.shareFiles(safeContext(), media.map { File(it.path) })
         if (!shared) {
             showToast("No available files to share")
         }
+    }
+
+    private fun openRoute(route: RouteSessionInfo) {
+        mainViewModel.selectedRouteSessionId.value = route.path
+        navigateTo(R.id.routeReplayFragment)
     }
 
     private fun openImageDetail(image: ImageInfo) {
@@ -148,14 +172,14 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
     }
 
     private fun updateNormalToolbar() = with(binding) {
-        val hasSelectedVideo = adapter.getSelectedMedia() != null
+        val hasSelectedItem = adapter.getSelectedMedia() != null
 
         ivBack.show()
         tvCancel.hide()
         ivTrash.hide()
         ivShare.hide()
 
-        if (hasSelectedVideo) {
+        if (hasSelectedItem) {
             tvEdit.hide()
             ivVideoCheck.show()
         } else {
@@ -165,8 +189,9 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
     }
 
     private fun updateEditToolbar() = with(binding) {
-        val hasSelection = adapter.getSelectedMediaItems().isNotEmpty()
-        val actionAlpha = if (hasSelection) 1f else 0.45f
+        val selected = adapter.getSelectedMediaItems()
+        val hasSelection = selected.isNotEmpty()
+        val canShare = selected.any { it !is RouteSessionInfo }
 
         ivBack.hide()
         tvCancel.show()
@@ -174,12 +199,33 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
         ivVideoCheck.hide()
         ivTrash.show()
         ivShare.show()
-        ivTrash.alpha = actionAlpha
-        ivShare.alpha = actionAlpha
+        ivTrash.alpha = if (hasSelection) 1f else 0.45f
+        ivShare.alpha = if (canShare) 1f else 0.45f
     }
 
     private fun showToast(message: String) {
         Toast.makeText(safeContext(), message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun RouteSessionSummary.toMediaInfo(): RouteSessionInfo {
+        return RouteSessionInfo(
+            path = id,
+            timestamp = startedAtMs,
+            destinationName = destinationName,
+            durationMs = durationMs,
+            outagePointCount = outagePointCount
+        )
+    }
+
+    private fun RouteSessionInfo.toSummary(): RouteSessionSummary {
+        return RouteSessionSummary(
+            id = path,
+            startedAtMs = timestamp,
+            durationMs = durationMs,
+            destinationName = destinationName,
+            outagePointCount = outagePointCount,
+            gnssPointCount = 0
+        )
     }
 
     private fun isValidVideo(path: String): Boolean {
@@ -221,7 +267,11 @@ class MediaListFragment : BaseFragment<FragmentVideoListBinding>(FragmentVideoLi
 
     override fun initObserver() {
         mainViewModel.videoLibraryUpdated.observe(viewLifecycleOwner) {
-            loadMedia()
+            loadItems()
+            updateToolbarState()
+        }
+        mainViewModel.routeLibraryUpdated.observe(viewLifecycleOwner) {
+            loadItems()
             updateToolbarState()
         }
     }
