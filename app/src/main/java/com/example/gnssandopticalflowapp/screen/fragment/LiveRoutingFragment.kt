@@ -478,10 +478,6 @@ class LiveRoutingFragment :
         lastNavHeadingDeg = headingDeg
         navigationMarker?.position = point
 
-        // Ease the displayed heading toward the (already filtered) target: shortest way around the
-        // 0/360 wrap, clamped to a physically-plausible yaw rate for the current speed, then low-passed.
-        // Only redraw when the rotation actually moved or the point changed, so a frozen / straight-line
-        // chevron does not thrash the map at the 20 Hz tick rate.
         val rotationChanged = advanceDisplayHeading(headingDeg)
         if (rotationChanged || pointChanged) {
             navigationMarker?.rotation = displayHeadingDeg.toFloat()
@@ -493,12 +489,6 @@ class LiveRoutingFragment :
         }
     }
 
-    /**
-     * Advances [displayHeadingDeg] one render step toward [targetDeg] and reports whether it moved.
-     * Pipeline: shortest-angle delta -> slew clamp (physically-plausible yaw rate for the current
-     * speed) -> frame-rate-independent low-pass -> deadband. Purely cosmetic; the heading itself is
-     * already filtered in the ViewModel.
-     */
     private fun advanceDisplayHeading(targetDeg: Double): Boolean {
         if (!hasDisplayHeading) {
             displayHeadingDeg = normalizeHeading(targetDeg)
@@ -1197,12 +1187,6 @@ class LiveRoutingFragment :
         const val CAMERA_PANEL_ANIM_MS = 260L
         const val STRONG_FIX_SATELLITES = 7
         const val OFFLINE_ROUTE_TOAST_COOLDOWN_MS = 15_000L
-
-        // === Render-side heading smoothing ===
-        // Slew clamp follows r = a_lat / v, with a generous floor near standstill so the chevron can
-        // catch up after a low-speed freeze. The lateral-accel bound is ~0.7g because a motorbike
-        // corners far harder than a car (a 45 deg lean is ~1.0g) — too low a bound would make the icon
-        // lag real turns. The low-pass time constant is ~1/DISPLAY_SMOOTH_SPEED seconds.
         const val HEADING_SLEW_A_LAT_MPS2 = 7.0 // ~0.71g (motorbike cornering)
         const val HEADING_SLEW_MIN_SPEED_MPS = 1.0
         const val HEADING_SLEW_MIN_DEG_SEC = 6.0

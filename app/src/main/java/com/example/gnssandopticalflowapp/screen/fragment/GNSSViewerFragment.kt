@@ -1293,7 +1293,7 @@ class GNSSViewerFragment :
             exitMapTargetPickerMode()
             selectPlace(
                 place = targetPlace,
-                saveRecentSearch = false,
+                saveRecentSearch = true,
                 moveCameraToPlace = false
             )
         }
