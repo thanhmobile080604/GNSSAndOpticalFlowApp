@@ -51,6 +51,7 @@ import com.example.gnssandopticalflowapp.function.optical_flow.classes.IMUEstima
 import com.example.gnssandopticalflowapp.function.optical_flow.classes.KLT
 import com.example.gnssandopticalflowapp.function.optical_flow.interfaces.OpticalFlow
 import com.example.gnssandopticalflowapp.model.RouteInfo
+import com.example.gnssandopticalflowapp.util.RouteDebugLogger
 import com.example.gnssandopticalflowapp.screen.viewmodel.LiveRoutingViewModel
 import com.example.gnssandopticalflowapp.screen.viewmodel.LiveRoutingViewModel.OpticalMode
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +74,9 @@ import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.max
 import kotlin.time.Duration.Companion.milliseconds
 
 class LiveRoutingFragment :
@@ -89,6 +93,7 @@ class LiveRoutingFragment :
     private lateinit var locationManager: LocationManager
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var imuEstimator: IMUEstimator
+    private val routeDebugLogger = RouteDebugLogger()
 
     private var navigationMarker: Marker? = null
     private var targetMarker: Marker? = null
@@ -108,6 +113,11 @@ class LiveRoutingFragment :
     private var isFollowingNavigation = true
     private var lastNavPoint: GeoPoint? = null
     private var lastNavHeadingDeg = 0.0
+    private var lastNavSpeedMps = 0.0
+    // Render-side heading smoothing state (see updateNavigationMarker / advanceDisplayHeading).
+    private var displayHeadingDeg = 0.0
+    private var hasDisplayHeading = false
+    private var lastDisplayTickMs = 0L
     private var lastSatellitesInFix = 0
 
     private var opticalFlow: OpticalFlow? = null
@@ -158,6 +168,11 @@ class LiveRoutingFragment :
 
         unlockOrientationForLiveRouting()
         lastOrientation = resources.configuration.orientation
+
+        if (Constants.DEBUG_ROUTE_LOG) {
+            routeDebugLogger.start(safeContext())
+            showToast("Debug: logging route to Android/data/${safeContext().packageName}/files", Toast.LENGTH_LONG)
+        }
 
         initializeRuntimeDependencies()
         setupMap()
@@ -232,6 +247,7 @@ class LiveRoutingFragment :
             restorePortrait()
         }
         stopLiveRuntime()
+        if (Constants.DEBUG_ROUTE_LOG) routeDebugLogger.stop()
         if (::imuEstimator.isInitialized) imuEstimator.unregister()
         if (::cameraExecutor.isInitialized) cameraExecutor.shutdown()
         super.onDestroyView()
@@ -297,8 +313,10 @@ class LiveRoutingFragment :
         binding.ivRecenter.visibility = if (follow) View.GONE else View.VISIBLE
         if (follow) {
             lastNavPoint?.let { point ->
-                binding.mapView.mapOrientation = (-lastNavHeadingDeg).toFloat()
-                navigationMarker?.rotation = lastNavHeadingDeg.toFloat()
+                // Snap follow to the currently rendered (smoothed) heading, not the raw target, so the
+                // recenter does not jump.
+                binding.mapView.mapOrientation = (-displayHeadingDeg).toFloat()
+                navigationMarker?.rotation = displayHeadingDeg.toFloat()
                 binding.mapView.controller.animateTo(point)
                 binding.mapView.invalidate()
             }
@@ -426,6 +444,7 @@ class LiveRoutingFragment :
         snapshot.weakGnssPoints?.let(::drawWeakMarkers)
         snapshot.strongGnssPoints?.let(::drawStrongMarkers)
         snapshot.opticalAssistSegments?.let(::drawOpticalAssistLines)
+        lastNavSpeedMps = snapshot.speedMps
         updateNavigationMarker(snapshot.point, snapshot.headingDeg)
         updateSpeedText(snapshot.speedMps)
     }
@@ -441,15 +460,72 @@ class LiveRoutingFragment :
             binding.mapView.overlays.add(navigationMarker)
         }
 
+        val pointChanged = lastNavPoint?.let {
+            it.latitude != point.latitude || it.longitude != point.longitude
+        } ?: true
         lastNavPoint = point
         lastNavHeadingDeg = headingDeg
         navigationMarker?.position = point
-        navigationMarker?.rotation = headingDeg.toFloat()
-        if (isFollowingNavigation) {
-            binding.mapView.mapOrientation = (-headingDeg).toFloat()
-            binding.mapView.controller.setCenter(point)
+
+        // Ease the displayed heading toward the (already filtered) target: shortest way around the
+        // 0/360 wrap, clamped to a physically-plausible yaw rate for the current speed, then low-passed.
+        // Only redraw when the rotation actually moved or the point changed, so a frozen / straight-line
+        // chevron does not thrash the map at the 20 Hz tick rate.
+        val rotationChanged = advanceDisplayHeading(headingDeg)
+        if (rotationChanged || pointChanged) {
+            navigationMarker?.rotation = displayHeadingDeg.toFloat()
+            if (isFollowingNavigation) {
+                binding.mapView.mapOrientation = (-displayHeadingDeg).toFloat()
+                binding.mapView.controller.setCenter(point)
+            }
+            binding.mapView.invalidate()
         }
-        binding.mapView.invalidate()
+    }
+
+    /**
+     * Advances [displayHeadingDeg] one render step toward [targetDeg] and reports whether it moved.
+     * Pipeline: shortest-angle delta -> slew clamp (physically-plausible yaw rate for the current
+     * speed) -> frame-rate-independent low-pass -> deadband. Purely cosmetic; the heading itself is
+     * already filtered in the ViewModel.
+     */
+    private fun advanceDisplayHeading(targetDeg: Double): Boolean {
+        if (!hasDisplayHeading) {
+            displayHeadingDeg = normalizeHeading(targetDeg)
+            hasDisplayHeading = true
+            lastDisplayTickMs = System.currentTimeMillis()
+            return true
+        }
+        val now = System.currentTimeMillis()
+        val dtSec = ((now - lastDisplayTickMs).coerceIn(1L, 500L)) / 1000.0
+        lastDisplayTickMs = now
+
+        var delta = shortestHeadingDelta(displayHeadingDeg, targetDeg)
+        val maxStep = maxYawRateForSpeed(lastNavSpeedMps) * dtSec
+        delta = delta.coerceIn(-maxStep, maxStep)
+        delta *= (1.0 - exp(-DISPLAY_SMOOTH_SPEED * dtSec))
+        if (abs(delta) < DISPLAY_DEADBAND_DEG) return false
+
+        displayHeadingDeg = normalizeHeading(displayHeadingDeg + delta)
+        return true
+    }
+
+    /** Physically-plausible max heading-change rate (deg/s): yaw rate r = a_lat / v, clamped. */
+    private fun maxYawRateForSpeed(speedMps: Double): Double {
+        return (DEG_PER_RAD * HEADING_SLEW_A_LAT_MPS2 / max(speedMps, HEADING_SLEW_MIN_SPEED_MPS))
+            .coerceIn(HEADING_SLEW_MIN_DEG_SEC, HEADING_SLEW_MAX_DEG_SEC)
+    }
+
+    private fun shortestHeadingDelta(fromDeg: Double, toDeg: Double): Double {
+        var delta = (toDeg - fromDeg) % 360.0
+        if (delta > 180.0) delta -= 360.0
+        if (delta < -180.0) delta += 360.0
+        return delta
+    }
+
+    private fun normalizeHeading(deg: Double): Double {
+        var d = deg % 360.0
+        if (d < 0) d += 360.0
+        return d
     }
 
     private fun buildMarkerIcon(drawableRes: Int, sizeDp: Int) = context?.let { ctx ->
@@ -562,6 +638,17 @@ class LiveRoutingFragment :
     }
 
     private fun handleLocationUpdate(location: Location) {
+        if (Constants.DEBUG_ROUTE_LOG) {
+            // Log the raw true fix BEFORE the view-model can reject it (e.g. during the dropout test),
+            // so the ground-truth track stays continuous.
+            routeDebugLogger.logGnss(
+                timeMs = System.currentTimeMillis(),
+                lat = location.latitude,
+                lon = location.longitude,
+                headingDeg = if (location.hasBearing()) location.bearing.toDouble() else Double.NaN,
+                speedMps = if (location.hasSpeed()) location.speed.toDouble() else Double.NaN
+            )
+        }
         val result = liveRoutingViewModel.onLocationUpdate(location)
         if (result.accepted) {
             mainViewModel.postCurrentLocation(location)
@@ -647,9 +734,12 @@ class LiveRoutingFragment :
                 val dtSec = ((nowMs - lastTickMs).coerceIn(1L, 500L)) / 1000.0
                 lastTickMs = nowMs
 
-                // Re-learn the gyro zero-rate bias whenever the vehicle is confidently stopped, so
-                // getYawRate() stays drift-free going into the next GNSS outage.
-                if (liveRoutingViewModel.isStationaryForBias(nowMs)) {
+                // Re-learn the gyro zero-rate bias when confidently stopped OR cruising straight (true
+                // yaw ~ 0), so getYawRate() stays drift-free going into the next GNSS outage — including
+                // on a drive that starts already moving and never sits still.
+                if (liveRoutingViewModel.isStationaryForBias(nowMs) ||
+                    liveRoutingViewModel.isStraightLineForBias(nowMs)
+                ) {
                     imuEstimator.learnGyroBias()
                 }
 
@@ -662,7 +752,22 @@ class LiveRoutingFragment :
                 applyAssistDecision(result.assistDecision)
                 result.navigation?.let { navigation ->
                     applyNavigationSnapshot(navigation)
-                    refreshRouteAfterLocationChange()
+                    // The tick now emits a snapshot every cycle (to rotate the chevron smoothly), but
+                    // under healthy GNSS the route refresh is already driven by handleLocationUpdate at
+                    // the fix rate — only the dead-reckoning (outage) path needs to drive it here.
+                    if (liveRoutingViewModel.gnssAssistActive) {
+                        if (Constants.DEBUG_ROUTE_LOG) {
+                            routeDebugLogger.logDeadReckon(
+                                timeMs = nowMs,
+                                lat = navigation.point.latitude,
+                                lon = navigation.point.longitude,
+                                headingDeg = navigation.headingDeg,
+                                speedMps = navigation.speedMps,
+                                routeLocked = liveRoutingViewModel.isRouteLocked
+                            )
+                        }
+                        refreshRouteAfterLocationChange()
+                    }
                 } ?: updateSpeedText(result.speedMps)
                 delay(LiveRoutingViewModel.TICK_MS.milliseconds)
             }
@@ -1081,6 +1186,19 @@ class LiveRoutingFragment :
         const val CAMERA_PANEL_ANIM_MS = 260L
         const val STRONG_FIX_SATELLITES = 7
         const val OFFLINE_ROUTE_TOAST_COOLDOWN_MS = 15_000L
+
+        // === Render-side heading smoothing ===
+        // Slew clamp follows r = a_lat / v, with a generous floor near standstill so the chevron can
+        // catch up after a low-speed freeze. The lateral-accel bound is ~0.7g because a motorbike
+        // corners far harder than a car (a 45 deg lean is ~1.0g) — too low a bound would make the icon
+        // lag real turns. The low-pass time constant is ~1/DISPLAY_SMOOTH_SPEED seconds.
+        const val HEADING_SLEW_A_LAT_MPS2 = 7.0 // ~0.71g (motorbike cornering)
+        const val HEADING_SLEW_MIN_SPEED_MPS = 1.0
+        const val HEADING_SLEW_MIN_DEG_SEC = 6.0
+        const val HEADING_SLEW_MAX_DEG_SEC = 120.0
+        const val DISPLAY_SMOOTH_SPEED = 8.0 // tau ~0.125 s
+        const val DISPLAY_DEADBAND_DEG = 1.0
+        const val DEG_PER_RAD = 57.29577951308232
         const val MESSAGE_NO_ACTIVE_ROUTE = "No active route"
         const val MESSAGE_LOCATION_PERMISSION_REQUIRED = "Location permission is required"
         const val MESSAGE_LOCATION_PERMISSION_SETTINGS = "Enable location permission in settings"

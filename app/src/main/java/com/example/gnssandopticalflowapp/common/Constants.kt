@@ -1,6 +1,10 @@
 package com.example.gnssandopticalflowapp.common
 
 object Constants {
+    // Debug: log true-GNSS vs dead-reckoned tracks to a .txt in the app's external files dir for
+    // accuracy analysis (see RouteDebugLogger). Turn off for release.
+    const val DEBUG_ROUTE_LOG = true
+
     const val USE_FAKE_LOCATION = false
     const val FAKE_LOCATION_PROVIDER = "test_new_york"
     const val FAKE_LOCATION_LATITUDE = 40.712776

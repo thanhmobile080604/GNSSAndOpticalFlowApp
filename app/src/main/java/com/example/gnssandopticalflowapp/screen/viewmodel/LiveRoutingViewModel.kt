@@ -66,13 +66,13 @@ class LiveRoutingViewModel : ViewModel() {
         val showHandle: Boolean
     )
 
+    // Optical flow is used ONLY for forward speed/translation now — never for heading. A forward-facing
+    // phone camera cannot separate yaw from lateral translation, and suspension vibration + rolling
+    // shutter inject apparent yaw, so heading comes from the gyro+GPS filter instead (runHeadingFilter).
     private data class VisualOdometry(
         val usable: Boolean,
         val speedMps: Double,
-        val deltaHeadingDeg: Double,
-        val opticalYawRateDegPerSec: Double,
         val translationPxPerSec: Double,
-        val lateralPxPerSec: Double,
         val quality: Double
     )
 
@@ -82,12 +82,6 @@ class LiveRoutingViewModel : ViewModel() {
         val distanceAlongRouteM: Double,
         val distanceFromRouteM: Double,
         val segmentHeadingDeg: Double
-    )
-
-    private data class MapMatchResult(
-        val point: GeoPoint,
-        val headingDeg: Double,
-        val confidence: Double
     )
 
     private data class FusedPose(
@@ -105,8 +99,7 @@ class LiveRoutingViewModel : ViewModel() {
         val forwardAxisConfidenceStep: Double,
         val maxInertialTrust: Double,
         val zuptEnterSpeedMps: Double,
-        val zuptAccelMps2: Double,
-        val lowSpeedYawGainMax: Double
+        val zuptAccelMps2: Double
     )
 
     var routeState: LiveRouteState? = null
@@ -117,6 +110,9 @@ class LiveRoutingViewModel : ViewModel() {
         private set
     var gnssAssistActive = false
         private set
+    /** Whether the dead-reckoned path is currently locked to the planned route (debug logging). */
+    val isRouteLocked: Boolean
+        get() = routeLocked
     // Camera panel is purely user-controlled (opens on entry, user can hide it); the camera keeps
     // running either way. NOT tied to GNSS state.
     var cameraPanelVisible = true
@@ -136,6 +132,11 @@ class LiveRoutingViewModel : ViewModel() {
 
     private var currentPoint: GeoPoint? = null
     private var currentHeadingDeg = 0.0
+    // Gyro + GPS course-over-ground heading complementary filter state (see runHeadingFilter).
+    private var lastCogDeg = 0.0
+    private var lastCogMs = 0L
+    private var lastYawRateDegPerSec = 0.0
+    private var reconvergeUntilMs = 0L
     private var lastTrueSpeedMps = 0.0
     private var deadReckoningSpeedMps = 0.0
     private var vehicleDeadReckoningSpeedMps = 0.0
@@ -165,7 +166,6 @@ class LiveRoutingViewModel : ViewModel() {
     private var lastFlowSampleMs = 0L
     private var lastFlowConfidence = 0.0
     private var dynamicFlowToMpsRatio = FLOW_PX_PER_SEC_TO_MPS
-    private var dynamicFlowToYawRatio = FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC
     private var cameraSpeedScaleConfidence = INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE
     private val emaAccelDevice = DoubleArray(3)
     private var hasAccelSample = false
@@ -176,6 +176,11 @@ class LiveRoutingViewModel : ViewModel() {
     private var prevGnssHeadingDeg = 0.0
     private var hasPrevGnssAccelRef = false
     private var stationaryHoldMs = 0L
+    // Route-locked dead reckoning during a GNSS outage (see resolveOutagePose): while locked the
+    // position is pinned to the planned route polyline and advanced by routeProgressM (metres along
+    // the route), so the path follows the road exactly instead of free-floating into buildings.
+    private var routeLocked = false
+    private var routeProgressM = 0.0
     private val vehicleProfile = VEHICLE_PROFILE
 
     fun initialize(state: LiveRouteState, nowMs: Long = System.currentTimeMillis()): InitialRouteUi {
@@ -208,6 +213,7 @@ class LiveRoutingViewModel : ViewModel() {
             routePoints.size > 1 -> bearingBetween(routePoints[0], routePoints[1])
             else -> 0.0
         }
+        lastCogDeg = currentHeadingDeg
         lastTrueSpeedMps = if (state.startLocation.hasSpeed()) {
             state.startLocation.speed.toDouble().coerceAtLeast(0.0)
         } else {
@@ -357,12 +363,19 @@ class LiveRoutingViewModel : ViewModel() {
             .let { speed -> if (speed < GNSS_STATIONARY_SPEED_FLOOR_MPS) 0.0 else speed }
             .coerceIn(0.0, MAX_NAVIGATION_SPEED_MPS)
 
-        currentHeadingDeg = when {
-            location.hasBearing() && lastTrueSpeedMps > MIN_BEARING_SPEED_MPS ->
-                normalizeDeg(location.bearing.toDouble())
-            previousPoint != null && previousDistance > 0.75 ->
-                bearingBetween(previousPoint, point)
-            else -> currentHeadingDeg
+        // GPS course-over-ground (COG) is the absolute heading reference, but it is NOISE below a
+        // few m/s and a single position-difference bearing spikes on bumps. So we no longer overwrite
+        // the heading here; we store COG as a measurement that runHeadingFilter() blends into the
+        // gyro-integrated heading slowly and only when trustworthy.
+        when {
+            location.hasBearing() && lastTrueSpeedMps >= COG_TRUST_SPEED_MPS -> {
+                lastCogDeg = normalizeDeg(location.bearing.toDouble())
+                lastCogMs = nowMs
+            }
+            previousPoint != null && previousDistance >= COG_FALLBACK_MIN_DISTANCE_M -> {
+                lastCogDeg = bearingBetween(previousPoint, point)
+                lastCogMs = nowMs
+            }
         }
         vehicleDeadReckoningSpeedMps = lastTrueSpeedMps
         deadReckoningSpeedMps = lastTrueSpeedMps
@@ -413,14 +426,26 @@ class LiveRoutingViewModel : ViewModel() {
         horizontalAccelDevice: FloatArray = NO_ACCEL_SAMPLE
     ): TickResult {
         updateImuAccel(horizontalAccelDevice)
-        val visualOdometry = resolveVisualOdometry(nowMs, dtSec, yawRateDegPerSec)
+        // Heading is now owned by a single gyro-led filter that runs every tick in BOTH states, so the
+        // chevron rotates smoothly between the 1 Hz GNSS fixes instead of stepping once per second.
+        runHeadingFilter(nowMs, dtSec, yawRateDegPerSec)
+        val visualOdometry = resolveVisualOdometry(nowMs)
         val assistDecision = setGnssAssistActive(!hasCurrentlyUsableGnss(nowMs))
         if (!assistDecision.active) {
             calibrateCameraSpeedScale(visualOdometry)
             vehicleDeadReckoningSpeedMps = lastTrueSpeedMps
             deadReckoningSpeedMps = lastTrueSpeedMps
+            // GNSS healthy: position only changes on a fix, but emit a lightweight snapshot every tick
+            // carrying the freshly filtered heading so the marker rotation stays continuous. Path/route
+            // fields are null, so applyNavigationSnapshot only refreshes the marker + speed.
             return TickResult(
-                navigation = null,
+                navigation = currentPoint?.let { point ->
+                    NavigationSnapshot(
+                        point = point,
+                        headingDeg = currentHeadingDeg,
+                        speedMps = lastTrueSpeedMps
+                    )
+                },
                 speedMps = lastTrueSpeedMps,
                 assistDecision = assistDecision
             )
@@ -437,6 +462,69 @@ class LiveRoutingViewModel : ViewModel() {
             speedMps = navigation?.speedMps ?: deadReckoningSpeedMps,
             assistDecision = assistDecision
         )
+    }
+
+    /**
+     * Single source of truth for vehicle heading, evaluated on every tick.
+     *
+     * The gyroscope integrates short-term yaw — it directly measures angular velocity and rejects road
+     * bumps far better than vision or a raw GPS bearing. GPS course-over-ground is folded in as a slow,
+     * speed-scheduled drift correction, but only above [COG_TRUST_SPEED_MPS] (COG is noise at a crawl)
+     * and not mid-turn (a lagging/noisy COG must not yank the heading while the gyro is carrying a
+     * corner). Below [HEADING_FREEZE_SPEED_MPS] the heading is frozen — this is what stops the icon
+     * spinning when stopped or creeping.
+     */
+    private fun runHeadingFilter(nowMs: Long, dtSec: Double, yawRateDegPerSec: Double) {
+        lastYawRateDegPerSec = yawRateDegPerSec
+        val speed = if (gnssAssistActive) deadReckoningSpeedMps else lastTrueSpeedMps
+        // Freeze only when slow AND not actually rotating. A real corner always has clear angular
+        // velocity, so the gyro must keep integrating through a slow turn even when the
+        // rotation-suppressed speed estimate dips below the freeze floor — otherwise heading sticks at
+        // the pre-turn direction and the path runs straight through the bend.
+        val rotating = abs(yawRateDegPerSec) >= HEADING_ROTATE_FLOOR_DEG_SEC
+        if (speed < HEADING_FREEZE_SPEED_MPS && !rotating) return
+
+        // Predict: integrate the bias-corrected gyro yaw rate.
+        currentHeadingDeg = normalizeDeg(currentHeadingDeg + yawRateDegPerSec * dtSec)
+
+        // Correct: nudge toward GPS course-over-ground when it is fresh, fast enough, and we are not
+        // in the middle of a turn.
+        if (
+            hasCurrentlyUsableGnss(nowMs) &&
+            speed >= COG_TRUST_SPEED_MPS &&
+            nowMs - lastCogMs < COG_FRESH_MS &&
+            abs(yawRateDegPerSec) < TURN_FREEZE_YAW_DEG_SEC
+        ) {
+            val err = signedHeadingDelta(currentHeadingDeg, lastCogDeg)
+            currentHeadingDeg = normalizeDeg(currentHeadingDeg + err * cogGain(speed, nowMs))
+        }
+    }
+
+    /**
+     * Per-tick COG correction gain. Ramps with speed (COG is more accurate the faster you go) and is
+     * deliberately small — ~0.05 per 50 ms tick is a ~1 s complementary time constant at 20 Hz, slow
+     * enough that a straight road does not oscillate. After a GNSS outage the gain eases back in over
+     * [RECONVERGE_SEC] so heading slides to the recovered COG instead of snapping.
+     */
+    private fun cogGain(speedMps: Double, nowMs: Long): Double {
+        val ramp = ((speedMps - COG_TRUST_SPEED_MPS) /
+            (COG_FULL_TRUST_SPEED_MPS - COG_TRUST_SPEED_MPS)).coerceIn(0.0, 1.0)
+        var gain = COG_GAIN_MIN + (COG_GAIN_MAX - COG_GAIN_MIN) * ramp
+        if (nowMs < reconvergeUntilMs) {
+            val t = (1.0 - (reconvergeUntilMs - nowMs) / (RECONVERGE_SEC * 1000.0)).coerceIn(0.0, 1.0)
+            gain = RECONVERGE_GAIN + (gain - RECONVERGE_GAIN) * t
+        }
+        return gain.coerceIn(0.0, COG_GAIN_MAX)
+    }
+
+    /**
+     * GNSS healthy and cruising straight (true yaw ≈ 0): a safe moment to learn the gyro zero-rate bias
+     * while moving, so a drive that starts already rolling still calibrates before its first outage.
+     */
+    fun isStraightLineForBias(nowMs: Long = System.currentTimeMillis()): Boolean {
+        return hasCurrentlyUsableGnss(nowMs) &&
+            lastTrueSpeedMps > MIN_FORWARD_AXIS_SPEED_MPS &&
+            abs(lastYawRateDegPerSec) < STRAIGHT_BIAS_MAX_YAW_DEG_SEC
     }
 
     fun updateRouteDeviation(nowMs: Long = System.currentTimeMillis()): Boolean {
@@ -541,88 +629,47 @@ class LiveRoutingViewModel : ViewModel() {
         )
         updateDeadReckoningUncertainty(visualOdometry, dtSec)
 
-        val yawAbs = abs(yawRateDegPerSec)
+        // currentHeadingDeg is the free gyro heading (set by runHeadingFilter). Position and the
+        // DISPLAYED heading come from route-lock: while plausibly on the planned route the pose is
+        // pinned to the road so corners stay tight; otherwise it free dead-reckons along the gyro
+        // heading. Distance 0 (stopped) is handled naturally — the pose just holds.
         val stepDistanceMeters = deadReckoningSpeedMps * dtSec
-        val headingDeltaDeg = resolveVehicleHeadingDelta(
-            origin = origin,
-            distanceMeters = stepDistanceMeters,
-            dtSec = dtSec,
-            yawRateDegPerSec = yawRateDegPerSec,
-            visualOdometry = visualOdometry
-        )
-        if (
-            abs(headingDeltaDeg) >= MIN_HEADING_DELTA_TO_APPLY_DEG ||
-            yawAbs >= MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC ||
-            visualOdometry.usable
-        ) {
-            currentHeadingDeg = normalizeDeg(currentHeadingDeg + headingDeltaDeg)
-        }
-
-        if (deadReckoningSpeedMps <= 0.0) {
-            return NavigationSnapshot(
-                point = origin,
-                headingDeg = currentHeadingDeg,
-                speedMps = 0.0,
-                opticalAssistSegments = snapshotSegments(opticalAssistSegments),
-                gnssTravelPathSegments = snapshotSegments(gnssTravelPathSegments),
-                weakGnssPoints = weakGnssPoints.toList(),
-                strongGnssPoints = strongGnssPoints.toList(),
-                remainingRoutePoints = remainingRouteFrom(origin)
-            )
-        }
-
-        val predictedPoint = offsetPoint(
-            origin = origin,
-            distanceMeters = deadReckoningSpeedMps * dtSec,
-            bearingDeg = currentHeadingDeg
-        )
-        val fusedPose = fusePredictedPoseWithRoute(
-            origin = origin,
-            predictedPoint = predictedPoint,
-            predictedHeadingDeg = currentHeadingDeg,
-            distanceMeters = stepDistanceMeters,
-            visualOdometry = visualOdometry
-        )
-        currentPoint = fusedPose.point
-        currentHeadingDeg = fusedPose.headingDeg
-        if (fusedPose.mapMatchConfidence > 0.0) {
+        val pose = resolveOutagePose(origin, stepDistanceMeters)
+        currentPoint = pose.point
+        if (pose.mapMatchConfidence > 0.0) {
             positionUncertaintyM = (
                 positionUncertaintyM *
-                    (1.0 - fusedPose.mapMatchConfidence * ROUTE_MATCH_UNCERTAINTY_REDUCTION)
+                    (1.0 - pose.mapMatchConfidence * ROUTE_MATCH_UNCERTAINTY_REDUCTION)
                 ).coerceAtLeast(MIN_POSITION_UNCERTAINTY_M)
         }
 
         val assistPoints = appendPathPoint(
             opticalAssistSegments,
-            fusedPose.point,
+            pose.point,
             DEAD_RECKONING_APPEND_DISTANCE_M
         )
         return NavigationSnapshot(
-            point = fusedPose.point,
-            headingDeg = currentHeadingDeg,
+            point = pose.point,
+            headingDeg = pose.headingDeg,
             speedMps = deadReckoningSpeedMps,
             opticalAssistSegments = assistPoints,
             gnssTravelPathSegments = snapshotSegments(gnssTravelPathSegments),
             weakGnssPoints = weakGnssPoints.toList(),
             strongGnssPoints = strongGnssPoints.toList(),
-            remainingRoutePoints = remainingRouteFrom(fusedPose.point)
+            remainingRoutePoints = remainingRouteFrom(pose.point)
         )
     }
 
-    private fun resolveVisualOdometry(
-        nowMs: Long,
-        dtSec: Double,
-        yawRateDegPerSec: Double
-    ): VisualOdometry {
+    private fun resolveVisualOdometry(nowMs: Long): VisualOdometry {
         val flowFresh = nowMs - lastFlowSampleMs < FLOW_STALE_MS
         val forwardFlowPxPerSec = abs(emaFlowDyPxPerSec)
-        val signedLateralFlowPxPerSec = emaFlowDxPxPerSec
-        val lateralFlowPxPerSec = abs(signedLateralFlowPxPerSec)
-        val yawAbs = abs(yawRateDegPerSec)
+        val lateralFlowPxPerSec = abs(emaFlowDxPxPerSec)
+        // A car is non-holonomic — it cannot translate sideways — so horizontal (lateral) image flow is
+        // almost entirely rotation/noise. Subtract nearly all of it before reading forward speed,
+        // otherwise a turn's sideways image sweep is mistaken for fast forward motion and the
+        // dead-reckoned path balloons far past the real turn (red path running into buildings).
         val translationFlowPxPerSec = when {
             !flowFresh || lastFlowConfidence < MIN_FLOW_CONFIDENCE -> 0.0
-            yawAbs < ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC ->
-                max(emaFlowMagPxPerSec, forwardFlowPxPerSec)
             else -> max(
                 forwardFlowPxPerSec,
                 emaFlowMagPxPerSec - lateralFlowPxPerSec * ROTATION_LATERAL_FLOW_DISCOUNT
@@ -647,82 +694,12 @@ class LiveRoutingViewModel : ViewModel() {
             0.0
         }
 
-        val turnFlowConfident = flowFresh && lastFlowConfidence >= MIN_FLOW_CONFIDENCE
-        val lateralCoherence = emaFlowCoherence
-        val opticalTurnDetected = turnFlowConfident &&
-            abs(lateralCoherence) >= FLOW_TURN_MIN_COHERENCE &&
-            lateralFlowPxPerSec >= MIN_LATERAL_FLOW_FOR_TURN_PX_PER_SEC
-        calibrateOpticalYawScale(
-            signedLateralPxPerSec = signedLateralFlowPxPerSec,
-            coherence = lateralCoherence,
-            rawGyroYawDegPerSec = yawRateDegPerSec,
-            flowConfident = turnFlowConfident
-        )
-        val opticalYawRateDegPerSec = if (opticalTurnDetected) {
-            (FLOW_YAW_SIGN * signedLateralFlowPxPerSec * dynamicFlowToYawRatio)
-                .coerceIn(-MAX_OPTICAL_YAW_RATE_DEG_SEC, MAX_OPTICAL_YAW_RATE_DEG_SEC)
-        } else {
-            0.0
-        }
-
-        val yawMag = abs(yawRateDegPerSec)
-        val amplifiedGyroYaw = if (yawMag > GYRO_YAW_NOISE_FLOOR_DEG_SEC) {
-            val gain = lowSpeedYawGain(deadReckoningSpeedMps)
-            val excess = yawMag - GYRO_YAW_NOISE_FLOOR_DEG_SEC
-            val boostedMag = GYRO_YAW_NOISE_FLOOR_DEG_SEC + excess * gain
-            if (yawRateDegPerSec >= 0.0) boostedMag else -boostedMag
-        } else {
-            yawRateDegPerSec
-        }
-
         return VisualOdometry(
             usable = usable,
             speedMps = speedMps,
-            deltaHeadingDeg = fuseYawRate(
-                gyroYawDegPerSec = amplifiedGyroYaw,
-                opticalYawDegPerSec = opticalYawRateDegPerSec,
-                opticalTurnDetected = opticalTurnDetected
-            ) * dtSec,
-            opticalYawRateDegPerSec = opticalYawRateDegPerSec,
             translationPxPerSec = translationFlowPxPerSec,
-            lateralPxPerSec = signedLateralFlowPxPerSec,
             quality = quality
         )
-    }
-
-    /** Fuse gyro + optical yaw: same sign -> larger magnitude; opposite -> trust optical; else gyro. */
-    private fun fuseYawRate(
-        gyroYawDegPerSec: Double,
-        opticalYawDegPerSec: Double,
-        opticalTurnDetected: Boolean
-    ): Double {
-        if (!opticalTurnDetected || opticalYawDegPerSec == 0.0) return gyroYawDegPerSec
-        return if (gyroYawDegPerSec * opticalYawDegPerSec >= 0.0) {
-            if (abs(opticalYawDegPerSec) >= abs(gyroYawDegPerSec)) opticalYawDegPerSec else gyroYawDegPerSec
-        } else {
-            opticalYawDegPerSec
-        }
-    }
-
-    /** Learn the px/s -> deg/s optical-yaw scale from the gyro on clear turns (slow EMA, gated). */
-    private fun calibrateOpticalYawScale(
-        signedLateralPxPerSec: Double,
-        coherence: Double,
-        rawGyroYawDegPerSec: Double,
-        flowConfident: Boolean
-    ) {
-        if (!flowConfident) return
-        if (abs(rawGyroYawDegPerSec) < OPTICAL_YAW_CALIB_MIN_GYRO_DEG_SEC) return
-        if (abs(signedLateralPxPerSec) < OPTICAL_YAW_CALIB_MIN_FLOW_PX_PER_SEC) return
-        if (abs(coherence) < FLOW_TURN_MIN_COHERENCE) return
-        if (rawGyroYawDegPerSec * (FLOW_YAW_SIGN * signedLateralPxPerSec) <= 0.0) return
-
-        val observed = (abs(rawGyroYawDegPerSec) / abs(signedLateralPxPerSec))
-            .coerceIn(MIN_FLOW_YAW_RATE_GAIN, MAX_FLOW_YAW_RATE_GAIN)
-        dynamicFlowToYawRatio = (
-            OPTICAL_YAW_SCALE_ALPHA * observed +
-                (1.0 - OPTICAL_YAW_SCALE_ALPHA) * dynamicFlowToYawRatio
-            ).coerceIn(MIN_FLOW_YAW_RATE_GAIN, MAX_FLOW_YAW_RATE_GAIN)
     }
 
     private fun calibrateCameraSpeedScale(visualOdometry: VisualOdometry) {
@@ -838,79 +815,6 @@ class LiveRoutingViewModel : ViewModel() {
             .coerceAtLeast(0.0)
     }
 
-    private fun resolveVehicleHeadingDelta(
-        origin: GeoPoint,
-        distanceMeters: Double,
-        dtSec: Double,
-        yawRateDegPerSec: Double,
-        visualOdometry: VisualOdometry
-    ): Double {
-        val sensorDelta = visualOdometry.deltaHeadingDeg
-        val baseHeading = normalizeDeg(currentHeadingDeg + sensorDelta)
-        val routeDelta = routeHeadingAssistDelta(
-            origin = origin,
-            baseHeadingDeg = baseHeading,
-            distanceMeters = distanceMeters,
-            dtSec = dtSec,
-            yawRateDegPerSec = yawRateDegPerSec,
-            visualOdometry = visualOdometry
-        )
-        return sensorDelta + routeDelta
-    }
-
-    private fun routeHeadingAssistDelta(
-        origin: GeoPoint,
-        baseHeadingDeg: Double,
-        distanceMeters: Double,
-        dtSec: Double,
-        yawRateDegPerSec: Double,
-        visualOdometry: VisualOdometry
-    ): Double {
-        if (dtSec <= 0.0) return 0.0
-        if (deadReckoningSpeedMps < ROUTE_HEADING_ASSIST_MIN_SPEED_MPS) return 0.0
-
-        val originProjection = projectOnRoute(origin) ?: return 0.0
-        val distanceGate = (
-            ROUTE_MATCH_BASE_DISTANCE_GATE_M +
-                positionUncertaintyM * ROUTE_MATCH_UNCERTAINTY_GATE_RATIO
-            ).coerceIn(ROUTE_MATCH_BASE_DISTANCE_GATE_M, ROUTE_MATCH_MAX_DISTANCE_GATE_M)
-        if (originProjection.distanceFromRouteM > distanceGate) return 0.0
-
-        val lookAheadMeters = (distanceMeters + deadReckoningSpeedMps * ROUTE_HEADING_LOOKAHEAD_SEC)
-            .coerceIn(ROUTE_HEADING_MIN_LOOKAHEAD_M, ROUTE_HEADING_MAX_LOOKAHEAD_M)
-        val routePose = pointAtRouteDistance(originProjection.distanceAlongRouteM + lookAheadMeters)
-            ?: return 0.0
-        val headingGap = signedHeadingDelta(baseHeadingDeg, routePose.segmentHeadingDeg)
-        if (abs(headingGap) < ROUTE_HEADING_ASSIST_MIN_GAP_DEG) return 0.0
-
-        val turnRateEvidence = yawRateDegPerSec + visualOdometry.opticalYawRateDegPerSec
-        val hasOppositeTurnEvidence =
-            abs(turnRateEvidence) >= ROUTE_HEADING_OPPOSITE_TURN_EVIDENCE_DEG_SEC &&
-                turnRateEvidence * headingGap < 0.0
-        if (hasOppositeTurnEvidence) return 0.0
-
-        val lateralRatio = abs(visualOdometry.lateralPxPerSec) /
-            visualOdometry.translationPxPerSec.coerceAtLeast(1.0)
-        val visualTurnStrength = (lateralRatio / ROUTE_HEADING_FULL_LATERAL_RATIO)
-            .coerceIn(0.0, 1.0)
-        val routeContinuity = (1.0 - originProjection.distanceFromRouteM / distanceGate)
-            .coerceIn(0.0, 1.0)
-
-        val cameraQuality = if (visualOdometry.usable) {
-            visualOdometry.quality
-        } else {
-            ROUTE_HEADING_NO_CAMERA_QUALITY
-        }
-        val assistStrength = (
-            ROUTE_HEADING_BASE_ASSIST_STRENGTH +
-                ROUTE_HEADING_VISUAL_ASSIST_STRENGTH * visualTurnStrength
-            ) * cameraQuality * routeContinuity
-
-        val maxAssistDelta = ROUTE_HEADING_MAX_ASSIST_DEG_SEC * dtSec
-        return (headingGap * assistStrength)
-            .coerceIn(-maxAssistDelta, maxAssistDelta)
-    }
-
     private fun updateDeadReckoningUncertainty(
         visualOdometry: VisualOdometry,
         dtSec: Double
@@ -949,112 +853,53 @@ class LiveRoutingViewModel : ViewModel() {
         return current + delta.coerceIn(-limit, limit)
     }
 
-    private fun fusePredictedPoseWithRoute(
-        origin: GeoPoint,
-        predictedPoint: GeoPoint,
-        predictedHeadingDeg: Double,
-        distanceMeters: Double,
-        visualOdometry: VisualOdometry
-    ): FusedPose {
-        val mapMatch = mapMatchPredictedPose(
-            origin = origin,
-            predictedPoint = predictedPoint,
-            predictedHeadingDeg = predictedHeadingDeg,
-            distanceMeters = distanceMeters,
-            visualOdometry = visualOdometry
-        ) ?: return FusedPose(
-            point = predictedPoint,
-            headingDeg = predictedHeadingDeg,
-            mapMatchConfidence = 0.0
-        )
-
-        val snapBoost = vehicleSnapBoost(deadReckoningSpeedMps)
-        val maxPointBlend = ROUTE_MATCH_MAX_POINT_BLEND +
-            (VEHICLE_SNAP_MAX_POINT_BLEND - ROUTE_MATCH_MAX_POINT_BLEND) * snapBoost
-        val effectiveConfidence = mapMatch.confidence +
-            (1.0 - mapMatch.confidence) * VEHICLE_SNAP_CONFIDENCE_LIFT * snapBoost
-        val pointBlend = (effectiveConfidence * maxPointBlend)
-            .coerceIn(0.0, maxPointBlend)
-        val headingBlendRatio = ROUTE_MATCH_HEADING_BLEND_RATIO +
-            (VEHICLE_SNAP_HEADING_BLEND_RATIO - ROUTE_MATCH_HEADING_BLEND_RATIO) * snapBoost
-        val headingBlend = pointBlend * headingBlendRatio
-        return FusedPose(
-            point = interpolatePoint(predictedPoint, mapMatch.point, pointBlend),
-            headingDeg = interpolateHeading(predictedHeadingDeg, mapMatch.headingDeg, headingBlend),
-            mapMatchConfidence = mapMatch.confidence
-        )
-    }
-
-    /** Ramps 0 -> 1 from the vehicle gate (~6 km/h) to cruising speed; scales how hard to snap to road. */
-    private fun vehicleSnapBoost(speedMps: Double): Double {
-        if (speedMps < VEHICLE_SNAP_SPEED_MPS) return 0.0
-        val range = (VEHICLE_SNAP_FULL_SPEED_MPS - VEHICLE_SNAP_SPEED_MPS).coerceAtLeast(0.01)
-        return ((speedMps - VEHICLE_SNAP_SPEED_MPS) / range).coerceIn(0.0, 1.0)
-    }
-
-    /** Gyro-yaw gain (>=1), largest near standstill, fading to 1.0 at the fade speed (slow tight corners). */
-    private fun lowSpeedYawGain(speedMps: Double): Double {
-        val maxGain = vehicleProfile.lowSpeedYawGainMax
-        if (maxGain <= 1.0 || speedMps >= LOW_SPEED_YAW_GAIN_FADE_MPS) return 1.0
-        val slowness = ((LOW_SPEED_YAW_GAIN_FADE_MPS - speedMps) / LOW_SPEED_YAW_GAIN_FADE_MPS)
-            .coerceIn(0.0, 1.0)
-        return 1.0 + (maxGain - 1.0) * slowness
-    }
-
-    private fun mapMatchPredictedPose(
-        origin: GeoPoint,
-        predictedPoint: GeoPoint,
-        predictedHeadingDeg: Double,
-        distanceMeters: Double,
-        visualOdometry: VisualOdometry
-    ): MapMatchResult? {
-        val originProjection = projectOnRoute(origin)
-        val predictedProjection = projectOnRoute(predictedPoint) ?: return null
-        val distanceGate = (
-            ROUTE_MATCH_BASE_DISTANCE_GATE_M +
-                positionUncertaintyM * ROUTE_MATCH_UNCERTAINTY_GATE_RATIO
-            ).coerceIn(ROUTE_MATCH_BASE_DISTANCE_GATE_M, ROUTE_MATCH_MAX_DISTANCE_GATE_M)
-
-        val routeDistance = if (
-            originProjection != null &&
-            originProjection.distanceFromRouteM <= distanceGate
-        ) {
-            originProjection.distanceAlongRouteM + distanceMeters
-        } else if (predictedProjection.distanceFromRouteM <= distanceGate) {
-            predictedProjection.distanceAlongRouteM
-        } else {
-            return null
+    /**
+     * Route-locked dead reckoning during a GNSS outage.
+     *
+     * While within [ROUTE_LOCK_ENTER_M] of the planned route the position is locked to the route
+     * polyline (advanced by [distanceMeters] each tick via [routeProgressM]) and the heading is taken
+     * from the route tangent, so the drawn path follows the road exactly — corners stay as tight as the
+     * road and the path can never overshoot into a building. The lock is intentionally NOT released on
+     * gyro-heading divergence (a leaning motorbike under-reads yaw, which used to false-release on every
+     * curve); a genuine departure from the route is instead corrected when GNSS returns (position snaps
+     * to truth and re-routing fires). The returned heading is what the chevron displays; currentHeadingDeg
+     * stays the free gyro estimate for COG re-capture when GNSS comes back.
+     */
+    private fun resolveOutagePose(origin: GeoPoint, distanceMeters: Double): FusedPose {
+        val routePoints = routeState?.routePoints.orEmpty()
+        if (routePoints.size < 2) {
+            return FusedPose(
+                point = offsetPoint(origin, distanceMeters, currentHeadingDeg),
+                headingDeg = currentHeadingDeg,
+                mapMatchConfidence = 0.0
+            )
         }
 
-        val routePose = pointAtRouteDistance(routeDistance) ?: predictedProjection
-        val lateralDistance = predictedPoint.distanceToAsDouble(routePose.point)
-        val headingError = absHeadingDelta(predictedHeadingDeg, routePose.segmentHeadingDeg)
-        val distanceScore = (1.0 - lateralDistance / distanceGate).coerceIn(0.0, 1.0)
-        val headingScore = (1.0 - headingError / ROUTE_MATCH_HEADING_GATE_DEG).coerceIn(0.0, 1.0)
-        val continuityScore = originProjection
-            ?.let { (1.0 - it.distanceFromRouteM / distanceGate).coerceIn(0.0, 1.0) }
-            ?: 0.35
-        val visualScore = if (visualOdometry.usable) visualOdometry.quality else ROUTE_MATCH_NO_CAMERA_VISUAL_SCORE
-        val confidence = (
-            distanceScore * ROUTE_MATCH_DISTANCE_WEIGHT +
-                headingScore * ROUTE_MATCH_HEADING_WEIGHT +
-                continuityScore * ROUTE_MATCH_CONTINUITY_WEIGHT +
-                visualScore * ROUTE_MATCH_VISUAL_WEIGHT
-            ).coerceIn(0.0, 1.0)
-
-        if (
-            confidence < ROUTE_MATCH_MIN_CONFIDENCE ||
-            distanceScore <= 0.0 ||
-            headingScore <= ROUTE_MATCH_MIN_HEADING_SCORE
-        ) {
-            return null
+        if (routeLocked) {
+            // Locked: advance purely ALONG the route polyline. Position AND heading come from the road
+            // geometry, so the path follows the road exactly — corners stay tight and it can NEVER
+            // overshoot into a building — no matter how poorly the (leaning-motorbike) gyro tracked the
+            // turn. The gyro is deliberately NOT consulted here; using it to decide "still on route?"
+            // was what made the path shoot straight through every curve.
+            routeProgressM += distanceMeters
+            val routePose = pointAtRouteDistance(routeProgressM)
+            if (routePose != null) {
+                return FusedPose(routePose.point, routePose.segmentHeadingDeg, 1.0)
+            }
+            routeLocked = false // ran past the end of the route
         }
 
-        return MapMatchResult(
-            point = routePose.point,
-            headingDeg = routePose.segmentHeadingDeg,
-            confidence = confidence
-        )
+        // Not locked (started off-route): free dead reckoning, re-locking by POSITION alone the moment
+        // we are within the corridor of the route. Departure from the route is corrected when GNSS
+        // returns (position snaps to truth and re-routing fires) rather than guessed at mid-outage.
+        val freePoint = offsetPoint(origin, distanceMeters, currentHeadingDeg)
+        val projection = projectOnRoute(freePoint)
+        if (projection != null && projection.distanceFromRouteM <= ROUTE_LOCK_ENTER_M) {
+            routeLocked = true
+            routeProgressM = projection.distanceAlongRouteM
+            return FusedPose(projection.point, projection.segmentHeadingDeg, 1.0)
+        }
+        return FusedPose(freePoint, currentHeadingDeg, 0.0)
     }
 
     private fun projectOnRoute(point: GeoPoint): RouteProjection? {
@@ -1258,6 +1103,19 @@ class LiveRoutingViewModel : ViewModel() {
                     weakGnssPoints.add(it)
                 }
                 gnssTravelSegmentOpen = false
+                // Lock to the planned route immediately if we are on it, so the very first dead-reckoned
+                // step already follows the road instead of free-floating.
+                val projection = currentPoint?.let { projectOnRoute(it) }
+                if (projection != null && projection.distanceFromRouteM <= ROUTE_LOCK_ENTER_M) {
+                    routeLocked = true
+                    routeProgressM = projection.distanceAlongRouteM
+                } else {
+                    routeLocked = false
+                }
+            } else {
+                // GNSS just came back after an outage: ease the COG correction in over RECONVERGE_SEC
+                // so the gyro-drifted heading slides to the recovered course instead of snapping.
+                reconvergeUntilMs = System.currentTimeMillis() + (RECONVERGE_SEC * 1000.0).toLong()
             }
         }
         return AssistDecision(active = gnssAssistActive, changed = changed)
@@ -1289,7 +1147,6 @@ class LiveRoutingViewModel : ViewModel() {
 
     private fun resetCameraSpeedScale() {
         dynamicFlowToMpsRatio = FLOW_PX_PER_SEC_TO_MPS
-        dynamicFlowToYawRatio = FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC
         cameraSpeedScaleConfidence = INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE
     }
 
@@ -1297,6 +1154,12 @@ class LiveRoutingViewModel : ViewModel() {
         deadReckoningSpeedMps = 0.0
         vehicleDeadReckoningSpeedMps = 0.0
         positionUncertaintyM = INITIAL_POSITION_UNCERTAINTY_M
+        lastCogDeg = 0.0
+        lastCogMs = 0L
+        lastYawRateDegPerSec = 0.0
+        reconvergeUntilMs = 0L
+        routeLocked = false
+        routeProgressM = 0.0
     }
 
     private fun resetInertialRuntime() {
@@ -1470,15 +1333,6 @@ class LiveRoutingViewModel : ViewModel() {
         return GeoPoint(Math.toDegrees(lat2), Math.toDegrees(lon2))
     }
 
-    private fun interpolateHeading(fromDeg: Double, toDeg: Double, ratio: Double): Double {
-        val delta = signedHeadingDelta(fromDeg, toDeg)
-        return normalizeDeg(fromDeg + delta * ratio.coerceIn(0.0, 1.0))
-    }
-
-    private fun absHeadingDelta(fromDeg: Double, toDeg: Double): Double {
-        return abs(signedHeadingDelta(fromDeg, toDeg))
-    }
-
     private fun signedHeadingDelta(fromDeg: Double, toDeg: Double): Double {
         var delta = (toDeg - fromDeg) % 360.0
         if (delta > 180.0) delta -= 360.0
@@ -1504,10 +1358,28 @@ class LiveRoutingViewModel : ViewModel() {
         private const val GNSS_STATUS_STALE_MS = 5_000L
         private const val MIN_USABLE_GNSS_SATELLITES = 4
         private const val MAX_USABLE_GNSS_ACCURACY_M = 25f
-        private const val MIN_BEARING_SPEED_MPS = 0.35
         private const val GNSS_STATIONARY_SPEED_FLOOR_MPS = 0.20
         private const val MIN_GNSS_DISTANCE_FOR_DERIVED_SPEED_M = 1.5
         private const val MAX_NAVIGATION_SPEED_MPS = 45.0
+
+        // === Gyro + GPS-course heading complementary filter — tune chevron stability vs turn tracking ===
+        // Below the freeze speed, heading is held (GPS course is pure noise at a crawl). The COG
+        // correction ramps in between trust/full-trust speed and is applied PER TICK (~20 Hz), so the
+        // small per-tick gain corresponds to a ~1 s complementary time constant.
+        private const val HEADING_FREEZE_SPEED_MPS = 1.0
+        // Above this yaw rate the gyro keeps integrating even below the freeze speed, so slow corners
+        // are still tracked while a genuinely stationary phone (gyro noise only) stays frozen.
+        private const val HEADING_ROTATE_FLOOR_DEG_SEC = 3.0
+        private const val COG_TRUST_SPEED_MPS = 1.5
+        private const val COG_FULL_TRUST_SPEED_MPS = 5.0
+        private const val COG_GAIN_MIN = 0.02
+        private const val COG_GAIN_MAX = 0.05
+        private const val COG_FRESH_MS = 2_500L
+        private const val TURN_FREEZE_YAW_DEG_SEC = 12.0
+        private const val COG_FALLBACK_MIN_DISTANCE_M = 2.0
+        private const val RECONVERGE_GAIN = 0.02
+        private const val RECONVERGE_SEC = 2.0
+        private const val STRAIGHT_BIAS_MAX_YAW_DEG_SEC = 1.0
 
         // === Re-route / arrival — tune when off-route refresh fires too eagerly/late ===
         private const val ROUTE_DEVIATION_DISTANCE_M = 35.0
@@ -1538,8 +1410,9 @@ class LiveRoutingViewModel : ViewModel() {
         private const val FLOW_PX_PER_SEC_TO_MPS = 0.075
         private const val MIN_FLOW_PX_PER_SEC_TO_MPS = 0.006
         private const val MAX_FLOW_PX_PER_SEC_TO_MPS = 0.30
-        private const val ROTATION_SUPPRESSION_YAW_RATE_DEG_SEC = 12.0
-        private const val ROTATION_LATERAL_FLOW_DISCOUNT = 0.12
+        // Fraction of lateral (rotational) optical flow removed before reading forward speed. Near 1.0
+        // because a car cannot move sideways, so lateral flow is rotation, not translation.
+        private const val ROTATION_LATERAL_FLOW_DISCOUNT = 0.9
         private const val MIN_CAMERA_CALIBRATION_SPEED_MPS = 2.0
         private const val MIN_CAMERA_CALIBRATION_FLOW_PX_PER_SEC = 10.0
         private const val CAMERA_SPEED_SCALE_ALPHA = 0.16
@@ -1548,22 +1421,6 @@ class LiveRoutingViewModel : ViewModel() {
         private const val CAMERA_SPEED_SCALE_CONFIDENCE_STEP = 0.10
         private const val CAMERA_SPEED_SCALE_TRUSTED_CONFIDENCE = 0.65
         private const val INITIAL_CAMERA_SPEED_SCALE_CONFIDENCE = 0.15
-
-        // === Turn detection: optical pan + gyro yaw fusion — tune when turns missed/over-read ===
-        private const val FLOW_TURN_MIN_COHERENCE = 0.35
-        private const val MIN_LATERAL_FLOW_FOR_TURN_PX_PER_SEC = 6.0
-        private const val FLOW_YAW_SIGN = -1.0 // flip if turns steer the wrong way
-        private const val FLOW_YAW_RATE_GAIN_DEG_PER_PX_SEC = 0.40
-        private const val MIN_FLOW_YAW_RATE_GAIN = 0.08
-        private const val MAX_FLOW_YAW_RATE_GAIN = 1.6
-        private const val MAX_OPTICAL_YAW_RATE_DEG_SEC = 45.0
-        private const val OPTICAL_YAW_CALIB_MIN_GYRO_DEG_SEC = 6.0
-        private const val OPTICAL_YAW_CALIB_MIN_FLOW_PX_PER_SEC = 8.0
-        private const val OPTICAL_YAW_SCALE_ALPHA = 0.12
-        private const val GYRO_YAW_NOISE_FLOOR_DEG_SEC = 1.5
-        private const val LOW_SPEED_YAW_GAIN_FADE_MPS = 4.0 // ~14 km/h
-        private const val MIN_YAW_RATE_TO_UPDATE_HEADING_DEG_SEC = 0.5
-        private const val MIN_HEADING_DELTA_TO_APPLY_DEG = 0.02
 
         // === Vehicle speed dead-reckoning fusion — tune the flow/inertial/prior blend ===
         private const val VEHICLE_FLOW_WEIGHT = 0.78
@@ -1589,40 +1446,14 @@ class LiveRoutingViewModel : ViewModel() {
         private const val INERTIAL_BRAKE_EVIDENCE_MPS2 = 0.6
         private const val ZUPT_YAW_RATE_DEG_SEC = 4.0
 
-        // === Map-matching / road snap — tune when the path floats off / snaps too hard ===
-        private const val ROUTE_MATCH_BASE_DISTANCE_GATE_M = 10.0
-        private const val ROUTE_MATCH_MAX_DISTANCE_GATE_M = 45.0
-        private const val ROUTE_MATCH_UNCERTAINTY_GATE_RATIO = 0.6
-        private const val ROUTE_MATCH_HEADING_GATE_DEG = 82.0
-        private const val ROUTE_MATCH_MIN_CONFIDENCE = 0.52
-        private const val ROUTE_MATCH_MIN_HEADING_SCORE = 0.15
-        private const val ROUTE_MATCH_DISTANCE_WEIGHT = 0.40
-        private const val ROUTE_MATCH_HEADING_WEIGHT = 0.30
-        private const val ROUTE_MATCH_CONTINUITY_WEIGHT = 0.20
-        private const val ROUTE_MATCH_VISUAL_WEIGHT = 0.10
-        private const val ROUTE_MATCH_NO_CAMERA_VISUAL_SCORE = 0.20
-        private const val ROUTE_MATCH_MAX_POINT_BLEND = 0.86
-        private const val ROUTE_MATCH_HEADING_BLEND_RATIO = 0.45
+        // === Route-locked dead reckoning during a GNSS outage — see resolveOutagePose ===
+        // While the dead-reckoned position is within this corridor of the planned route, the path is
+        // pinned to the route polyline (position + heading from the road) so corners stay tight and it
+        // cannot overshoot into buildings. Lock is decided by POSITION only — never by gyro heading —
+        // because a leaning motorbike under-reads yaw and would otherwise false-release on every curve.
+        private const val ROUTE_LOCK_ENTER_M = 25.0
         private const val ROUTE_MATCH_UNCERTAINTY_REDUCTION = 0.28
-        private const val VEHICLE_SNAP_SPEED_MPS = 1.667 // ~6 km/h
-        private const val VEHICLE_SNAP_FULL_SPEED_MPS = 3.0 // ~10.8 km/h
-        private const val VEHICLE_SNAP_MAX_POINT_BLEND = 0.985
-        private const val VEHICLE_SNAP_CONFIDENCE_LIFT = 0.55
-        private const val VEHICLE_SNAP_HEADING_BLEND_RATIO = 0.72
         private const val ROUTE_REMAINING_PROJECTION_DISTANCE_M = 60.0
-
-        // === Route-heading assist — tune how strongly the planned road bends the heading ===
-        private const val ROUTE_HEADING_LOOKAHEAD_SEC = 1.45
-        private const val ROUTE_HEADING_MIN_LOOKAHEAD_M = 6.0
-        private const val ROUTE_HEADING_MAX_LOOKAHEAD_M = 28.0
-        private const val ROUTE_HEADING_ASSIST_MIN_GAP_DEG = 1.2
-        private const val ROUTE_HEADING_MAX_ASSIST_DEG_SEC = 18.0
-        private const val ROUTE_HEADING_OPPOSITE_TURN_EVIDENCE_DEG_SEC = 2.0
-        private const val ROUTE_HEADING_FULL_LATERAL_RATIO = 0.45
-        private const val ROUTE_HEADING_BASE_ASSIST_STRENGTH = 0.22
-        private const val ROUTE_HEADING_VISUAL_ASSIST_STRENGTH = 0.46
-        private const val ROUTE_HEADING_ASSIST_MIN_SPEED_MPS = 0.6
-        private const val ROUTE_HEADING_NO_CAMERA_QUALITY = 0.45
 
         // === Path drawing & geo (rarely tuned) ===
         private const val DEAD_RECKONING_APPEND_DISTANCE_M = 0.35
@@ -1639,8 +1470,7 @@ class LiveRoutingViewModel : ViewModel() {
             forwardAxisConfidenceStep = 0.03,
             maxInertialTrust = 0.70,
             zuptEnterSpeedMps = 1.8,
-            zuptAccelMps2 = 1.2,
-            lowSpeedYawGainMax = 6.0
+            zuptAccelMps2 = 1.2
         )
     }
 }
