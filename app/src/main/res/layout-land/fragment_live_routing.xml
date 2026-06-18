@@ -171,6 +171,22 @@
         app:layout_constraintTop_toBottomOf="@id/ivBack" />
 
     <TextView
+        android:id="@+id/btnSnapMode"
+        android:layout_width="54dp"
+        android:layout_height="54dp"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/bg_glass_black_button"
+        android:gravity="center"
+        android:text="SNAP"
+        android:textColor="@color/black"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:translationZ="100dp"
+        app:layout_constraintEnd_toEndOf="@id/btnTestMode"
+        app:layout_constraintStart_toStartOf="@id/btnTestMode"
+        app:layout_constraintTop_toBottomOf="@id/btnTestMode" />
+
+    <TextView
         android:id="@+id/tvGnssStatus"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

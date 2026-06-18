@@ -180,6 +180,7 @@ class LiveRoutingFragment :
         bindInitialRoute(liveRoutingViewModel.restoreOrInitialize(state))
         rebuildActiveOpticalFlow()
         renderTestModeButton()
+        renderSnapModeButton()
         updateGnssStrengthText()
         prepareCameraPanelFromState()
         ensureLocationPermission()
@@ -202,6 +203,7 @@ class LiveRoutingFragment :
             setActiveOpticalMode(OpticalMode.FARNEBACK_VECTOR)
         }
         btnTestMode.setSingleClick { onTestModeTapped() }
+        btnSnapMode.setSingleClick { onSnapModeTapped() }
         ivRecenter.setSingleClick { setFollowing(true) }
     }
 
@@ -1162,6 +1164,17 @@ class LiveRoutingFragment :
         binding.btnTestMode.text = when (mode) {
             LiveRoutingViewModel.TestMode.REAL_LIFE -> "REAL"
             LiveRoutingViewModel.TestMode.GNSS_DROPOUT -> "DROP"
+        }
+    }
+
+    private fun onSnapModeTapped() {
+        renderSnapModeButton(liveRoutingViewModel.cycleSnapMode())
+    }
+
+    private fun renderSnapModeButton(mode: LiveRoutingViewModel.SnapMode = liveRoutingViewModel.snapMode) {
+        binding.btnSnapMode.text = when (mode) {
+            LiveRoutingViewModel.SnapMode.SNAP -> "SNAP"
+            LiveRoutingViewModel.SnapMode.REAL -> "REAL"
         }
     }
 

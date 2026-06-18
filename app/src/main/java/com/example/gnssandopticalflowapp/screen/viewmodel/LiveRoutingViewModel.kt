@@ -29,6 +29,13 @@ class LiveRoutingViewModel : ViewModel() {
         GNSS_DROPOUT
     }
 
+    /** During an outage: SNAP locks the dead-reckoned position onto the planned (purple) route;
+     *  REAL shows the raw dead-reckoned position so deviation from the route is visible. */
+    enum class SnapMode {
+        SNAP,
+        REAL
+    }
+
     data class InitialRouteUi(
         val destinationPoint: GeoPoint,
         val routePoints: List<GeoPoint>,
@@ -108,8 +115,13 @@ class LiveRoutingViewModel : ViewModel() {
         private set
     var testMode = TestMode.REAL_LIFE
         private set
+    var snapMode = SnapMode.SNAP
+        private set
     var gnssAssistActive = false
         private set
+
+    private val snapToRouteEnabled: Boolean
+        get() = snapMode == SnapMode.SNAP
     val isRouteLocked: Boolean
         get() = routeLocked
 
@@ -327,6 +339,19 @@ class LiveRoutingViewModel : ViewModel() {
         }
         if (testMode != TestMode.GNSS_DROPOUT) testGnssSuppressed = false
         return testMode
+    }
+
+    fun cycleSnapMode(): SnapMode {
+        snapMode = when (snapMode) {
+            SnapMode.SNAP -> SnapMode.REAL
+            SnapMode.REAL -> SnapMode.SNAP
+        }
+        if (snapMode == SnapMode.REAL) {
+            // Release any active lock so the next outage tick reckons freely from the live position.
+            routeLocked = false
+            lockReferencePoint = null
+        }
+        return snapMode
     }
 
     fun dismissCameraPanel() {
@@ -846,7 +871,7 @@ class LiveRoutingViewModel : ViewModel() {
 
     private fun resolveOutagePose(origin: GeoPoint, distanceMeters: Double): FusedPose {
         val routePoints = routeState?.routePoints.orEmpty()
-        if (routePoints.size < 2) {
+        if (routePoints.size < 2 || !snapToRouteEnabled) {
             return FusedPose(
                 point = offsetPoint(origin, distanceMeters, currentHeadingDeg),
                 headingDeg = currentHeadingDeg,
@@ -1084,7 +1109,7 @@ class LiveRoutingViewModel : ViewModel() {
                     weakGnssPoints.add(it)
                 }
                 gnssTravelSegmentOpen = false
-                val projection = currentPoint?.let { projectOnRoute(it) }
+                val projection = currentPoint?.takeIf { snapToRouteEnabled }?.let { projectOnRoute(it) }
                 if (projection != null && projection.distanceFromRouteM <= ROUTE_LOCK_ENTER_M) {
                     routeLocked = true
                     routeProgressM = projection.distanceAlongRouteM
