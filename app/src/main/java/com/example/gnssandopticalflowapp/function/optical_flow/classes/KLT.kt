@@ -49,7 +49,21 @@ class KLT : OpticalFlow {
     private val semaphore: Semaphore = Semaphore(1)
     private val ofOutput: OFOutput = OFOutput()
 
-    private data class TrackMotion(val start: Point, val dx: Double, val dy: Double)
+    // Persistent per-track smoothing to remove arrow flicker (appear/disappear each frame).
+    private val emaAlpha = 0.35
+    private val visRampUp = 0.30
+    private val visRampDown = 0.12
+    private val drawVisMin = 0.12
+    private var tracks = ArrayList<Track>()
+
+    private class Track {
+        var dx = 0.0
+        var dy = 0.0
+        var vis = 0.0
+        var initialized = false
+    }
+
+    private data class TrackMotion(val index: Int, val start: Point, val dx: Double, val dy: Double)
 
     private fun statusInit() = MatOfByte()
 
@@ -88,6 +102,12 @@ class KLT : OpticalFlow {
         val corners = MatOfPoint()
         Imgproc.goodFeaturesToTrack(prevGray, corners, maxCorners, qualityLevel, minDistance)
         prevPts.fromArray(*corners.toArray())
+        resetTracks(prevPts.toArray().size)
+    }
+
+    private fun resetTracks(size: Int) {
+        tracks = ArrayList(size)
+        repeat(size) { tracks.add(Track()) }
     }
 
     private fun median(list: List<Double>): Double {
@@ -177,6 +197,10 @@ class KLT : OpticalFlow {
         val currPtsArray = currPts.toArray()
         val backwardPtsArray = backwardPts.toArray()
 
+        if (tracks.size != prevPtsArray.size) {
+            resetTracks(prevPtsArray.size)
+        }
+
         // Keep EVERY tracked vector (whole frame); FBE is measured for confidence only, drops nothing.
         val trackedMotions = ArrayList<TrackMotion>()
         val allDxList = ArrayList<Double>()
@@ -202,7 +226,7 @@ class KLT : OpticalFlow {
                 val dx = pt2.x - pt1.x
                 val dy = pt2.y - pt1.y
                 flowPts++
-                trackedMotions.add(TrackMotion(pt1, dx, dy))
+                trackedMotions.add(TrackMotion(i, pt1, dx, dy))
                 allDxList.add(dx)
                 allDyList.add(dy)
             }
@@ -211,23 +235,44 @@ class KLT : OpticalFlow {
         val dominantDx = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDxList) else 0.0
         val dominantDy = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDyList) else 0.0
 
+        // Per-track EMA + visibility ramp: smooth each arrow over time and fade it
+        // in/out (via length) instead of popping on/off when motion crosses the threshold.
         val motions = ArrayList<TrackMotion>()
-        for (motion in trackedMotions) {
-            val dx = motion.dx - dominantDx
-            val dy = motion.dy - dominantDy
-            if (sqrt((dx * dx) + (dy * dy)) < minTrackedMotionMagnitude) continue
-            motions.add(TrackMotion(motion.start, dx, dy))
-        }
-
         var coherenceSumDx = 0.0
         var coherenceSumAbsDx = 0.0
-        for (motion in motions) {
-            val displayDx = motion.dx * vectorDirectionSign * displayVectorLengthMultiplier
-            val displayDy = motion.dy * vectorDirectionSign * displayVectorLengthMultiplier
+        for (motion in trackedMotions) {
+            val rawDx = motion.dx - dominantDx
+            val rawDy = motion.dy - dominantDy
+            val track = tracks[motion.index]
+            if (!track.initialized) {
+                track.dx = rawDx
+                track.dy = rawDy
+                track.initialized = true
+            } else {
+                track.dx += emaAlpha * (rawDx - track.dx)
+                track.dy += emaAlpha * (rawDy - track.dy)
+            }
+            val sdx = track.dx
+            val sdy = track.dy
+            val mag = sqrt((sdx * sdx) + (sdy * sdy))
+            val active = mag >= minTrackedMotionMagnitude
+            track.vis = if (active) {
+                (track.vis + visRampUp).coerceAtMost(1.0)
+            } else {
+                (track.vis - visRampDown).coerceAtLeast(0.0)
+            }
+            if (track.vis <= drawVisMin) continue
+
+            val displayDx = sdx * vectorDirectionSign * displayVectorLengthMultiplier * track.vis
+            val displayDy = sdy * vectorDirectionSign * displayVectorLengthMultiplier * track.vis
             val displayEnd = Point(motion.start.x + displayDx, motion.start.y + displayDy)
             Imgproc.line(currFrame, motion.start, displayEnd, color, vectorThickness)
-            coherenceSumDx += motion.dx
-            coherenceSumAbsDx += abs(motion.dx)
+
+            if (active) {
+                motions.add(TrackMotion(motion.index, motion.start, sdx, sdy))
+                coherenceSumDx += sdx
+                coherenceSumAbsDx += abs(sdx)
+            }
         }
         val lateralCoherence = if (coherenceSumAbsDx > 1e-3) coherenceSumDx / coherenceSumAbsDx else 0.0
 

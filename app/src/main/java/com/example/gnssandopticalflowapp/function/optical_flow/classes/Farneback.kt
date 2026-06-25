@@ -47,6 +47,24 @@ class Farneback : OpticalFlow {
     private val ofOutput: OFOutput = OFOutput()
     private val flowColor = Scalar(0.0, 255.0, 0.0)
 
+    // Temporal grid buffer: smooth each fixed grid cell over time and fade arrows in/out
+    // (via length) instead of popping on/off or jittering direction frame-to-frame.
+    private val emaAlpha = 0.35
+    private val visRampUp = 0.30
+    private val visRampDown = 0.12
+    private val drawVisMin = 0.12
+    private val gridCells = HashMap<Int, GridCell>()
+    private var gridStep = -1
+    private var gridMapCols = -1
+    private var gridMapRows = -1
+
+    private class GridCell {
+        var fx = 0.0
+        var fy = 0.0
+        var vis = 0.0
+        var initialized = false
+    }
+
     private data class FlowStats(
         val avgMotion: Point?,
         val sampleCount: Int,
@@ -186,85 +204,99 @@ class Farneback : OpticalFlow {
         val startY = computeCenteredGridStart(mapRows, step)
         val minMotionSquared = minMotionMagnitude * minMotionMagnitude
 
-        // Pass 1: collect every grid sample with significant motion, across the whole frame.
-        val sampleScreenX = ArrayList<Int>()
-        val sampleScreenY = ArrayList<Int>()
-        val sampleFx = ArrayList<Double>()
-        val sampleFy = ArrayList<Double>()
-        val sampleFbe = ArrayList<Boolean>()
+        if (gridStep != step || gridMapCols != mapCols || gridMapRows != mapRows) {
+            gridCells.clear()
+            gridStep = step
+            gridMapCols = mapCols
+            gridMapRows = mapRows
+        }
+
+        val drawArrows = visualizationMode == VisualizationMode.VECTORS
+        val activeFx = ArrayList<Double>()
+        val activeFy = ArrayList<Double>()
+        var sumX = 0.0
+        var sumAbsX = 0.0
+        var fbeInliers = 0
         var gridSampleCount = 0
+
+        var rowIndex = 0
         var screenY = startY
         while (screenY < mapRows) {
+            var colIndex = 0
             var screenX = startX
             while (screenX < mapCols) {
                 gridSampleCount++
+                val cellKey = (rowIndex * GRID_KEY_STRIDE) + colIndex
+                val cell = gridCells.getOrPut(cellKey) { GridCell() }
+
                 val flowX = (screenX / xScale).roundToInt().coerceIn(0, flowCols - 1)
                 val flowY = (screenY / yScale).roundToInt().coerceIn(0, flowRows - 1)
                 val vector = flow.get(flowY, flowX) ?: doubleArrayOf(0.0, 0.0)
-                val fx = vector[0] * xScale
-                val fy = vector[1] * yScale
-                val magnitudeSquared = (fx * fx) + (fy * fy)
+                val rawFx = vector[0] * xScale
+                val rawFy = vector[1] * yScale
 
-                if (magnitudeSquared >= minMotionSquared) {
-                    // Check FBE
-                    var fbeValid = false
-                    val bx = (flowX + fx).roundToInt().coerceIn(0, flowCols - 1)
-                    val by = (flowY + fy).roundToInt().coerceIn(0, flowRows - 1)
-                    val bVec = backwardFlow.get(by, bx)
-                    if (bVec != null) {
-                        val bdx = bVec[0] * xScale
-                        val bdy = bVec[1] * yScale
-                        val errX = fx + bdx
-                        val errY = fy + bdy
-                        val fbeSquared = errX * errX + errY * errY
-                        if (fbeSquared <= 2.25) { // Threshold 1.5 pixels
-                            fbeValid = true
-                        }
-                    }
-                    sampleScreenX.add(screenX)
-                    sampleScreenY.add(screenY)
-                    sampleFx.add(fx)
-                    sampleFy.add(fy)
-                    sampleFbe.add(fbeValid)
+                // EMA-smooth the cell over time to kill per-frame direction jitter.
+                if (!cell.initialized) {
+                    cell.fx = rawFx
+                    cell.fy = rawFy
+                    cell.initialized = true
+                } else {
+                    cell.fx += emaAlpha * (rawFx - cell.fx)
+                    cell.fy += emaAlpha * (rawFy - cell.fy)
+                }
+                val sfx = cell.fx
+                val sfy = cell.fy
+                val active = (sfx * sfx) + (sfy * sfy) >= minMotionSquared
+
+                // Visibility ramp: fade arrow in/out via length instead of popping on/off.
+                cell.vis = if (active) {
+                    (cell.vis + visRampUp).coerceAtMost(1.0)
+                } else {
+                    (cell.vis - visRampDown).coerceAtLeast(0.0)
                 }
 
+                if (drawArrows && cell.vis > drawVisMin) {
+                    val start = Point(screenX.toDouble(), screenY.toDouble())
+                    val displayFx = sfx * vectorDirectionSign * vectorLengthMultiplier * cell.vis
+                    val displayFy = sfy * vectorDirectionSign * vectorLengthMultiplier * cell.vis
+                    val end = Point(start.x + displayFx, start.y + displayFy)
+                    Imgproc.line(flowmap, start, end, color, vectorThickness)
+                    Imgproc.circle(flowmap, start, dotRadius, color, -1)
+                }
+
+                if (active) {
+                    activeFx.add(sfx)
+                    activeFy.add(sfy)
+                    sumX += sfx
+                    sumAbsX += abs(sfx)
+
+                    // FBE confidence on raw forward/backward flow at this cell.
+                    val bx = (flowX + rawFx).roundToInt().coerceIn(0, flowCols - 1)
+                    val by = (flowY + rawFy).roundToInt().coerceIn(0, flowRows - 1)
+                    val bVec = backwardFlow.get(by, bx)
+                    if (bVec != null) {
+                        val errX = rawFx + (bVec[0] * xScale)
+                        val errY = rawFy + (bVec[1] * yScale)
+                        if (errX * errX + errY * errY <= 2.25) fbeInliers++
+                    }
+                }
+
+                colIndex++
                 screenX += step
             }
+            rowIndex++
             screenY += step
         }
 
-        // Pass 2: accumulate over EVERY sample (no rejection); draw arrow uses vectorDirectionSign,
-        // metrics use true flow. FBE is a confidence signal only.
-        var sumX = 0.0
-        var sumAbsX = 0.0
-        var sampleCount = 0
-        var fbeInliers = 0
-        for (index in sampleFx.indices) {
-            val fx = sampleFx[index]
-            val fy = sampleFy[index]
-            if (visualizationMode == VisualizationMode.VECTORS) {
-                val start = Point(sampleScreenX[index].toDouble(), sampleScreenY[index].toDouble())
-                val displayFx = fx * vectorDirectionSign * vectorLengthMultiplier
-                val displayFy = fy * vectorDirectionSign * vectorLengthMultiplier
-                val end = Point(start.x + displayFx, start.y + displayFy)
-                Imgproc.line(flowmap, start, end, color, vectorThickness)
-                Imgproc.circle(flowmap, start, dotRadius, color, -1)
-            }
-            sumX += fx
-            sumAbsX += abs(fx)
-            sampleCount++
-            if (sampleFbe[index]) {
-                fbeInliers++
-            }
-        }
         if (visualizationMode == VisualizationMode.HEATMAP) {
             drawDenseHeatmap(flow, flowmap, xScale, yScale)
         }
 
+        val sampleCount = activeFx.size
         return if (sampleCount > 0) {
             // Median (like KLT): robust to a few wrong/foreground vectors that a mean would follow.
-            val avgDx = median(sampleFx)
-            val avgDy = median(sampleFy)
+            val avgDx = median(activeFx)
+            val avgDy = median(activeFy)
             val confidence = (fbeInliers.toDouble() / sampleCount.toDouble()) * 100.0
             val lateralCoherence = if (sumAbsX > 1e-3) (sumX / sumAbsX).coerceIn(-1.0, 1.0) else 0.0
             FlowStats(
@@ -394,6 +426,7 @@ class Farneback : OpticalFlow {
         const val HEATMAP_NORMALIZE_MULTIPLIER = 9.0
         const val HEATMAP_INPUT_THRESHOLD_MULTIPLIER = 0.40
         const val HEATMAP_MASK_THRESHOLD_MULTIPLIER = 0.32
+        const val GRID_KEY_STRIDE = 100_000
     }
 
     private fun buildOutput(
