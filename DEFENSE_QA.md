@@ -1,1666 +1,654 @@
-# DEFENSE_QA — Bộ câu hỏi phản biện và trả lời chi tiết
+# DEFENSE_QA - Bộ câu hỏi và trả lời bảo vệ đồ án
 
-> Tài liệu này liệt kê **mọi câu hỏi bản chất** mà hội đồng có thể hỏi khi bảo vệ đồ án
-> **GNSSAndOpticalFlowApp** (Android) + **OpticalFlowServer** (Python FastAPI/RAFT).
-> Câu trả lời được diễn giải **dễ hiểu, không máy móc**, kèm số dòng code minh chứng.
->
-> Ngôn ngữ: Tiếng Việt. Mục đích: chuẩn bị phản biện.
+> Tài liệu này được viết theo vai trò giảng viên phản biện trong phiên bảo vệ đồ án.
+> Câu trả lời dùng ngôi "em", ngắn gọn nhưng giải thích đúng bản chất, bám sát nội dung đồ án.
+> Trọng tâm cần ôn kỹ nhất là Chương 5: các giải pháp và đóng góp nổi bật.
 
 ---
 
-## MỤC LỤC
+## Mục lục
 
-1. [Optical Flow — Bản chất chuyển đổi ảnh và tính vector](#1-optical-flow--bản-chất)
-2. [Optical Flow — Thuật toán KLT (sparse)](#2-klt-sparse-optical-flow)
-3. [Optical Flow — Thuật toán Farneback (dense)](#3-farneback-dense-optical-flow)
-4. [Optical Flow — Server RAFT (Deep Learning)](#4-raft-server-side)
-5. [IMU Estimator và cảm biến quán tính](#5-imu-estimator)
-6. [GNSS — Vì sao cần ít nhất 4 vệ tinh](#6-gnss-4-vệ-tinh)
-7. [GNSS — Kiến trúc 4 tầng ưu tiên (PVT → IGS → SGP4 → Approximate)](#7-gnss-4-tầng-ưu-tiên)
-8. [GNSS — Toán học quỹ đạo Kepler và WGS84](#8-toán-học-quỹ-đạo-và-wgs84)
-9. [GNSS — Vị trí Mặt Trời và Mặt Trăng (thuật toán Meeus)](#9-mặt-trời-và-mặt-trăng)
-10. [Dialog thông tin vệ tinh 3D — từng biến](#10-map3dinformationdialog)
-11. [AR rendering — View matrix, Projection matrix, Skybox](#11-ar-rendering)
-12. [Live Routing — Dead reckoning khi mất GNSS](#12-live-routing-dead-reckoning)
-13. [Analytics — So sánh KLT vs Farneback (benchmark)](#13-analytics-benchmark)
-14. [Server — FastAPI, ONNX Runtime, Chunked upload](#14-server-fastapi-onnx)
-15. [Câu hỏi tổng hợp — Kiến trúc, hiệu năng, giới hạn](#15-câu-hỏi-tổng-hợp)
+1. [Tổng quan đề tài](#1-tổng-quan-đề-tài)
+2. [Lý do chọn đề tài](#2-lý-do-chọn-đề-tài)
+3. [Kiến thức nền về GNSS](#3-kiến-thức-nền-về-gnss)
+4. [Kiến thức nền về Optical Flow](#4-kiến-thức-nền-về-optical-flow)
+5. [Cách hệ thống kết hợp GNSS và Optical Flow](#5-cách-hệ-thống-kết-hợp-gnss-và-optical-flow)
+6. [Câu hỏi trọng tâm về Chương 5](#6-câu-hỏi-trọng-tâm-về-chương-5)
+7. [Câu hỏi về thuật toán và xử lý ảnh](#7-câu-hỏi-về-thuật-toán-và-xử-lý-ảnh)
+8. [Câu hỏi về dữ liệu, thực nghiệm và đánh giá](#8-câu-hỏi-về-dữ-liệu-thực-nghiệm-và-đánh-giá)
+9. [Câu hỏi về sai số, giới hạn và rủi ro](#9-câu-hỏi-về-sai-số-giới-hạn-và-rủi-ro)
+10. [Câu hỏi phản biện khó](#10-câu-hỏi-phản-biện-khó)
+11. [Câu hỏi về hướng phát triển](#11-câu-hỏi-về-hướng-phát-triển)
+12. [Bộ câu hỏi trả lời nhanh trước khi bảo vệ](#12-bộ-câu-hỏi-trả-lời-nhanh-trước-khi-bảo-vệ)
 
 ---
 
-## 1. Optical Flow — Bản chất
+## 1. Tổng quan đề tài
 
-### 1.1. Optical Flow là gì? Nó tính cái gì?
+### 1.1. Đề tài của em giải quyết bài toán gì?
 
-**Optical flow** là **trường vector 2D** mô tả **chuyển động biểu kiến của các điểm ảnh (pixel)**
-giữa hai khung hình liên tiếp. Mỗi pixel `(x, y)` ở khung hình cũ được ánh xạ sang vị trí
-mới `(x + dx, y + dy)` ở khung hình mới; cặp `(dx, dy)` chính là **vector optical flow** tại
-điểm đó.
+**Trả lời:**  
+Đề tài xây dựng một hệ thống Android để trực quan hóa dữ liệu GNSS và phân tích chuyển động camera bằng Optical Flow. Hệ thống không chỉ hiển thị vị trí người dùng trên bản đồ, mà còn cho phép quan sát vệ tinh, xem mô hình 3D/AR, chạy KLT/Farneback trên camera, xử lý video bằng RAFT trên backend và thử nghiệm hỗ trợ chỉ đường khi tín hiệu GNSS suy giảm.
 
-Lưu ý bản chất: đây là **chuyển động biểu kiến** (apparent motion), tức là chỉ dựa trên
-thay đổi độ sáng pixel. Nó không nhất thiết trùng với chuyển động thực (motion field).
-Ví dụ: đèn nhấp nháy trên tường tạo optical flow dù tường không di chuyển; và một quả bóng
-quay quanh trục đối xứng (đơn sắc) sẽ có motion field khác 0 nhưng optical flow bằng 0
-vì độ sáng pixel không đổi. Trong đồ án, ta chấp nhận sai số này vì camera điện thoại
-di chuyển tương đối chậm và bối cảnh có texture đủ phong phú.
+### 1.2. Sản phẩm cuối cùng của đồ án gồm những thành phần nào?
 
-### 1.2. Giả thuyết cốt lõi của optical flow (brightness constancy) là gì?
+**Trả lời:**  
+Sản phẩm gồm ứng dụng Android và backend xử lý video. Ứng dụng Android phụ trách bản đồ, GNSS, camera, IMU, Optical Flow thời gian thực, lưu phiên đo và giao diện người dùng. Backend Python/FastAPI phụ trách xử lý video nặng bằng mô hình RAFT, quản lý job, upload/download theo chunk, hủy job và dọn tài nguyên.
 
-Cả KLT lẫn Farneback đều dựa trên **giả thuyết bảo toàn độ sáng (Brightness Constancy
-Assumption)**:
+### 1.3. Các nhóm chức năng chính của hệ thống là gì?
 
-```
-I(x, y, t) = I(x + dx, y + dy, t + dt)
-```
+**Trả lời:**  
+Trong đồ án, hệ thống có các nhóm chức năng chính:
 
-Nghĩa là một điểm vật chất trong thế giới, dù di chuyển tới đâu trong khung hình,
-vẫn giữ cùng cường độ sáng. Khai triển Taylor bậc nhất:
+- Quan sát vệ tinh GNSS trên bản đồ, mô hình 3D và AR.
+- Xem bản đồ hai chiều, tìm kiếm địa điểm và tuyến đường.
+- Chỉ đường trực tiếp có hỗ trợ camera/IMU khi GNSS yếu.
+- Xem Optical Flow trên camera bằng KLT hoặc Farneback.
+- Phân tích hiệu năng KLT và Farneback.
+- Xử lý video Optical Flow bằng RAFT trên backend.
+- Xem lại dữ liệu đã lưu như phiên phân tích, tuyến đường và media.
 
-```
-∂I/∂x · dx + ∂I/∂y · dy + ∂I/∂t · dt ≈ 0
-```
+### 1.4. Đóng góp chính của đồ án là gì?
 
-Chia hai vế cho `dt`, ta có **phương trình ràng buộc optical flow (OFCE)**:
+**Trả lời:**  
+Đóng góp chính nằm ở việc tích hợp nhiều luồng kỹ thuật vào một hệ thống thử nghiệm thống nhất. Cụ thể, Chương 5 nêu sáu đóng góp: chuỗi ưu tiên phân giải vị trí vệ tinh GNSS, cơ chế hỗ trợ chỉ đường khi GNSS yếu, so sánh hiệu năng KLT/Farneback, pipeline RAFT bất đồng bộ trên server, bám đối tượng trong camera trực tiếp và hiệu ứng giao diện Liquid Glass theo khả năng thiết bị.
 
-```
-Ix · u + Iy · v + It = 0
-```
+### 1.5. Đồ án này có phải là một ứng dụng bản đồ hoàn chỉnh như Google Maps không?
 
-Trong đó `u = dx/dt`, `v = dy/dt` là hai thành phần chưa biết. Một phương trình mà hai
-ẩn số, nên bài toán bị **thiếu ràng buộc (aperture problem)**: chỉ tính được thành phần
-vuông góc với biên, không tính được thành phần song song với biên.
+**Trả lời:**  
+Không. Trong phạm vi đồ án, hệ thống không nhằm thay thế ứng dụng bản đồ thương mại. Mục tiêu chính là xây dựng nguyên mẫu kỹ thuật để quan sát GNSS, Optical Flow, thử nghiệm hỗ trợ định vị khi GNSS suy giảm và đánh giá các luồng xử lý trong cùng một ứng dụng.
 
-Cách vượt qua:
-- **KLT / Lucas-Kanade**: giả thiết flow không đổi trong một cửa sổ nhỏ, gộp nhiều
-  phương trình lại → giải bằng bình phương tối thiểu.
-- **Farneback**: xấp xỉ vùng lân cận mỗi pixel bằng **đa thức bậc 2**, so sánh hệ số
-  đa thức giữa 2 khung → suy ra vector chuyển dịch.
+### 1.6. Phạm vi nghiên cứu của đồ án dừng ở đâu?
 
-### 1.3. Convert ImageProxy → Mat như thế nào?
-
-Xem `CameraOpticalFlowFragment.kt` — hàm `imageProxyToRgbaMat`. Bản chất từng bước:
-
-1. **CameraX xuất ImageProxy định dạng YUV_420_888.** Đây là chuẩn của Android:
-   - `plane[0]` = kênh Y (luminance, 1 byte/pixel, kích thước gốc).
-   - `plane[1]` = kênh U (chroma, 1 byte / 4 pixel).
-   - `plane[2]` = kênh V (chroma, 1 byte / 4 pixel).
-   Định dạng này tiết kiệm bộ nhớ (12 bit/pixel thay vì 32 bit như RGBA).
-
-2. **Đọc từng plane vào `ByteBuffer`.** Vì các plane có thể có `rowStride ≠ width`
-   (do hardware padding), ta phải sao chép từng dòng có bù rowStride/pixelStride,
-   không được `bytebuffer.get()` toàn khối.
-
-3. **Ghép Y, U, V thành một `Mat` NV21** (`CV_8UC1`, kích thước `1.5 × H × W`).
-   NV21 là format YUV 4:2:0 interleaved mà OpenCV nhận trực tiếp.
-
-4. **Gọi `Imgproc.cvtColor(nv21Mat, rgbaMat, Imgproc.COLOR_YUV2RGBA_NV21)`**:
-   - Đây là hàm OpenCV được triển khai bằng NEON/SIMD, biến đổi màu theo công thức
-     BT.601:
-     ```
-     R = Y + 1.402·(V-128)
-     G = Y - 0.344·(U-128) - 0.714·(V-128)
-     B = Y + 1.772·(U-128)
-     A = 255
-     ```
-   - Kết quả là **Mat kiểu `CV_8UC4`** (4 kênh 8-bit unsigned: R, G, B, Alpha),
-     kích thước đúng `H × W`.
-
-5. **Xoay Mat theo `imageInfo.rotationDegrees`** (thường là 90° khi cầm dọc):
-   `Core.rotate(mat, mat, Core.ROTATE_90_CLOCKWISE)`. Nếu không xoay, hình sẽ nằm ngang.
-
-Vì sao chọn NV21 thay vì tự tay convert YUV → RGB bằng Kotlin? Vì OpenCV convert
-nhanh gấp ~10 lần nhờ SIMD, quan trọng khi ta cần chạy ~30 FPS liên tục.
-
-### 1.4. `CV_8UC4` nghĩa là gì?
-
-- `CV_` = prefix của OpenCV.
-- `8` = depth 8-bit.
-- `U` = unsigned (giá trị 0-255, không âm).
-- `C4` = 4 kênh (channels).
-
-Ghép lại: **`CV_8UC4` = ma trận 4 kênh, mỗi kênh là 1 byte không dấu**. Đúng khớp
-với định dạng RGBA mà OpenGL và Android surface sử dụng.
-
-Các loại khác dùng trong đồ án:
-- `CV_8UC1` — 1 kênh, dùng cho ảnh xám (`prevGray`, `currGray` trong KLT/Farneback).
-- `CV_32FC2` — 2 kênh float, dùng cho **flow map** của Farneback (mỗi pixel lưu `(dx, dy)`).
-- `CV_32FC1` — 1 kênh float, dùng cho magnitude/heatmap.
-
-### 1.5. Vì sao phải chuyển RGBA → GRAY trước khi tính flow?
-
-Xem `Farneback.kt:81` và `KLT.kt:124`:
-
-```kotlin
-Imgproc.cvtColor(newFrame, currGray, Imgproc.COLOR_RGBA2GRAY)
-```
-
-Lý do:
-1. **Optical flow chỉ cần độ sáng** — công thức OFCE dùng gradient ảnh xám, không dùng
-   thông tin màu.
-2. **Giảm 4× dữ liệu** — 4 kênh → 1 kênh, tăng tốc gấp 4 lần, giảm cache miss.
-3. **Chuẩn hóa** — hai camera khác trắng (white-balance) sẽ có RGB khác nhau nhưng
-   độ sáng gần giống, nên grayscale ổn định hơn với optical flow.
-
-Công thức OpenCV dùng cho `COLOR_RGBA2GRAY` là **BT.601 luma**:
-
-```
-Y = 0.299·R + 0.587·G + 0.114·B
-```
-
-Hệ số G lớn nhất vì mắt người nhạy nhất với xanh lá.
-
-### 1.6. Vẽ vector màu ra sao? Bản chất `Imgproc.line`?
-
-Xem `Farneback.kt:263` và `KLT.kt:269`:
-
-```kotlin
-Imgproc.line(flowmap, start, end, color, vectorThickness)
-Imgproc.circle(flowmap, start, dotRadius, color, -1)
-```
-
-Bản chất:
-1. **Tính điểm cuối vector**: `end = start + (dx, dy) × scale × visibility × sign`.
-   - `scale = vectorLengthMultiplier = 4.2` (Farneback) hoặc `4.8` (KLT) — nhân độ dài
-     cho dễ nhìn.
-   - `visibility ∈ [0, 1]` — hệ số fade in/fade out, giúp mũi tên **không nháy**.
-   - `sign = ±1` — đảo chiều nếu ở chế độ moving (đi bộ).
-2. **`Imgproc.line`** triển khai thuật toán **Bresenham** (hoặc Xiaolin Wu antialiased):
-   tính các pixel nằm trên đường thẳng nối `start → end` và tô màu `color = Scalar(R,G,B)`
-   với độ dày `thickness` pixel.
-3. **`Imgproc.circle` với `radius = -1`** vẽ vòng tròn **đặc** (filled). Đây là "chấm gốc"
-   tại đầu vector, giúp thấy rõ điểm xuất phát ngay cả khi vector rất ngắn.
-4. **Màu**: `Scalar(0, 255, 0)` cho Farneback (xanh lá), `Scalar(240, 230, 140)` cho KLT
-   (vàng nhạt / khaki). Bản chất `Scalar` là `(B, G, R, A)` khi Mat 4 kênh, hoặc
-   `(R, G, B, A)` sau khi cvtColor RGBA. Trong file này ta đã ở không gian RGBA,
-   nên `Scalar(0, 255, 0)` chính là **xanh lục thuần**.
-
-### 1.7. Vì sao mũi tên phải fade in/out (visibility ramp)?
-
-Xem `Farneback.kt:52-55` và `KLT.kt:53-56`:
-
-```kotlin
-private val emaAlpha = 0.35
-private val visRampUp = 0.30
-private val visRampDown = 0.12
-private val drawVisMin = 0.12
-```
-
-Vấn đề: khi độ lớn vector dao động quanh ngưỡng `minMotionMagnitude`, mũi tên sẽ
-**nháy liên tục** (frame này vẽ, frame sau không) → khó chịu, gây ảo giác chuyển động
-không có thật.
-
-Giải pháp: mỗi cell/track có biến `vis ∈ [0, 1]`:
-- Nếu vector đang active → `vis += 0.30` (tăng nhanh) mỗi frame, kẹp về 1.
-- Nếu vector đang idle → `vis -= 0.12` (giảm chậm) mỗi frame, kẹp về 0.
-- Chỉ vẽ khi `vis > 0.12`.
-- **Độ dài hiển thị** được nhân thêm `vis`, nên khi vector vừa xuất hiện, nó vẽ ngắn
-  rồi dài dần; khi mất động, nó co ngắn lại rồi biến mất.
-
-Đây là kỹ thuật **hysteresis + soft-thresholding**, quen thuộc trong xử lý ảnh (Canny
-edge detector cũng dùng hysteresis 2 ngưỡng).
-
-Cùng với **EMA (Exponential Moving Average) α = 0.35** trên `(dx, dy)`:
-```
-dx_new = dx_old + 0.35 × (raw_dx - dx_old)
-```
-mỗi track được **làm mượt theo thời gian**, không giật hướng frame-to-frame.
-
-### 1.8. So sánh pixel giữa 2 frame là "so sánh" cái gì?
-
-Không phải so từng pixel `if (a == b)`. Bản chất là **tối thiểu hoá sai số cường độ**
-trên một cửa sổ / một vùng đa thức.
-
-- **KLT**: với mỗi feature point, tìm `(dx, dy)` sao cho
-  `Σ (I_prev(x, y) - I_curr(x + dx, y + dy))² → min` trong cửa sổ 21×21.
-  Bài toán giải bằng **Gauss-Newton** trên phương trình
-  `[G] · [dx, dy]ᵀ = [b]`, với `G` là ma trận **cấu trúc** (structure matrix)
-  của gradient `Σ Ix²`, `Σ IxIy`, `Σ Iy²`.
-- **Farneback**: xấp xỉ vùng lân cận `(2n+1)×(2n+1)` (n=5) bằng đa thức bậc 2:
-  `f(x) ≈ xᵀAx + bᵀx + c`. Với frame 2, đa thức là `f₂(x) = f₁(x - d)`,
-  bung ra và cân bằng hệ số → giải `A·d ≈ ½·(b₂ - b₁)` cho vector chuyển dịch `d`.
-
-### 1.9. Vì sao KLT và Farneback cùng chạy song song?
-
-Xem `CameraOpticalFlowFragment.kt` → hàm `processAnalysisFrame`. App clone Mat gốc **hai
-lần**, chạy KLT trên copy 1 và Farneback trên copy 2 **trong 2 coroutine song song**,
-sau đó ghép side-by-side thành một khung hình để so sánh trực quan.
-
-Mục đích:
-- **Demo thực nghiệm** cho hội đồng thấy điểm mạnh/yếu của mỗi thuật toán trên cùng đầu vào.
-- **Benchmark**: cùng ghi metric FPS, confidence, số vector active để so trên đồ thị Analytics.
+**Trả lời:**  
+Đồ án dừng ở mức nguyên mẫu kỹ thuật. Hệ thống đã chạy được trên thiết bị thật và backend cục bộ, nhưng chưa phải dịch vụ thương mại, chưa tối ưu cho nhiều người dùng đồng thời, chưa có benchmark quy mô lớn và chức năng LiveRouting vẫn đang ở mức thử nghiệm, chưa đạt độ ổn định như hệ định vị công nghiệp.
 
 ---
 
-## 2. KLT (Sparse Optical Flow)
+## 2. Lý do chọn đề tài
 
-### 2.1. KLT là gì? Vì sao gọi là "sparse"?
+### 2.1. Vì sao em chọn đề tài kết hợp GNSS và Optical Flow?
 
-**KLT = Kanade-Lucas-Tomasi**, tổ hợp:
-- **Shi-Tomasi corner detector** (`goodFeaturesToTrack`): chọn các **điểm góc** đủ tốt để theo dõi.
-- **Lucas-Kanade Pyramid** (`calcOpticalFlowPyrLK`): theo dõi các điểm đó qua khung tiếp theo.
+**Trả lời:**  
+Vì GNSS là nguồn định vị phổ biến trên điện thoại nhưng dễ bị suy giảm ở hầm, đô thị dày đặc hoặc nơi có vật che khuất. Trong khi đó, camera và IMU có thể cung cấp thông tin chuyển động tương đối của thiết bị. Đồ án chọn hướng kết hợp này để khảo sát khả năng hỗ trợ định vị ngắn hạn khi GNSS không còn đủ tin cậy.
 
-"Sparse" nghĩa là chỉ theo dõi **vài trăm điểm đặc trưng**, không phải mọi pixel.
-Trong `KLT.kt:37`, `maxCorners = 240` mặc định, sensitivity 100 → 420 điểm.
+### 2.2. Khoảng trống của các ứng dụng hiện có là gì?
 
-Ưu điểm: nhanh, đủ chính xác nếu có góc để bám. Nhược điểm: mất tín hiệu ở vùng phẳng
-(tường trắng, bầu trời) — không có góc để track.
+**Trả lời:**  
+Ứng dụng bản đồ phổ thông thường chỉ hiển thị kết quả định vị cuối cùng, ít cho thấy dữ liệu vệ tinh phía sau. Ứng dụng GNSS chuyên dụng có thể hiển thị vệ tinh nhưng thường tách rời bản đồ và xử lý ảnh. Các demo Optical Flow lại thường thiếu lưu phiên, so sánh thuật toán và backend xử lý video. Đồ án cố gắng gom các phần này vào một hệ thống quan sát và thử nghiệm thống nhất.
 
-### 2.2. `goodFeaturesToTrack` bản chất làm gì?
+### 2.3. Vì sao đề tài không chỉ làm GNSS mà còn thêm Optical Flow?
 
-Xem `KLT.kt:103`:
-```kotlin
-Imgproc.goodFeaturesToTrack(prevGray, corners, maxCorners, qualityLevel, minDistance)
-```
+**Trả lời:**  
+Nếu chỉ làm GNSS thì hệ thống chủ yếu dừng ở trực quan hóa vệ tinh. Optical Flow giúp bổ sung một hướng dữ liệu khác là chuyển động biểu kiến từ camera. Nhờ đó đồ án có thêm khả năng so sánh thuật toán, bám đối tượng và thử nghiệm hỗ trợ LiveRouting khi GNSS yếu.
 
-Thuật toán **Shi-Tomasi** (cải tiến từ Harris corner):
+### 2.4. Vì sao cần backend RAFT, trong khi Android đã chạy KLT/Farneback?
 
-1. Tính ma trận **structure tensor** trong cửa sổ 3×3 quanh mỗi pixel:
-   ```
-   M = Σ [ Ix²    Ix·Iy ]
-         [ Ix·Iy   Iy²  ]
-   ```
-2. Tính 2 giá trị riêng `λ₁, λ₂` của M.
-3. **Điểm góc** nếu `min(λ₁, λ₂) > qualityLevel × max_all_lambda_min`.
-   - Nếu `λ₁, λ₂` đều lớn → điểm ở góc (2 hướng gradient mạnh).
-   - Nếu 1 lớn 1 nhỏ → điểm ở cạnh (chỉ 1 hướng gradient) → loại.
-   - Nếu cả hai nhỏ → vùng phẳng → loại.
-4. **Non-maximum suppression** với bán kính `minDistance` để tránh feature dồn cụm.
-5. Lấy tối đa `maxCorners` điểm mạnh nhất.
+**Trả lời:**  
+KLT và Farneback phù hợp xử lý thời gian thực trên điện thoại vì nhẹ hơn. RAFT là mô hình học sâu cho dense optical flow, biểu diễn chuyển động chi tiết hơn nhưng nặng về tính toán. Vì vậy đồ án đưa RAFT lên backend để xử lý video ngoại tuyến, tránh làm quá tải thiết bị Android.
 
-Trong đồ án, `qualityLevel` chỉnh động theo sensitivity `0.005 → 0.10` (`KLT.kt:76`):
-sensitivity cao → nhận cả điểm yếu → nhiều feature hơn.
+### 2.5. Ý nghĩa thực tiễn của đề tài là gì?
 
-### 2.3. `calcOpticalFlowPyrLK` (Pyramidal Lucas-Kanade) hoạt động thế nào?
-
-Bài toán: cho `prevGray, currGray, prevPts` → tìm `currPts` sao cho mỗi điểm được theo
-đúng qua khung mới.
-
-Lucas-Kanade cơ bản chỉ chính xác khi chuyển động nhỏ (≤1-2 pixel). Với chuyển động
-lớn (xe di chuyển, tay rung), ta cần **pyramid**:
-
-1. Xây pyramid Gauss cho cả 2 ảnh: `L0 (nguyên gốc), L1 (½), L2 (¼), L3 (⅛)`.
-   Trong `KLT.kt:47`, `lkMaxLevel = 3` → 4 tầng.
-2. Bắt đầu từ tầng thô nhất `L3` — chuyển động lớn thu gọn còn ~1 pixel.
-3. Áp dụng Lucas-Kanade trên cửa sổ 21×21 (`lkWinSize`) tại tầng đó:
-   giải hệ 2 ẩn từ OFCE bằng bình phương tối thiểu:
-   ```
-   [Σ Ix²    Σ IxIy] [u]   [-Σ Ix·It]
-   [Σ IxIy   Σ Iy² ] [v] = [-Σ Iy·It]
-   ```
-4. Nội suy kết quả lên tầng mịn hơn (nhân 2), dùng làm điểm khởi đầu, refine tiếp.
-5. Về đến `L0` → có `(dx, dy)` chính xác.
-6. `TermCriteria(COUNT + EPS, 30, 0.01)` — tối đa 30 iteration hoặc dừng khi
-   độ thay đổi < 0.01 pixel.
-
-Output còn có mảng `status[i]`: 1 = theo dõi thành công, 0 = mất dấu (điểm ra khỏi biên,
-sai số quá lớn, hoặc gradient suy biến).
-
-### 2.4. Forward-Backward Error (FBE) là gì? Vì sao dùng làm confidence?
-
-Xem `KLT.kt:187-223`:
-
-```kotlin
-Video.calcOpticalFlowPyrLK(prevGray, currGray, prevPts, currPts, ...)
-Video.calcOpticalFlowPyrLK(currGray, prevGray, currPts, backwardPts, ...)
-val errX = pt1.x - ptBack.x
-if (errX*errX + errY*errY <= 2.25) fbeValid = true
-```
-
-Bản chất: track một điểm **tới** rồi track **ngược lại**. Nếu tracker tốt, điểm phải
-trở về đúng vị trí ban đầu. Nếu sai lệch > 1.5 pixel (2.25 = 1.5²) → điểm này bị nghi ngờ.
-
-Confidence = tỷ lệ điểm có FBE ≤ 1.5 pixel:
-```
-confidence = inliers / totalTracked × 100%
-```
-
-Vì sao dùng FBE thay vì eigenvalue hay minEigThreshold? FBE trực tiếp đo **độ nhất quán
-hình học**, không phụ thuộc mức xám. Kinh nghiệm cho thấy FBE loại các điểm bám
-"nhầm vào chỗ khác" (occlusion, ánh sáng đổi) rất tốt.
-
-### 2.5. Vì sao trừ dominant motion (median dx/dy)?
-
-Xem `KLT.kt:235`:
-```kotlin
-val dominantDx = if (subtractDominantMotion && trackedMotions.size >= 8) median(allDxList) else 0.0
-```
-
-Khi camera pan (quay ngang), **tất cả** các điểm đều chuyển động cùng chiều. Nhưng
-mục đích của chúng ta là detect **chuyển động tương đối** (xe, người đi bộ) trên nền
-tĩnh, không phải chuyển động của bản thân camera.
-
-Vì vậy:
-- Nếu ở chế độ **standing (đứng yên)** — trừ dominant motion để lộ vật thể đang di chuyển.
-- Nếu ở chế độ **moving (đi bộ)** — không trừ, vì bản thân chuyển động của camera chính
-  là cái ta muốn ước lượng để làm visual odometry.
-
-**Dominant** dùng **median** thay vì **mean** vì median chống outlier: vài điểm bị track
-sai không kéo cả giá trị lệch đi.
-
-### 2.6. `lateralCoherence` là gì? Ứng dụng cho detect rẽ (turn)?
-
-Xem `KLT.kt:277`:
-```kotlin
-val lateralCoherence = if (coherenceSumAbsDx > 1e-3) coherenceSumDx / coherenceSumAbsDx else 0.0
-```
-
-Công thức: `Σ dx / Σ |dx|`, giá trị trong `[-1, 1]`:
-- **+1**: mọi vector đều lệch **dương** (sang phải) → camera đang quay sang trái (vì thế
-  giới trong ảnh dịch sang phải) hoặc xe đang **rẽ trái**.
-- **-1**: mọi vector đều lệch âm → camera quay phải → xe **rẽ phải**.
-- **0**: vector chia đều dương/âm → đi thẳng.
-
-Đây là ý tưởng chính trong đề tài phát hiện rẽ: dùng **coherence hướng vector**
-thay vì chỉ dựa gyro, vì gyro có drift còn coherence trực tiếp phản ánh cảnh thay đổi.
-
-### 2.7. Vì sao chọn `winSize = 21`?
-
-Trade-off:
-- Cửa sổ nhỏ (5-9): nhanh, nhạy chi tiết nhưng dễ **aperture problem** (lỗi kính lỗ), noisy.
-- Cửa sổ lớn (31+): mượt, chống noise tốt nhưng chậm, và giả thiết "flow đều trong cửa sổ"
-  không còn đúng nếu có nhiều vật thể chuyển động độc lập.
-- **21×21** là compromise chuẩn của OpenCV cho video 640-1080p, đủ cover chuyển động 5-10px/frame.
-
-### 2.8. Semaphore trong `setSensitivity` để làm gì?
-
-Xem `KLT.kt:49, 72, 165`:
-```kotlin
-private val semaphore: Semaphore = Semaphore(1)
-```
-
-`Semaphore(1)` ≡ mutex. Lý do: `setSensitivity` thay đổi `maxCorners, qualityLevel,
-minDistance` **trong khi** `run()` có thể đang track trên thread khác. Nếu thay đổi
-giữa chừng, hệ dữ liệu `tracks[]` sẽ không khớp size với `prevPts` → crash.
-
-Semaphore đảm bảo hai luồng loại trừ nhau khi chạm cùng biến. Đây là điển hình cho
-**cross-thread state protection**.
-
-### 2.9. Vì sao motion vector cuối cùng dùng median chứ không mean?
-
-Xem `KLT.kt:284`:
-```kotlin
-val medDx = median(motions.map { it.dx })
-val medDy = median(motions.map { it.dy })
-```
-
-Trong một khung hình, luôn có vài điểm bị track sai (occlusion, lá cây đung đưa, người
-đi qua). Nếu dùng **mean**, các outlier ~50 px kéo trung bình đi rất xa. **Median**
-robust — cần > 50% điểm bị sai thì mới lệch, mà thực tế FBE đã loại bớt outliers rồi.
-
-### 2.10. Motion vector output còn được smooth thêm bằng cách nào?
-
-Xem `KLT.kt:296-300`:
-```kotlin
-currMv = Point(
-    prevMv!!.x * 0.85 + newMv.x * 0.15,
-    prevMv!!.y * 0.85 + newMv.y * 0.15
-)
-```
-
-Đây là **low-pass filter bậc 1** (còn gọi là exponential smoothing) với hệ số 0.15/0.85.
-Bản chất giống EMA α = 0.15: giữ 85% giá trị cũ, thêm 15% giá trị mới → mượt, phản ứng
-chậm với đột biến. Áp dụng cho vector chuyển động đầu ra (dùng cho live routing).
+**Trả lời:**  
+Đề tài có ý nghĩa như một công cụ học tập, kiểm thử và quan sát trực quan. Người dùng có thể xem dữ liệu vệ tinh, kiểm tra chất lượng GNSS, quan sát Optical Flow, so sánh thuật toán và thử nghiệm hành vi khi GNSS suy giảm. Đây là nền tảng để phát triển tiếp các cơ chế định vị lai sau này.
 
 ---
 
-## 3. Farneback (Dense Optical Flow)
+## 3. Kiến thức nền về GNSS
 
-### 3.1. "Dense" khác "Sparse" thế nào?
+### 3.1. GNSS là gì?
 
-- **Sparse** (KLT): tính flow cho vài trăm feature points. Kết quả là `MatOfPoint2f`.
-- **Dense** (Farneback): tính flow **cho mọi pixel**. Kết quả là `Mat CV_32FC2` cùng
-  kích thước ảnh, mỗi pixel lưu `(dx, dy)` dạng float.
+**Trả lời:**  
+GNSS là nhóm hệ thống vệ tinh dẫn đường toàn cầu như GPS, Galileo, BeiDou, GLONASS. Trên điện thoại Android, GNSS cung cấp vị trí người dùng và thông tin vệ tinh quan sát được như SVID, chòm vệ tinh, azimuth, elevation, C/N0 và trạng thái used-in-fix.
 
-Dense có ưu thế: không phụ thuộc feature detector, hoạt động tốt trên vùng phẳng, có
-đủ thông tin để visualize heatmap. Nhược điểm: chậm hơn nhiều — mỗi pixel một phép tính.
+### 3.2. Trong Android, đồ án lấy dữ liệu GNSS từ đâu?
 
-### 3.2. Farneback bản chất là gì?
+**Trả lời:**  
+Đồ án dùng các API nền tảng của Android như `LocationManager`, `GnssStatus` và `GnssMeasurementsEvent`. `LocationManager` cung cấp vị trí người dùng, `GnssStatus` cung cấp trạng thái vệ tinh, còn `GnssMeasurementsEvent` cung cấp dữ liệu đo GNSS thô hơn nếu thiết bị hỗ trợ.
 
-Được Gunnar Farnebäck đề xuất năm 2003. Ý tưởng chính:
+### 3.3. Azimuth và elevation của vệ tinh có ý nghĩa gì?
 
-**Xấp xỉ đa thức bậc 2** cho vùng lân cận mỗi pixel:
-```
-f(x) ≈ xᵀ A x + bᵀ x + c
-```
-- `A` (ma trận 2×2), `b` (vector 2), `c` (scalar) — 6 hệ số/pixel.
-- Được ước lượng bằng bình phương tối thiểu có trọng số Gauss trên cửa sổ `(2n+1)²`
-  với `n = polyN = 5`.
+**Trả lời:**  
+Azimuth là góc phương vị của vệ tinh quanh người quan sát, còn elevation là góc cao của vệ tinh so với đường chân trời. Hai thông tin này giúp biết vệ tinh đang nằm ở hướng nào trên bầu trời. Tuy nhiên, chỉ từ azimuth/elevation thì tọa độ vệ tinh trong không gian chỉ là xấp xỉ, không chính xác bằng PVT hoặc dữ liệu quỹ đạo.
 
-**Giả thuyết**: khung sau là khung trước dịch chuyển `d`:
-```
-f₂(x) = f₁(x - d) = (x-d)ᵀ A (x-d) + bᵀ(x-d) + c
-```
-Bung ra và cân bằng hệ số, được:
-```
-A · d ≈ (b₁ - b₂) / 2
-```
-Giải hệ 2×2 này ra được `d = (dx, dy)`. Đây là công thức lõi.
+### 3.4. Vì sao hệ thống cần phân giải vị trí vệ tinh từ nhiều nguồn?
 
-**Multi-scale**: giống LK, chạy Gauss pyramid nhiều tầng (`levels = 2-3` trong đồ án)
-để bắt chuyển động lớn.
+**Trả lời:**  
+Vì không phải thiết bị Android nào cũng cung cấp đầy đủ tọa độ vệ tinh thật. Để giao diện không bị trống và vẫn tận dụng nguồn tốt nhất khi có, đồ án dùng chuỗi ưu tiên: PVT thật từ thiết bị, IGS Broadcast Ephemeris, CelesTrak TLE/SGP4 và cuối cùng là xấp xỉ từ azimuth/elevation.
 
-### 3.3. Ý nghĩa từng tham số Farneback?
+### 3.5. PVT, IGS, CelesTrak và Approximate khác nhau như thế nào?
 
-Xem `Farneback.kt:29-35`:
+**Trả lời:**  
+PVT là nguồn tốt nhất nếu thiết bị trích xuất được tọa độ và vận tốc vệ tinh thật. IGS Broadcast Ephemeris là lịch vệ tinh công khai dùng để lan truyền quỹ đạo. CelesTrak TLE/SGP4 dùng phần tử quỹ đạo hai dòng, phù hợp trực quan hóa với kích thước dữ liệu nhỏ. Approximate là nguồn dự phòng, tính xấp xỉ từ azimuth, elevation và vị trí người quan sát.
 
-| Tham số | Giá trị | Ý nghĩa |
-|---------|---------|---------|
-| `pyrScale = 0.5` | scale mỗi tầng pyramid = 1/2 | Chuẩn |
-| `levels = 2..3` | số tầng | Cao hơn → bắt chuyển động lớn, chậm hơn |
-| `winSize = 11..19` | cửa sổ lấy trung bình | Lớn → mượt, mất chi tiết |
-| `iterations = 2..3` | vòng lặp Gauss-Newton mỗi tầng | Cao hơn → chính xác, chậm hơn |
-| `polyN = 5` | bán kính khai triển đa thức | 5 → dùng cửa sổ 11×11, cân bằng |
-| `polySigma = 1.1` | σ của Gauss trong xấp xỉ đa thức | 1.1 hợp với `polyN=5` (theo Farnebäck) |
-| `flags = 0` | không dùng flow trước, dùng box filter | Nhanh |
+### 3.6. Vì sao đồ án dùng hệ tọa độ WGS84 và ECEF?
 
-### 3.4. Vì sao downscale ảnh trước (frameScale 0.35-0.7)?
+**Trả lời:**  
+WGS84 là hệ quy chiếu phổ biến cho vĩ độ, kinh độ và độ cao. ECEF biểu diễn điểm trong hệ tọa độ Descartes gắn với Trái Đất, thuận tiện cho tọa độ vệ tinh và phép dựng 3D. Đồ án chuyển đổi giữa ECEF và LLA để vừa tính toán không gian, vừa hiển thị trên bản đồ và mô hình Trái Đất.
 
-Xem `Farneback.kt:36, 168-182`:
-```kotlin
-private var frameScale = 0.5
-...
-Imgproc.resize(sourceGray, targetGray, Size(), frameScale, frameScale, Imgproc.INTER_AREA)
-```
+### 3.7. C/N0 và used-in-fix dùng để làm gì?
 
-Farneback O(W×H) — thu ảnh còn 50% giảm 4× phép tính. Chuyển động 10 px trên full-res
-thành 5 px trên half-res, vẫn nằm trong phạm vi bắt được của winSize=11. Không mất
-thông tin do:
-- `INTER_AREA` = **area-averaging**, chống aliasing tốt (giống box filter).
-- Sau đó scale ngược `dx, dy` bằng `xScale = mapCols / flowCols` (`Farneback.kt:201-202`)
-  để vẽ đúng trên ảnh gốc.
+**Trả lời:**  
+C/N0 phản ánh cường độ tín hiệu vệ tinh, còn used-in-fix cho biết vệ tinh có được dùng trong nghiệm định vị hay không. Trong đồ án, các thông tin này giúp người dùng hiểu chất lượng quan sát GNSS thay vì chỉ nhìn một điểm vị trí cuối cùng trên bản đồ.
 
-### 3.5. `HashMap<Int, GridCell>` để làm gì?
+### 3.8. GNSS có sai số thì hệ thống xử lý như thế nào?
 
-Xem `Farneback.kt:56-66`:
-```kotlin
-private class GridCell {
-    var fx = 0.0; var fy = 0.0; var vis = 0.0; var initialized = false
-}
-private val gridCells = HashMap<Int, GridCell>()
-```
-
-Farneback vẽ mũi tên tại các điểm lưới cố định cách nhau `drawStep = 20-40` px. Mỗi
-ô lưới có một `GridCell` để **lưu state** qua các frame:
-- `fx, fy` — vector đã EMA smooth.
-- `vis` — mức hiển thị (fade in/out).
-- `initialized` — cờ để lần đầu không interpolate.
-
-Key = `rowIndex * 100_000 + colIndex` (`GRID_KEY_STRIDE = 100_000`). Đây là **encoding
-2D → 1D** đơn giản (miễn `colIndex < 100k`, luôn đúng cho video < 100k cột).
-
-### 3.6. Heatmap mode làm việc thế nào?
-
-Xem `Farneback.kt:332-411`:
-
-1. **Tách 2 kênh flow** thành `dx, dy` (`Core.split`).
-2. **Scale ngược lên ảnh gốc**: `dx *= xScale, dy *= yScale`.
-3. **`Core.magnitude`**: tính `mag = √(dx² + dy²)` per-pixel.
-4. **Gaussian blur 9×9**: làm mượt để tránh nhiễu chấm.
-5. **Normalize theo max**: `normalized = mag / maxMagnitude`, giá trị [0, 1].
-6. **Convert sang 8-bit**: `heatmap8u = normalized * 255`.
-7. **Blur thêm 15×15**: mềm hơn nữa.
-8. **`applyColorMap(COLORMAP_TURBO)`**: bảng LUT màu (xanh dương → xanh lá → vàng → đỏ)
-   giống nhiệt kế nhưng có gradient đẹp hơn Jet.
-9. **Resize lên full-size** bằng `INTER_CUBIC`.
-10. **Tạo mask**: chỉ blend heatmap ở vùng magnitude vượt ngưỡng
-    (`HEATMAP_MASK_THRESHOLD_MULTIPLIER = 0.32`), tránh nhiễu ở vùng không có chuyển động.
-11. **`Core.addWeighted`**: blend frame gốc (58%) + heatmap (70%) tại vùng mask.
-
-Kết quả: khu vực chuyển động mạnh hiện thành mảng màu đỏ/vàng, vùng tĩnh giữ ảnh gốc.
-
-### 3.7. Vì sao dùng `Turbo` colormap thay vì `Jet`?
-
-`Jet` (dài dòng) có "band artifacts" — người xem hiểu nhầm gradient. `Turbo` (Google
-Research, 2019) là **perceptually uniform** — 2 giá trị cách đều nhau trên thang đo
-thì cách đều nhau về màu → nhìn quantitative chính xác hơn.
-
-### 3.8. `computeCenteredGridStart` để làm gì?
-
-Xem `Farneback.kt:414-421`. Vấn đề: nếu bắt đầu vẽ từ pixel 0, lưới sẽ **lệch về phía
-trên-trái**, phía dưới-phải mất một dải trống. Hàm này tính offset để lưới **cân đối
-ở giữa frame**.
-
-Bản chất:
-```
-sampleCount = ((size - 1 - halfStep) / step) + 1
-occupiedSpan = (sampleCount - 1) × step
-start = round((size - 1 - occupiedSpan) / 2)
-```
-
-### 3.9. So sánh KLT vs Farneback về sức mạnh, nhược điểm?
-
-| Tiêu chí | KLT (sparse) | Farneback (dense) |
-|----------|-------------|--------------------|
-| Tốc độ | Nhanh (30-60 FPS mobile) | Chậm (~10-15 FPS) |
-| Vùng phẳng | Không track được | Track được nhờ đa thức bậc 2 |
-| Precision | Cao ở điểm góc | Đều, hơi mờ ở biên |
-| Bộ nhớ | Nhẹ (vài trăm points) | Nặng (Mat CV_32FC2 full-size) |
-| Visualize | Chỉ mũi tên rời rạc | Có heatmap density |
-| Ứng dụng chính | Object tracking, VO | Motion segmentation, ego-motion |
-
-Trong đồ án, KLT dùng cho **live camera streaming** (đòi hỏi FPS), Farneback dùng
-cho **video mode** (không real-time nhưng cần visualize dense).
+**Trả lời:**  
+Trong phạm vi đồ án, hệ thống không tự sửa toàn bộ sai số GNSS như thiết bị chuyên dụng. Hệ thống đánh giá độ tin cậy của GNSS, dùng GNSS làm nguồn chính khi còn tốt và chuyển sang hỗ trợ bằng Optical Flow/IMU khi GNSS suy giảm. Với vệ tinh, hệ thống gắn nhãn nguồn dữ liệu để người dùng biết mức tin cậy tương đối.
 
 ---
 
-## 4. RAFT Server-side
+## 4. Kiến thức nền về Optical Flow
 
-### 4.1. Vì sao có server riêng khi Android đã có KLT + Farneback?
+### 4.1. Optical Flow là gì?
 
-RAFT (Recurrent All-Pairs Field Transforms, ECCV 2020) là **state-of-the-art** dense
-optical flow, chính xác hơn Farneback ~10× nhưng nặng ~1000× → chạy không nổi trên
-Android. Server (GPU/DirectML) offload xử lý này:
-- App upload video → server chạy RAFT → trả video có overlay + metrics.
-- Đóng vai trò "gold standard" để so sánh với KLT/Farneback đang chạy trên thiết bị.
+**Trả lời:**  
+Optical Flow là trường vector mô tả chuyển động biểu kiến của điểm ảnh giữa hai khung hình liên tiếp. Nói đơn giản, nó ước lượng mỗi điểm ảnh hoặc mỗi điểm đặc trưng đã dịch chuyển bao nhiêu pixel theo trục ngang và dọc.
 
-### 4.2. RAFT hoạt động ra sao (bản chất)?
+### 4.2. Giả thiết cơ bản của Optical Flow là gì?
 
-RAFT gồm 3 thành phần:
-1. **Feature encoder**: CNN ResNet-like biến 2 khung `I1, I2` thành 2 tensor feature
-   ở độ phân giải 1/8. Đồng thời có **context encoder** riêng cho `I1`.
-2. **Correlation volume 4D**: tính tương quan feature vector giữa mọi cặp `(x1, y1, x2, y2)`.
-   Đây là "all-pairs" — ai dịch chuyển tới đâu đều có tương quan.
-3. **Iterative refinement (GRU)**: khởi tạo flow = 0, mỗi vòng lặp mạng GRU truy vấn
-   correlation volume tại flow hiện tại + refine dần. Sau 12-32 iteration, converge
-   thành flow chính xác.
+**Trả lời:**  
+Giả thiết cơ bản là độ sáng của cùng một điểm trong cảnh gần như không đổi trong khoảng thời gian ngắn. Từ giả thiết đó, ta có ràng buộc:
 
-Ưu thế:
-- Không cần multi-scale (khác Farneback/PWC-Net).
-- Học được biểu diễn tương quan tốt hơn heuristic thủ công.
-- SOTA trên KITTI, Sintel.
-
-### 4.3. Onnx Runtime providers CUDA/DirectML/CPU chọn thế nào?
-
-Xem server `inference.py`:
-
-```python
-providers = []
-if CUDA_AVAILABLE: providers.append('CUDAExecutionProvider')
-if DML_AVAILABLE:  providers.append('DmlExecutionProvider')
-providers.append('CPUExecutionProvider')
-InferenceSession(model_path, providers=providers)
+```text
+Ix * u + Iy * v + It = 0
 ```
 
-ONNX Runtime tự chọn provider **theo thứ tự ưu tiên**, fallback nếu provider trên
-không khả dụng:
-- **CUDAExecutionProvider**: NVIDIA GPU, nhanh nhất (nếu có CUDA + cuDNN).
-- **DmlExecutionProvider (DirectML)**: chạy trên bất kỳ GPU nào có DirectX 12 (Intel,
-  AMD, cả Nvidia). Trên Windows là tự nhiên nhất.
-- **CPUExecutionProvider**: fallback cuối cùng, chậm nhưng luôn chạy.
+Trong đó `u` và `v` là vận tốc ảnh theo hai trục, còn `Ix`, `Iy`, `It` là gradient theo không gian và thời gian.
 
-Điều này giúp server portable — chạy trên laptop demo hoặc server GPU đều được.
+### 4.3. Vì sao một phương trình Optical Flow lại chưa đủ để tìm chuyển động?
 
-### 4.4. Input/Output tensor của RAFT là gì?
+**Trả lời:**  
+Vì phương trình có hai ẩn `u` và `v` nhưng chỉ có một ràng buộc tại mỗi pixel. Do đó bài toán thiếu ràng buộc, thường gọi là aperture problem. Các thuật toán như Lucas-Kanade hoặc Farneback phải thêm giả thiết cục bộ để giải.
 
-- **Input**: 2 tensor `NCHW float32`, shape `[1, 3, 360, 480]`. Giá trị BGR chuyển
-  sang RGB, chuẩn hoá [0, 1] hoặc [-1, 1] tuỳ model. Server dùng RGB [0, 255] rồi
-  scale nội bộ theo config model.
-- **Output**: tensor 2 kênh flow `[1, 2, 360, 480]` (dx, dy tính bằng pixel ở scale 480×360).
-  Trước khi vẽ, phải scale ngược lên full-size của frame gốc bằng `xScale, yScale`.
+### 4.4. KLT hoạt động theo ý tưởng nào?
 
-### 4.5. Vì sao input phải resize về 480×360?
+**Trả lời:**  
+KLT trong đồ án kết hợp phát hiện điểm đặc trưng Shi-Tomasi và theo dõi Lucas-Kanade dạng kim tự tháp. Thuật toán chọn các điểm có gradient tốt, sau đó tìm vị trí tương ứng của các điểm đó ở frame tiếp theo. Vì chỉ theo dõi số điểm thưa nên KLT nhẹ và phù hợp thời gian thực.
 
-RAFT phát hành nhiều biến thể; model đã export ONNX trong đồ án được train ở 480×360
-(hoặc 512×384). Nếu đổi size, cần padding sao cho `H, W chia hết cho 8` (vì downsample
-1/8 trong feature encoder). Do đó server fix cứng 480×360 rồi scale ngược ở postprocess.
+### 4.5. Farneback khác KLT ở điểm nào?
 
-### 4.6. Server dùng chunked upload — vì sao?
+**Trả lời:**  
+KLT là sparse optical flow, chỉ theo dõi các điểm đặc trưng. Farneback là dense optical flow, ước lượng chuyển động dày đặc hơn trên ảnh bằng cách xấp xỉ vùng lân cận bằng đa thức bậc hai. Farneback cho cái nhìn tổng thể hơn nhưng chi phí xử lý cao hơn.
 
-Video 5-10 phút → 50-200 MB. Một request duy nhất dễ:
-- Timeout HTTP.
-- Chiếm RAM server (buffer toàn bộ).
-- Retry lại toàn bộ nếu lỗi mạng.
+### 4.6. RAFT khác KLT và Farneback như thế nào?
 
-**Chunked upload** (giống S3 multipart, YouTube upload):
-1. `POST /uploads` → server trả về `uploadId`.
-2. Client chia file thành chunk (~4 MB), gửi từng `PUT /uploads/{id}/chunks/{index}`.
-3. `POST /uploads/{id}/complete` → server ghép chunk theo thứ tự index, tạo job.
-4. Client poll `GET /jobs/{id}` để lấy progress.
-5. Khi xong, `GET /jobs/{id}/result` để tải video output.
+**Trả lời:**  
+RAFT là mô hình học sâu cho Optical Flow, xây dựng volume tương quan toàn cặp giữa hai ảnh và cập nhật flow lặp. RAFT có khả năng biểu diễn chuyển động dày đặc và phức tạp hơn, nhưng nặng hơn nên trong đồ án được đặt ở backend để xử lý video ngoại tuyến.
 
-Ưu điểm:
-- Có thể **resume** nếu mất mạng.
-- Cho phép **progress bar** chính xác.
-- Server giữ RAM ổn định (chỉ buffer 1 chunk).
+### 4.7. Optical Flow có cho ra vận tốc thật theo mét/giây không?
 
-### 4.7. Semaphore giới hạn concurrency trên server có ý nghĩa gì?
+**Trả lời:**  
+Không trực tiếp. Optical Flow chủ yếu cho chuyển động theo pixel giữa các frame. Muốn quy đổi sang mét/giây cần hiệu chỉnh tỷ lệ, ví dụ dựa vào GNSS khi tín hiệu còn tốt. Đồ án cũng trình bày rõ LiveRouting chỉ là visual odometry thực dụng, không phải hệ khôi phục pose và tỷ lệ tuyệt đối đầy đủ.
 
-Server dùng `asyncio.Semaphore` để giới hạn số job xử lý song song. Vì:
-- GPU chỉ có 1 (hoặc vài) đơn vị compute, nếu 10 job cùng chạy → tranh chấp memory,
-  crash `CUDA out of memory`.
-- CPU inference cũng vậy — chạy quá 4-8 process song song không nhanh hơn mà còn chậm
-  do context switch.
+### 4.8. Khi camera rung hoặc thiếu texture thì Optical Flow bị ảnh hưởng ra sao?
 
-Concurrency limit = số job đồng thời tối ưu → phần còn lại chờ trong queue (`status: queued`).
+**Trả lời:**  
+Camera rung làm vector nhiễu và khó phân biệt chuyển động thật của thiết bị với rung cục bộ. Thiếu texture khiến KLT khó tìm điểm đặc trưng, còn Farneback cũng có thể cho trường chuyển động kém ổn định. Vì vậy hệ thống có các chỉ số chất lượng, độ tin cậy tương đối và trong nhiều trường hợp cần giảm trọng số camera.
 
-### 4.8. Vì sao vẽ vector trên server dùng LUT turbo + shadow layer?
+### 4.9. Forward-Backward Error trong đồ án dùng để làm gì?
 
-Xem `inference.py:draw_vectors`. Grid step tương tự Farneback client-side. Điểm khác:
-- **Percentile motion threshold**: thay vì `minMagnitude` cố định, ngưỡng = `percentile(58) × 0.6`.
-  Tức là ~40% pixel mạnh nhất được xem là active. Điều này tự động thích nghi với
-  video có nhiều/ít chuyển động.
-- **Turbo LUT indexed by strength**: màu mũi tên = `LUT[normalized_magnitude * 255]`.
-  Vector mạnh → đỏ, vector yếu → xanh dương. Cung cấp thêm chiều thông tin.
-- **Shadow layer**: vẽ mũi tên đen với thickness lớn hơn 2px trước, rồi vẽ mũi tên
-  màu lên trên. Giúp mũi tên nổi bật trên nền sáng.
-
-### 4.9. `select_flow_output_index` và `extract_flow_channels` giải quyết vấn đề gì?
-
-Model RAFT khác nhau xuất output khác:
-- 1 output tensor 4D `[N, 2, H, W]`.
-- 1 output tensor 4D `[N, H, W, 2]` (NHWC).
-- Nhiều output (RAFT gốc trả về flow ở nhiều scale).
-
-Server chọn output có **2 kênh và độ phân giải lớn nhất** làm flow chính, dùng
-`extract_flow_channels` để chuẩn hoá về `[H, W, 2]` (float32), thay `NaN/Inf` bằng 0.
-Đảm bảo backend robust với đa dạng model ONNX bên ngoài (RAFT2023, quantized, dequant,
-int8bq).
+**Trả lời:**  
+Forward-Backward Error kiểm tra tính nhất quán của vector: theo dõi điểm từ frame trước sang frame sau, rồi theo dõi ngược lại. Nếu điểm quay về gần vị trí ban đầu, vector được xem là inlier. Trong đồ án, ngưỡng 1.5 pixel được dùng để tính độ tin cậy tương đối, không phải độ chính xác tuyệt đối so với ground truth.
 
 ---
 
-## 5. IMU Estimator
+## 5. Cách hệ thống kết hợp GNSS và Optical Flow
 
-### 5.1. IMUEstimator dùng những cảm biến nào? Mục đích?
+### 5.1. Hệ thống kết hợp GNSS và Optical Flow trong chức năng nào?
 
-Xem `function/optical_flow/classes/IMUEstimator.kt`. Sử dụng:
-- `TYPE_GRAVITY` (nếu thiết bị hỗ trợ) hoặc **low-pass α = 0.8** từ `TYPE_ACCELEROMETER` để
-  trích trọng lực.
-- `TYPE_ACCELEROMETER` — gia tốc thô 3 trục (m/s²), gồm cả trọng lực.
-- `TYPE_GYROSCOPE` — vận tốc góc (rad/s).
-- `TYPE_MAGNETIC_FIELD` — từ trường Trái Đất (μT).
+**Trả lời:**  
+Việc kết hợp rõ nhất nằm ở LiveRouting. Khi GNSS còn tin cậy, vị trí và tốc độ từ Android Location API là nguồn chính. Khi GNSS yếu hoặc mất, hệ thống chuyển sang dead reckoning dựa trên Optical Flow, IMU và con quay hồi chuyển để duy trì marker trong thời gian ngắn.
 
-Mục đích: cung cấp **prior motion** (chuyển động dự đoán) độc lập với optical flow,
-làm nguồn dead-reckoning khi mất GNSS và giúp phân biệt turn thật/false-positive.
+### 5.2. Khi GNSS còn tốt, Optical Flow có vai trò gì?
 
-### 5.2. `linearAcceleration = raw - gravity` — vì sao?
+**Trả lời:**  
+Khi GNSS còn tốt, hệ thống dùng GNSS làm chuẩn chính và tranh thủ hiệu chỉnh hệ số quy đổi từ pixel/giây của Optical Flow sang mét/giây. Nói cách khác, GNSS giúp hệ thống học tỷ lệ tương đối cho camera trước khi xảy ra mất tín hiệu.
 
-Accelerometer đo cả **trọng lực** lẫn **gia tốc chuyển động**. Ví dụ điện thoại nằm
-im trên bàn: `raw = (0, 0, 9.81)` — không có chuyển động vẫn thấy 9.81 m/s² do trọng lực.
+### 5.3. Khi GNSS yếu hoặc mất, hệ thống làm gì?
 
-Muốn ra "chuyển động thực", phải trừ trọng lực:
-```
-linear_a = raw_a - g_vector
-```
+**Trả lời:**  
+Hệ thống tạo bộ đo chuyển động thị giác từ Optical Flow, kết hợp yaw rate từ con quay hồi chuyển và trạng thái chuyển động từ IMU. Sau đó hệ thống ước lượng tốc độ, hướng và vị trí mới bằng dead reckoning. Nếu chế độ SNAP bật và vị trí đủ tin cậy, marker được kéo một phần về tuyến đường hiện tại.
 
-Nếu thiết bị có `TYPE_GRAVITY` sensor cứng (Sensor fusion do OEM cung cấp), dùng
-trực tiếp. Nếu không, ước lượng bằng **low-pass filter**:
-```
-gravity = 0.8 × prev_gravity + 0.2 × raw_a
-```
-Ý tưởng: trọng lực gần như không đổi theo thời gian, còn chuyển động thay đổi nhanh.
-Low-pass giữ lại tần số thấp = trọng lực.
+### 5.4. Vì sao không chỉ dùng tốc độ cuối cùng của GNSS để ngoại suy?
 
-### 5.3. Integrate acceleration → velocity ra sao? Có drift không?
+**Trả lời:**  
+Nếu giữ nguyên tốc độ cuối cùng thì khi xe tăng tốc, giảm tốc hoặc dừng, sai số sẽ tăng rất nhanh. Đồ án dùng Optical Flow để nhận biết thay đổi chuyển động ảnh, rồi trộn với prior từ tốc độ GNSS cuối cùng; prior này giảm dần theo thời gian mất tín hiệu để tránh giả định xe luôn chạy đều.
 
-Xem `IMUEstimator.kt` — velocity integration:
-```
-v[n] = 0.8 × (v[n-1] + a × dt) + 0.2 × gyro-projected_v
-```
+### 5.5. Vì sao không chỉ dùng Optical Flow để định vị?
 
-Đây là **discrete integration** với leaky term (0.8) để chống drift tích luỹ. Còn
-`0.2 × gyro-projected_v` là hồi tiếp từ gyro để chỉnh hướng.
+**Trả lời:**  
+Vì camera đơn không tự cung cấp tỷ lệ tuyệt đối theo mét nếu không có hiệu chỉnh. Optical Flow cũng phụ thuộc ánh sáng, texture, rung camera, vật thể chuyển động trong cảnh và góc đặt điện thoại. Do đó trong đồ án, Optical Flow chỉ là nguồn hỗ trợ khi GNSS suy giảm, không thay thế hoàn toàn GNSS.
 
-**Drift là gì**: accelerometer có bias ~0.01-0.1 m/s². Tích phân bias × time² → sau
-10 giây, sai số vị trí có thể ~5-50m. Vì thế IMU velocity **chỉ tin cậy trong 1-3 giây**.
-Cần phải reset/correct bằng nguồn khác (GNSS, visual odometry).
+### 5.6. Chế độ SNAP và REAL khác nhau như thế nào?
 
-### 5.4. Gyro bias learning là gì?
+**Trả lời:**  
+REAL hiển thị thẳng vị trí dead reckoning để người dùng thấy quỹ đạo ước lượng thật đang trôi ra sao. SNAP kéo vị trí một phần về tuyến đã chọn nếu khoảng cách, hướng và tính liên tục đủ tin cậy. SNAP giúp hiển thị ổn định hơn, nhưng đồ án nhấn mạnh đây không phải map matching liên tục vào toàn bộ mạng đường.
 
-Gyro cũng có bias (khi đứng yên vẫn báo ~0.001-0.01 rad/s). Ta học bias online bằng EWMA:
-```
-bias = (1 - α) × bias + α × current_gyro   khi thiết bị đang đứng yên
-```
-với `α = 0.05`. Điều kiện "đứng yên" dựa vào `|linear_a| < ngưỡng` và
-`|gyro_raw - bias| < ngưỡng`. Sau vài giây, bias hội tụ về giá trị offset thực tế.
+### 5.7. ZUPT có vai trò gì trong hệ thống?
 
-### 5.5. `yawRate` là gì? Tính thế nào?
+**Trả lời:**  
+ZUPT là Zero-velocity Update, dùng để nhận biết trạng thái gần như đứng yên và đưa vận tốc ước lượng về gần 0. Vai trò của nó là giảm trôi vận tốc khi thiết bị dừng, vì nếu chỉ tích lũy IMU hoặc Optical Flow thì sai số có thể tăng theo thời gian.
 
-`yawRate` = tốc độ quay quanh trục dọc (heading), rad/s. Bản chất là **chiếu vector
-angular velocity lên hướng gravity (ngược chiều)**:
-```
-yawRate = -dot(gyro_bias_corrected, gravity_normalized)
-```
-Vì trục Z của thế giới trùng với `-gravity` (khi thiết bị đứng thẳng), thành phần
-gyro dọc trục này chính là tốc độ xoay ngang. Không cần phải solve full quaternion.
+### 5.8. Khi hệ thống phát hiện lệch tuyến thì xử lý thế nào?
 
-Dùng để: kết hợp với `lateralCoherence` của optical flow để phát hiện rẽ chắc chắn hơn
-(nếu cả 2 cùng dấu và vượt ngưỡng).
+**Trả lời:**  
+Theo Chương 5, nếu quỹ đạo lệch tuyến qua nhiều mẫu liên tiếp và còn Internet, hệ thống có thể yêu cầu tuyến mới từ vị trí ước lượng tới đích. Cách này giúp không che giấu việc người dùng có thể đã đi sai đường.
 
 ---
 
-## 6. GNSS 4 vệ tinh
+## 6. Câu hỏi trọng tâm về Chương 5
 
-### 6.1. Vì sao cần ít nhất 4 vệ tinh để định vị GPS?
+### 6.1. Chương 5 trình bày những đóng góp nổi bật nào?
 
-Đây là câu hỏi phản biện **thường xuyên**. Câu trả lời bản chất:
+**Trả lời:**  
+Chương 5 trình bày sáu đóng góp: phân giải vị trí vệ tinh GNSS theo thứ tự ưu tiên nguồn dữ liệu, hỗ trợ chỉ đường khi GNSS yếu bằng dead reckoning, phân tích hiệu năng KLT và Farneback, quy trình xử lý video RAFT bất đồng bộ trên máy chủ, bám đối tượng trong camera trực tiếp và dựng hiệu ứng Liquid Glass theo nhiều mức khả năng Android.
 
-**GPS có 4 ẩn số cần giải**:
-1. `x` — toạ độ máy thu (ECEF X).
-2. `y` — toạ độ máy thu (ECEF Y).
-3. `z` — toạ độ máy thu (ECEF Z).
-4. `dt` — **độ lệch đồng hồ máy thu** so với đồng hồ nguyên tử vệ tinh.
+### 6.2. Đóng góp về GNSS ở Chương 5 là gì?
 
-**Mỗi vệ tinh cho 1 phương trình pseudorange**:
-```
-ρᵢ = √((xᵢ - x)² + (yᵢ - y)² + (zᵢ - z)²) + c · dt
-```
-Trong đó `ρᵢ` là khoảng cách đo được (biết), `(xᵢ, yᵢ, zᵢ)` là vị trí vệ tinh
-(broadcast bởi vệ tinh, biết), `c` là tốc độ ánh sáng.
+**Trả lời:**  
+Đóng góp là cơ chế phân giải vị trí vệ tinh có thứ tự ưu tiên rõ ràng. Hệ thống lần lượt thử PVT thật, IGS Broadcast Ephemeris, CelesTrak TLE/SGP4 và cuối cùng là xấp xỉ từ azimuth/elevation. Mỗi kết quả được gắn nhãn nguồn để người dùng biết dữ liệu đang hiển thị có độ tin cậy ở mức nào.
 
-Với 4 ẩn số → cần **4 phương trình độc lập** → **4 vệ tinh**.
+### 6.3. Vì sao PVT được ưu tiên cao nhất?
 
-**Vì sao có ẩn số dt?** Vì đồng hồ trong điện thoại là thạch anh (crystal) rẻ tiền,
-sai số ~10 μs/s. Nếu bỏ qua dt, sai số vị trí = `c × 10⁻⁵ = 3000 m` mỗi giây!
+**Trả lời:**  
+Vì PVT là dữ liệu tọa độ và vận tốc vệ tinh thật nếu thiết bị trích xuất được. Đây là nguồn sát với trạng thái đo của thiết bị nhất. Tuy nhiên, không phải Android/chipset nào cũng cung cấp ổn định nên hệ thống vẫn cần các nguồn dự phòng.
 
-Vệ tinh có **đồng hồ nguyên tử** (cesium/rubidium) chính xác 10⁻¹³, gần như coi là chân lý.
-Máy thu **giải đồng thời** vị trí `(x, y, z)` và độ lệch đồng hồ `dt` từ 4 pseudorange.
+### 6.4. Điều kiện hợp lệ của các nguồn GNSS trong Chương 5 là gì?
 
-Nếu chỉ 3 vệ tinh → 3 phương trình 4 ẩn → **vô số nghiệm** → không định vị được.
+**Trả lời:**  
+Theo Chương 5, PVT chỉ dùng khi chưa quá hạn 10 giây. IGS Broadcast Ephemeris chỉ dùng khi thời điểm bản tin gần thời điểm quan sát trong ngưỡng 12 giờ. CelesTrak dùng cho các chòm được hỗ trợ. Nếu các nguồn trên không khả dụng, hệ thống dùng vị trí xấp xỉ từ azimuth/elevation và vị trí người quan sát.
 
-**3 vệ tinh + biết độ cao**: có thể thay ẩn `z` bằng ràng buộc `x² + y² + z² = (R_earth + h)²`.
-Chỉ dùng trong hàng hải (biết h ~ 0). Điện thoại không giả thiết được.
+### 6.5. Việc gắn nhãn nguồn vị trí vệ tinh có ý nghĩa gì?
 
-### 6.2. Vì sao càng nhiều vệ tinh càng chính xác?
+**Trả lời:**  
+Nhãn nguồn giúp kết quả minh bạch. Cùng là một điểm vệ tinh trên giao diện, người dùng có thể biết nó đến từ PVT, IGS, CelesTrak hay chỉ là xấp xỉ. Điều này cũng hỗ trợ gỡ lỗi, vì khi hiển thị sai hoặc thiếu chính xác, ta biết nguồn dữ liệu nào đang được dùng.
 
-Với 4 vệ tinh, hệ 4×4 có nghiệm duy nhất (nếu không suy biến hình học). Nhưng đo lường
-có noise (multipath, ionosphere, tropospheric delay), nên nghiệm bị lệch.
+### 6.6. Đóng góp về LiveRouting ở Chương 5 là gì?
 
-Với ≥5 vệ tinh → hệ **overdetermined**, giải bằng bình phương tối thiểu:
-```
-x_hat = (Hᵀ W H)⁻¹ Hᵀ W ρ
-```
-với `H` là ma trận Jacobi hình học, `W` là ma trận trọng số (theo CN0). Càng nhiều
-phương trình, sai số càng bị "trung bình hoá" → chính xác hơn.
+**Trả lời:**  
+Đóng góp là cơ chế hỗ trợ định vị ngắn hạn khi GNSS yếu hoặc mất. Hệ thống không chỉ ngoại suy từ tốc độ GNSS cuối cùng, mà dùng Optical Flow để ước lượng chuyển động, kết hợp yaw rate từ IMU, prior vận tốc GNSS suy giảm theo thời gian, giới hạn tăng tốc/phanh và bám tuyến có điều kiện.
 
-Chất lượng còn phụ thuộc **DOP (Dilution of Precision)**:
-- `GDOP < 2` — geometric tốt (vệ tinh phân bố đều trên bầu trời).
-- `GDOP > 6` — xấu (vệ tinh dồn cụm).
+### 6.7. Em đánh giá kết quả LiveRouting trong Chương 5 như thế nào?
 
-### 6.3. Pseudorange đo bằng cách nào?
+**Trả lời:**  
+Kết quả có ý nghĩa ở mức thử nghiệm: marker có thể duy trì tốt hơn trong các khoảng mất GNSS ngắn so với giữ nguyên tốc độ cuối cùng. Tuy nhiên, hệ thống chưa ổn định trong mọi điều kiện, vì camera đơn không có tỷ lệ tuyệt đối nếu thiếu GNSS, và Optical Flow còn phụ thuộc ánh sáng, texture, rung camera và cách đặt điện thoại.
 
-Máy thu đo **thời gian truyền tín hiệu** từ vệ tinh đến máy:
-```
-τ = t_receive - t_transmit
-ρ = c × τ
-```
-- `t_transmit` được nhúng trong tín hiệu (mã C/A hoặc P), vệ tinh phát ra cùng dữ liệu
-  navigation.
-- `t_receive` là thời điểm máy thu decode được tín hiệu.
-- `τ ~ 60-90 ms` cho vệ tinh MEO.
+### 6.8. Cơ chế so sánh KLT và Farneback trong Chương 5 có gì đáng chú ý?
 
-Gọi là **pseudo**range vì có sai số `c × dt`, không phải range thật.
+**Trả lời:**  
+Điểm đáng chú ý là hai thuật toán chạy trên cùng khung hình đầu vào, cùng điều kiện, và độ nhạy bị khóa ở mức 100 khi phân tích. Kết quả được ghép trái-phải để quan sát trực tiếp, đồng thời lưu sample vào Room để xem lại biểu đồ FPS, thời gian xử lý và số điểm/vector hoạt động.
 
-### 6.4. Trong đồ án, ta có tự giải 4 phương trình này không?
+### 6.9. Vì sao Chương 5 tách chỉ số chính và chỉ số hỗ trợ trong analytics?
 
-**Không**. Android system service `LocationManager` + chipset GNSS đã làm điều đó.
-Đồ án nhận vị trí đã tính (lat, lon, alt) qua `Location` object và **tập trung vào
-việc tính vị trí VỆ TINH** để render 3D — đó là bài toán ngược: cho epoch time,
-tính vị trí vệ tinh trong ECEF, sau đó biến đổi để hiển thị trên globe.
+**Trả lời:**  
+Vì FPS, thời gian xử lý và số điểm/vector hoạt động là các đại lượng đo trực tiếp. Độ tin cậy lại phụ thuộc cách định nghĩa inlier, ví dụ kiểm tra tiến-lùi, nên chỉ nên dùng để hỗ trợ diễn giải. Tách như vậy tránh việc người dùng hiểu nhầm độ tin cậy là độ chính xác tuyệt đối.
 
-### 6.5. Constellation types (GPS, GLONASS, Galileo, BeiDou, QZSS, IRNSS, SBAS) khác nhau ra sao?
+### 6.10. Pipeline RAFT bất đồng bộ giải quyết vấn đề gì?
 
-| System | Quốc gia | Số vệ tinh | Quỹ đạo | Ghi chú |
-|--------|---------|-----------|---------|---------|
-| GPS | Mỹ | 31 | MEO, 20,200 km | Đầu tiên (1978), phổ biến nhất |
-| GLONASS | Nga | 24 | MEO, 19,100 km | Frequency Division Multiplexing (mỗi vệ tinh tần số riêng) |
-| Galileo | EU | 30 (kế hoạch) | MEO, 23,222 km | Cho dân sự, độ chính xác cao |
-| BeiDou | Trung Quốc | 35 | MEO+IGSO+GEO | Có cả GEO đứng yên |
-| QZSS | Nhật | 4 | HEO tựa 8-figure | Chỉ phủ Nhật + Australia |
-| IRNSS/NavIC | Ấn Độ | 7 | GEO+IGSO | Chỉ Ấn Độ + lân cận |
-| SBAS | Không phải constellation riêng | GEO (WAAS, EGNOS, MSAS, GAGAN) | Gửi correction cho GPS |
+**Trả lời:**  
+RAFT xử lý video nặng, nếu gửi một request đồng bộ dài thì dễ timeout và người dùng không biết tiến độ. Pipeline bất đồng bộ tạo job, upload video trực tiếp hoặc theo chunk, thăm dò trạng thái, cho phép hủy job, tải kết quả và dọn tài nguyên. Nhờ đó ứng dụng không bị khóa ở một màn hình khi xử lý video dài.
 
-App đọc **tất cả constellation** qua `GnssStatus` — mỗi vệ tinh có `constellationType`
-để biết thuộc hệ nào.
+### 6.11. Vì sao video kết quả được ghi H.264 bằng ffmpeg?
 
-### 6.6. `SBAS` (Satellite-Based Augmentation System) là gì?
+**Trả lời:**  
+Theo Chương 5, video kết quả được ghi theo chuẩn H.264 để Android phát ổn định. Đây là lựa chọn thực dụng vì H.264 được hỗ trợ rộng rãi trên thiết bị di động, còn việc chỉ dựa vào `VideoWriter` của OpenCV có thể không ổn định với container đầu ra.
 
-SBAS **không phải hệ định vị độc lập**, mà là các vệ tinh GEO phát tín hiệu **điều
-chỉnh** cho GPS/Galileo. Chúng gửi:
-- Ionospheric correction cho vùng phủ.
-- Ephemeris error correction.
-- Integrity monitoring (báo vệ tinh nào đang bị lỗi).
+### 6.12. Bám đối tượng trên camera trực tiếp khác bám đối tượng trên video ngoại tuyến thế nào?
 
-Các SBAS chính:
-- **WAAS** (US) — vùng Bắc Mỹ.
-- **EGNOS** (Europe).
-- **MSAS** (Japan).
-- **GAGAN** (India).
-- **SDCM** (Russia).
+**Trả lời:**  
+Camera trực tiếp chỉ có frame quá khứ và hiện tại nên đồ án dùng CSRT kết hợp template matching để bám thời gian thực. Video ngoại tuyến có toàn bộ chuỗi khung hình nên backend có thể dùng Cutie để lan truyền mask tiến và lùi theo thời gian. Vì vậy hai hướng xử lý khác nhau về dữ liệu sẵn có và thuật toán phù hợp.
 
-App tại Việt Nam thường **không thấy** SBAS vì không có SBAS phủ Đông Nam Á.
+### 6.13. Vì sao cần ánh xạ tọa độ vùng chọn giữa preview và frame xử lý?
+
+**Trả lời:**  
+Vì khung preview camera trên màn hình có thể bị co giãn hoặc cắt khác với frame OpenCV đang xử lý. Nếu không tính đúng tỷ lệ, kích thước và độ lệch, hộp bám sẽ không khớp với đối tượng mà người dùng đã chọn, dẫn đến phân tích sai vùng.
+
+### 6.14. Hiệu ứng Liquid Glass trong Chương 5 có liên quan gì tới đóng góp kỹ thuật?
+
+**Trả lời:**  
+Đây là đóng góp ở tầng giao diện. Hệ thống dựng lớp kính theo nhiều mức: Android 13 trở lên dùng AGSL shader trên GPU, Android 12 dùng làm mờ phần cứng kết hợp mô phỏng, thiết bị cũ hơn dùng phương án CPU trên ảnh thu nhỏ. Mục tiêu là giữ giao diện thống nhất mà vẫn tương thích nhiều phiên bản Android.
+
+### 6.15. Nếu hội đồng hỏi Chương 5 có điểm nào chưa hoàn thiện, em trả lời sao?
+
+**Trả lời:**  
+Em sẽ trả lời trung thực rằng phần LiveRouting vẫn ở mức thử nghiệm và chưa có benchmark định lượng với ground truth. Phần đánh giá hiện chủ yếu là kiểm thử chức năng, quan sát log và chạy trên thiết bị thật. Hướng phát triển là bổ sung bộ dữ liệu chuẩn, đánh giá sai số quỹ đạo và dùng các bộ lọc như EKF, particle filter hoặc factor graph.
 
 ---
 
-## 7. GNSS 4 tầng ưu tiên
+## 7. Câu hỏi về thuật toán và xử lý ảnh
 
-### 7.1. Vì sao chia thành 4 tầng nguồn dữ liệu vị trí vệ tinh?
+### 7.1. Vì sao em chọn KLT và Farneback cho xử lý thời gian thực?
 
-Xem `GnssSatelliteTracker.kt:resolvePosition`:
+**Trả lời:**  
+Vì đây là hai thuật toán Optical Flow cổ điển có sẵn trong OpenCV, đủ nhẹ để chạy trên thiết bị Android và đại diện cho hai hướng khác nhau: KLT là sparse, nhanh và dựa trên điểm đặc trưng; Farneback là dense, cho cái nhìn tổng thể hơn nhưng tốn tài nguyên hơn.
 
-```
-1. PVT (Position/Velocity/Time từ chipset)  — tin cậy nhất, cần Android ≥ 12 + chipset hỗ trợ
-2. IGS Broadcast Ephemeris                  — tải RINEX từ IGS/CDDIS, chính xác ~1m
-3. CelesTrak SGP4                            — TLE từ CelesTrak, chính xác ~1km
-4. Approximate (Kepler thủ công)            — chỉ dùng constellation type mặc định
-```
+### 7.2. Khi nào KLT hoạt động tốt?
 
-Lý do:
-- **Tầng 1 (PVT)**: chipset đã giải tất cả (position ECEF, velocity, clock), độ chính
-  xác cỡ meter. Nhưng chỉ Android ≥ 12, phải dùng **reflection** vì API còn hidden.
-- **Tầng 2 (IGS)**: tải file RINEX navigation từ IGS/CDDIS, giải Kepler theo lịch bay
-  chính thức. Chính xác vài mét, đủ cho hiển thị đúng vị trí thực.
-- **Tầng 3 (SGP4)**: dùng khi vệ tinh không có trong IGS (LEO satellites, hoặc IGS
-  thiếu dữ liệu). TLE là bộ tham số quỹ đạo public trên CelesTrak.
-- **Tầng 4 (Approximate)**: fallback cuối, dùng khi mất mạng ban đầu — tính vị trí giả
-  định trên vòng tròn quỹ đạo trung bình.
+**Trả lời:**  
+KLT hoạt động tốt khi cảnh có nhiều điểm đặc trưng rõ, ánh sáng tương đối ổn định và chuyển động giữa hai frame không quá lớn. Vì nó theo dõi điểm thưa nên tốc độ tốt, phù hợp cho hiển thị vector và tính toán chỉ số thời gian thực.
 
-### 7.2. Vì sao PVT phải dùng reflection?
+### 7.3. Khi nào Farneback phù hợp hơn KLT?
 
-Google chưa mở public API `Location.hasSatellitePvt()` / `getSatellitePvt()` cho tất
-cả cấp Android. Nó tồn tại từ Android 12 (API 31) nhưng bị đánh dấu `@hide`. Reflection
-là cách duy nhất truy cập:
+**Trả lời:**  
+Farneback phù hợp khi muốn quan sát phân bố chuyển động tổng thể trên ảnh, đặc biệt khi dùng heatmap. Nó không chỉ dựa vào một số điểm đặc trưng rời rạc như KLT. Đổi lại, chi phí xử lý cao hơn nên đồ án có giảm kích thước ảnh và lấy mẫu theo lưới khi hiển thị.
 
-```kotlin
-val method = LocationManager::class.java.getDeclaredMethod("getSatellitePvt", ...)
-method.isAccessible = true
-val pvt = method.invoke(locationManager, satelliteInfo)
-```
+### 7.4. Vì sao không chạy RAFT trực tiếp trên điện thoại?
 
-Rủi ro: nếu Google đổi tên method, code break. Đồ án kiểm tra `Build.VERSION.SDK_INT`
-và bắt exception cẩn thận.
+**Trả lời:**  
+Trong phạm vi đồ án, RAFT nặng về tính toán và bộ nhớ, trong khi ứng dụng Android còn phải xử lý camera, GNSS, IMU và giao diện thời gian thực. Vì vậy đồ án chọn kiến trúc client-server: điện thoại chạy KLT/Farneback cho real-time, còn RAFT chạy trên backend cho video ngoại tuyến.
 
-### 7.3. Broadcast Ephemeris chính xác đến mức nào?
+### 7.5. ROI trong Optical Flow có tác dụng gì?
 
-RINEX navigation file phát bởi IGS gồm **các tham số Kepler + hiệu chỉnh phi Kepler**:
-- 6 tham số quỹ đạo cổ điển (a, e, i, Ω, ω, M₀).
-- Các số hạng nhiễu loạn (Δn, Cuc, Cus, Crc, Crs, Cic, Cis) để tính chính xác đến sub-meter.
-- Đồng hồ vệ tinh (af0, af1, af2).
+**Trả lời:**  
+ROI giúp giới hạn phạm vi phân tích vào vùng người dùng quan tâm, ví dụ một xe hoặc một người. Điều này giảm nhiễu từ nền và có thể giảm chi phí xử lý vì thuật toán không cần xử lý toàn khung hình.
 
-Có hiệu lực ~2-4 giờ, sau đó phải tải mới. App cache `BROADCAST_MAX_AGE_MS = 12h` để
-không tải lại quá thường xuyên.
+### 7.6. Vì sao cần bám đối tượng chứ không chỉ dùng ROI tĩnh?
 
-### 7.4. Vì sao PVT_STALE_THRESHOLD_NANOS = 10 giây?
+**Trả lời:**  
+Vì trong camera trực tiếp, cả đối tượng và thiết bị đều có thể di chuyển. Nếu ROI chỉ là hình chữ nhật tĩnh, nó sẽ nhanh chóng lệch khỏi đối tượng. Bám đối tượng giúp vùng phân tích đi theo mục tiêu sau khi người dùng chọn một lần.
 
-PVT được cập nhật liên tục từ chipset. Nhưng nếu > 10s không có PVT mới (chipset không
-báo cáo), coi là stale và fallback xuống tầng 2. 10s đủ dài để tránh flicker khi
-mất tín hiệu tạm thời (đi trong tunnel ngắn), đủ ngắn để không hiển thị dữ liệu quá cũ.
+### 7.7. Template matching trong bám đối tượng có vai trò gì?
 
-### 7.5. IgsBroadcastEphemerisPropagator: vì sao GLONASS xử lý riêng?
+**Trả lời:**  
+Theo Chương 5, hệ thống dùng CSRT kết hợp template matching. CSRT là tracker chính, còn template matching đóng vai trò kiểm tra và hỗ trợ khôi phục khi tracker mất dấu ngắn hạn. Cách kết hợp này giúp vùng bám ổn định hơn so với chỉ giữ ROI cố định.
 
-GPS/Galileo/BeiDou dùng **Kepler orbit model** trong ECEF (WGS84). GLONASS dùng
-**PZ-90.11 datum** và **ephemeris kiểu positions/velocities/accelerations** thay vì
-Kepler. Nó tích phân số học phương trình đại số:
+### 7.8. Vì sao dùng CameraX thay vì Camera2 trực tiếp?
 
-```
-d²r/dt² = -μ/r³ · r + accelerations
-```
-
-Orekit cung cấp `GLONASSNumericalPropagator` riêng, dùng bộ integrator ODE (Runge-Kutta 4)
-để tích phân từ epoch tham chiếu đến epoch cần tính. Sau đó chuyển đổi PZ-90.11 → WGS84
-bằng ma trận Helmert 7-parameter transformation.
+**Trả lời:**  
+CameraX gắn với lifecycle Android và cung cấp use case `Preview` cùng `ImageAnalysis`, phù hợp với xử lý frame bằng OpenCV. Camera2 linh hoạt hơn nhưng phức tạp hơn nhiều về session, surface và lifecycle. Với mục tiêu đồ án, CameraX giúp tập trung vào thuật toán và tích hợp hệ thống.
 
 ---
 
-## 8. Toán học quỹ đạo và WGS84
+## 8. Câu hỏi về dữ liệu, thực nghiệm và đánh giá
 
-### 8.1. Kepler's equation là gì? Vì sao phải giải?
+### 8.1. Chương 4 và Chương 5 đánh giá hệ thống theo cách nào?
 
-Kepler: **quỹ đạo hành tinh/vệ tinh là ellipse**, Trái Đất ở một tiêu điểm. 6 tham số
-xác định quỹ đạo:
-- `a` — semi-major axis (trục lớn).
-- `e` — eccentricity (độ dẹt).
-- `i` — inclination (góc nghiêng so với xích đạo).
-- `Ω` — right ascension of ascending node (kinh độ nút lên).
-- `ω` — argument of perigee (góc từ nút lên đến cận điểm).
-- `M₀` — mean anomaly at epoch (góc trung bình tại thời điểm gốc).
+**Trả lời:**  
+Đồ án chủ yếu đánh giá bằng kiểm thử chức năng, kiểm thử tích hợp trên thiết bị thật và quan sát log. Các luồng được kiểm thử gồm quyền GPS/camera, GNSS viewer, LiveRouting, Optical Flow camera, analytics, xử lý video và lỗi server/model.
 
-Cho epoch time `t`, ta biết **mean anomaly**:
-```
-M(t) = M₀ + n · (t - t₀), với n = √(μ / a³)
-```
+### 8.2. Thiết bị thử nghiệm trong đồ án là gì?
 
-Nhưng cần **eccentric anomaly E** để tính vị trí thực. Phương trình Kepler:
-```
-M = E - e · sin(E)
-```
+**Trả lời:**  
+Theo Chương 4, ứng dụng được thử nghiệm trên điện thoại Samsung Galaxy S20 Ultra để truy cập GNSS, camera và IMU. Trên thiết bị này, các luồng quan sát vệ tinh, 3D/AR, Optical Flow camera, analytics và xử lý video RAFT hoạt động mượt và ổn định; riêng LiveRouting chưa ổn định trong mọi điều kiện.
 
-Không giải được đóng (transcendental), phải giải số bằng **Newton-Raphson**:
-```
-E_new = E - (E - e·sin(E) - M) / (1 - e·cos(E))
-```
+### 8.3. Các chỉ số analytics Optical Flow gồm những gì?
 
-Xem `SatelliteCalculator.kt:solveKepler`, dùng **10 iteration** — với `e < 0.02`
-(vệ tinh GPS), hội tụ sau 3-4 iteration, 10 iteration là dư dả.
+**Trả lời:**  
+Các chỉ số chính gồm FPS, thời gian xử lý và số điểm/vector hoạt động. Ngoài ra hệ thống còn ghi độ dịch chuyển trung bình/trung vị và độ tin cậy tương đối theo kiểm tra tiến-lùi. Trong biểu đồ chính, đồ án ưu tiên các chỉ số đo trực tiếp để tránh hiểu nhầm.
 
-### 8.2. Sau khi có E, tính vị trí vệ tinh trong ECEF ra sao?
+### 8.4. FPS được hiểu như thế nào trong đồ án?
 
-1. **True anomaly** ν:
-   ```
-   tan(ν/2) = √((1+e)/(1-e)) · tan(E/2)
-   ```
-2. **Radius**:
-   ```
-   r = a(1 - e·cos(E))
-   ```
-3. **Toạ độ trong mặt phẳng quỹ đạo**:
-   ```
-   x' = r·cos(ν)
-   y' = r·sin(ν)
-   ```
-4. **Quay 3 lần để về ECEF**:
-   - Quay `-ω` quanh Z (đưa cận điểm về trục X).
-   - Quay `-i` quanh X (nghiêng mặt phẳng quỹ đạo về mặt phẳng xích đạo).
-   - Quay `-Ω` quanh Z (đưa nút lên về hướng gốc).
-   - Cuối cùng, phải trừ **rotation của Trái Đất** vì ECEF quay:
-     ```
-     θ_earth = ω_earth · (t - t₀), với ω_earth = 7.2921150e-5 rad/s
-     ```
-     → quay quanh Z thêm góc `-θ_earth`.
+**Trả lời:**  
+FPS là tốc độ xử lý tức thời của thuật toán trên frame hiện tại, thường tính từ thời gian xử lý. Nó phản ánh khả năng đáp ứng thời gian thực, nhưng không tự nói lên độ chính xác của vector Optical Flow.
 
-### 8.3. ECEF ↔ Lat/Lon/Alt (WGS84) — thuật toán Bowring?
+### 8.5. Độ tin cậy trong analytics có phải độ chính xác tuyệt đối không?
 
-**ECEF** (Earth-Centered, Earth-Fixed) là hệ toạ độ Descartes, gốc tâm Trái Đất, trục Z
-qua Bắc Cực, trục X qua điểm giao Greenwich với xích đạo.
+**Trả lời:**  
+Không. Độ tin cậy trong đồ án là chỉ số tương đối dựa trên tỷ lệ điểm/vector nhất quán theo kiểm tra tiến-lùi. Vì đồ án chưa có ground truth chuyển động camera, chỉ số này hỗ trợ đánh giá nội bộ giữa KLT và Farneback trong cùng điều kiện, chứ không phải sai số tuyệt đối.
 
-**LLA** (Latitude, Longitude, Altitude) là toạ độ địa lý thông thường.
+### 8.6. Hệ thống lưu dữ liệu thực nghiệm ở đâu?
 
-Chuyển ECEF → LLA đơn giản cho Lon:
-```
-lon = atan2(y, x)
-```
+**Trả lời:**  
+Ứng dụng dùng Room để lưu dữ liệu cục bộ. Các bảng được nêu trong Chương 4 gồm `AnalyticsSession`, `AnalyticsSample`, `RoutingSession`, `RoutePoint` và `MediaItem`. Nhờ vậy người dùng có thể xem lại phiên đo, tuyến đường và media kết quả.
 
-Với Lat và Alt phải iteration vì Trái Đất là **ellipsoid** không phải cầu. WGS84:
-- `a = 6378137 m` (bán trục lớn xích đạo).
-- `f = 1/298.257223563` (flattening).
-- `b = a(1-f) = 6356752.314 m` (bán trục nhỏ, hai cực).
-- `e² = 2f - f² = 0.006694...` (eccentricity²).
+### 8.7. Kết quả xử lý video được đánh giá như thế nào?
 
-**Thuật toán Bowring** (closed-form, 1 lần iteration là đủ):
-```
-p = √(x² + y²)
-θ = atan2(z·a, p·b)
-lat = atan2(z + e'²·b·sin³(θ), p - e²·a·cos³(θ))
-N = a / √(1 - e²·sin²(lat))
-alt = p / cos(lat) - N
-```
+**Trả lời:**  
+Trong đồ án, kết quả video được đánh giá ở mức chức năng: upload được, theo dõi tiến độ được, job hoàn tất hoặc lỗi rõ ràng, tải kết quả về và mở được video. Hệ thống cũng kiểm tra các trường hợp video nhỏ/lớn, upload theo chunk, hủy job và lỗi model/server.
 
-Xem `SatelliteCalculator.kt:ecefToLla`.
+### 8.8. Đồ án đã có benchmark định lượng sâu chưa?
 
-### 8.4. GMST là gì? Vì sao cần?
+**Trả lời:**  
+Chưa. Chương 6 nêu rõ hạn chế là đánh giá mới tập trung vào chức năng và quan sát định tính, chưa có benchmark trên nhiều thiết bị, nhiều độ phân giải, nhiều điều kiện ánh sáng hoặc tập dữ liệu chuẩn.
 
-**GMST** = Greenwich Mean Sidereal Time — góc quay của Trái Đất so với **các sao cố định**
-(không phải Mặt Trời). Ngày sidereal = 23h56m4s, ngắn hơn ngày mặt trời ~4 phút.
+### 8.9. Vì sao kiểm thử hệ thống chủ yếu là chức năng và tích hợp?
 
-Cần GMST để chuyển từ hệ **TEME/ECI** (inertial, gắn với các sao) sang **ECEF**
-(gắn với mặt đất):
-```
-ECEF_xy = R_z(GMST) · ECI_xy
-```
-
-Nghĩa là để hiển thị vệ tinh đúng vị trí trên globe, ta phải **quay hệ inertial đi
-một góc GMST** để đồng bộ với Trái Đất đang quay.
-
-Công thức GMST (IAU 1982, đơn giản hoá):
-```
-GMST(rad) = 18.697374558 + 24.06570982441908 · D  (giờ)
-```
-với `D` = số ngày Julian từ J2000.0.
-
-Trong đồ án, xem `SatelliteCalculator.kt:computeGmst`.
-
-### 8.5. Julian Date là gì? Vì sao dùng?
-
-Astronomers dùng **Julian Date (JD)** — số ngày liên tục từ ngày 1/1/4713 BC 12:00 UT.
-Ưu điểm: **liền mạch**, không cần lo tháng, năm nhuận, timezone.
-
-- **JD 2440587.5** = 1/1/1970 00:00 UTC (Unix epoch).
-- **J2000.0** = JD 2451545.0 = 1/1/2000 12:00 UTC — epoch chuẩn hiện đại.
-
-Công thức: `JD = 2440587.5 + unix_time / 86400`.
-
-### 8.6. TLE (Two-Line Element) là gì? Vì sao dùng cho SGP4?
-
-TLE là format text 2 dòng chứa **tham số quỹ đạo trung bình** ở epoch. Ví dụ ISS:
-```
-1 25544U 98067A   24001.12345678 -.00001764  00000-0 -32908-4 0  9990
-2 25544  51.6423  10.7654 0002123 45.6789 12.3456 15.49812345 34567
-```
-
-Đọc được:
-- Dòng 1: satellite number, epoch (year + day), drag terms.
-- Dòng 2: inclination, RAAN, eccentricity, argument of perigee, mean anomaly, mean motion.
-
-**SGP4** (Simplified General Perturbations #4) là bộ propagator do NASA/NORAD phát triển
-để tính vị trí từ TLE, tính đến nhiễu loạn `J2, J3, J4` (gương phẳng Trái Đất), drag khí quyển.
-
-Đồ án dùng **Orekit's TLE propagator** — cache 256 entry LRU vì tính toán SGP4 tốn CPU.
-CelesTrak cập nhật TLE mỗi ngày.
-
-### 8.7. `inertialSpeed` bù rotation Trái Đất là gì?
-
-Xem `SatelliteCalculator.kt:inertialSpeed`. Vấn đề: khi ta tính velocity vệ tinh trong
-ECEF (rotating frame), nó **không phải velocity thật** so với inertial frame vì Trái
-Đất đang quay.
-
-Muốn hiển thị "speed thực" (~7 km/s cho GPS), phải cộng vector Coriolis:
-```
-v_inertial = v_ecef + ω × r
-```
-với `ω = (0, 0, 7.2921150e-5)` rad/s, `r` là vị trí ECEF.
-
-Nếu bỏ qua, sẽ thấy vệ tinh GEO có `v = 0` (đúng trong ECEF vì đứng yên trên mặt đất
-so với mặt đất), nhưng thực tế trong inertial nó bay ~3 km/s.
+**Trả lời:**  
+Vì hệ thống phụ thuộc nhiều vào phần cứng, cảm biến và server: GNSS, camera, IMU, ARCore, backend RAFT. Nhiều luồng khó kiểm chứng bằng unit test thuần, nên đồ án chọn kiểm thử trên thiết bị thật kết hợp quan sát log để xác nhận hành vi hệ thống.
 
 ---
 
-## 9. Mặt Trời và Mặt Trăng (Meeus algorithm)
+## 9. Câu hỏi về sai số, giới hạn và rủi ro
 
-### 9.1. Vì sao app tính vị trí Mặt Trời/Mặt Trăng?
+### 9.1. Hạn chế lớn nhất của LiveRouting là gì?
 
-Xem `EarthRenderer.kt`. Để render **AR globe chân thực**:
-- Mặt Trời chiếu sáng half-Earth → dùng để tính vector chiếu sáng shader.
-- Mặt Trăng hiện thực có pha (crescent, gibbous) → cần biết vị trí Mặt Trời để tính pha.
-- Vị trí ngày/đêm trên Trái Đất đúng theo giờ hiện tại.
+**Trả lời:**  
+Hạn chế lớn nhất là LiveRouting mới ở mức thử nghiệm. Cơ chế dead reckoning dựa trên Optical Flow, IMU và con quay có thể duy trì vị trí ngắn hạn, nhưng chưa ổn định trong mọi điều kiện và chưa có ground truth để đánh giá sai số quỹ đạo định lượng.
 
-### 9.2. Thuật toán Meeus tính Mặt Trời ra sao?
+### 9.2. Vì sao camera đơn khó suy ra quãng đường thật?
 
-Từ sách "Astronomical Algorithms" của Jean Meeus (1998), độ chính xác ~0.01°.
+**Trả lời:**  
+Camera đơn nhìn thấy chuyển động theo pixel, nhưng thiếu thông tin độ sâu và tỷ lệ tuyệt đối. Cùng một độ dịch chuyển ảnh có thể tương ứng với quãng đường thật khác nhau tùy độ cao camera, góc đặt, vật thể trong cảnh và khoảng cách tới bề mặt. Vì vậy đồ án cần hiệu chỉnh bằng GNSS khi tín hiệu còn tốt.
 
-1. **Julian Day**:
-   ```
-   T = (JD - 2451545.0) / 36525  (thế kỷ Julian từ J2000)
-   ```
-2. **Mean longitude of Sun** (độ):
-   ```
-   L₀ = 280.46646 + 36000.76983·T + 0.0003032·T²
-   ```
-3. **Mean anomaly**:
-   ```
-   M = 357.52911 + 35999.05029·T - 0.0001537·T²
-   ```
-4. **Equation of center** (correction cho quỹ đạo ellipse):
-   ```
-   C = (1.914602 - 0.004817·T)·sin(M)
-     + (0.019993 - 0.000101·T)·sin(2M)
-     + 0.000289·sin(3M)
-   ```
-5. **True longitude**:
-   ```
-   λ = L₀ + C
-   ```
-6. **Right ascension và declination** (đổi sang toạ độ xích đạo):
-   ```
-   α = atan2(cos(ε)·sin(λ), cos(λ))
-   δ = asin(sin(ε)·sin(λ))
-   ```
-   với `ε = 23.4393°` là độ nghiêng trục Trái Đất.
+### 9.3. GNSS trong đô thị dày đặc có rủi ro gì?
 
-Cuối cùng biến đổi α, δ → vector 3D trong world space để shader.
+**Trả lời:**  
+GNSS có thể bị che khuất, phản xạ đa đường, mất cập nhật hoặc giảm độ chính xác. Khi đó vị trí Android trả về có thể trễ hoặc lệch. Đồ án xử lý bằng cách đánh giá độ tin cậy GNSS và hỗ trợ ngắn hạn bằng camera/IMU, nhưng không khẳng định loại bỏ hoàn toàn sai số GNSS.
 
-### 9.3. Thuật toán Meeus tính Mặt Trăng ra sao?
+### 9.4. IMU có hạn chế gì?
 
-Phức tạp hơn Mặt Trời vì quỹ đạo Mặt Trăng bị nhiễu loạn bởi Mặt Trời và độ dẹt Trái
-Đất. Cần **các tham số fundamental**:
-- `L` — mean longitude of Moon.
-- `D` — mean elongation Moon-Sun.
-- `M` — mean anomaly of Sun.
-- `M'` — mean anomaly of Moon.
-- `F` — argument of latitude (từ nút lên).
+**Trả lời:**  
+IMU có tần số cao và không phụ thuộc tín hiệu ngoài, nhưng dễ trôi khi tích phân theo thời gian. Con quay có thể trôi góc, gia tốc kế nhiễu và bị ảnh hưởng bởi rung. Vì vậy trong đồ án IMU chỉ hỗ trợ ngắn hạn và cần ràng buộc bởi GNSS, Optical Flow hoặc tuyến đường.
 
-Vị trí longitude:
-```
-λ = L + 6.289·sin(M') + 0.214·sin(2M') + 0.658·sin(2F) + ...
-```
+### 9.5. Bám tuyến SNAP có thể gây hiểu nhầm không?
 
-Đây là **truncated series** — chuỗi các số hạng chu kỳ. Meeus phiên bản đầy đủ có 60+
-số hạng đạt độ chính xác 0.5" (giây cung), nhưng đồ án dùng 5-6 số hạng chính, đủ hiển thị.
+**Trả lời:**  
+Có, nếu trình bày như vị trí thật tuyệt đối. Vì SNAP kéo marker về tuyến nên có thể làm quỹ đạo trông ổn định hơn thực tế. Đồ án phân biệt SNAP và REAL để người dùng có thể xem vị trí dead reckoning thật, đồng thời chỉ bám tuyến có điều kiện thay vì ép liên tục.
 
-Latitude ~ ±5° (mặt phẳng quỹ đạo Mặt Trăng nghiêng 5° so với ecliptic):
-```
-β ≈ 5.128·sin(F) + 0.281·sin(M'+F) + ...
-```
+### 9.6. Backend RAFT có rủi ro gì khi triển khai thực tế?
 
-### 9.4. Vì sao dùng tọa độ **ecliptic** trước rồi mới đổi sang equatorial?
+**Trả lời:**  
+Backend phụ thuộc tốc độ mạng, tài nguyên CPU/GPU, dung lượng video và môi trường triển khai. Nếu không có GPU, xử lý có thể lâu. Khi triển khai thực tế cần bổ sung xác thực API, giới hạn dung lượng upload, hàng đợi bền vững, timeout và giám sát tài nguyên.
 
-Ecliptic (hoàng đạo) = mặt phẳng quỹ đạo Trái Đất quanh Mặt Trời. Rất tự nhiên để mô tả
-chuyển động Mặt Trời/Mặt Trăng.
+### 9.7. Bám đối tượng có thể thất bại trong trường hợp nào?
 
-Equatorial (xích đạo) = mặt phẳng xích đạo Trái Đất. Cần cho rendering vì Earth model
-xoay quanh trục cực.
+**Trả lời:**  
+Bám đối tượng có thể mất dấu khi vật thể bị che hoàn toàn, ra khỏi khung hình, biến dạng mạnh, thiếu texture, ánh sáng thay đổi hoặc camera rung nhiều. Trong các trường hợp đó, người dùng cần chọn lại vùng đối tượng.
 
-Chuyển đổi bằng ma trận quay quanh trục X một góc `ε = 23.44°`.
+### 9.8. Màn hình AR có đạt độ chính xác không gian như hệ AR thương mại không?
+
+**Trả lời:**  
+Không. Chương 6 nêu AR trong đồ án tập trung minh họa tương đối vị trí vệ tinh theo hướng nhìn, chưa đạt mức hiệu chỉnh không gian chính xác như các hệ AR thương mại chuyên sâu. Đây là hạn chế và có thể cải thiện bằng hiệu chỉnh hướng nhìn, bộ lọc orientation và cảnh báo độ tin cậy.
 
 ---
 
-## 10. Map3DInformationDialog
+## 10. Câu hỏi phản biện khó
 
-Dialog này hiển thị mọi thông tin về **một vệ tinh** khi user tap chọn nó trên globe 3D.
-Từng biến trong `Map3DInformationDialog.kt`:
+### 10.1. Điểm mới của đồ án là gì, khi KLT, Farneback, RAFT đều đã có sẵn?
 
-### 10.1. `totalSatellites` — Tổng số vệ tinh đang nhận
+**Trả lời:**  
+Điểm mới của đồ án không nằm ở việc phát minh thuật toán Optical Flow mới, mà ở việc tích hợp và điều phối chúng trong một hệ thống Android hoàn chỉnh: GNSS đa nguồn, camera real-time, analytics lưu phiên, backend RAFT bất đồng bộ, bám đối tượng và thử nghiệm LiveRouting khi GNSS yếu. Đóng góp chính là thiết kế hệ thống và cơ chế kết hợp thực dụng.
 
-Tổng số vệ tinh mà app đang "thấy" (có tín hiệu, bất kể có được dùng để định vị hay
-không). Bao gồm cả các constellation. Điển hình tại VN: 20-40 vệ tinh.
+### 10.2. Nếu chưa có ground truth, làm sao chứng minh hệ thống định vị tốt hơn?
 
-### 10.2. `svid` (Space Vehicle ID)
+**Trả lời:**  
+Trong phạm vi đồ án, em chưa khẳng định hệ thống chính xác hơn theo nghĩa định lượng tuyệt đối. Em chứng minh ở mức chức năng và quan sát: hệ thống duy trì marker trong khoảng mất GNSS ngắn và phản ứng theo chuyển động camera/IMU thay vì giữ tốc độ cố định. Đây cũng là hạn chế đã nêu; hướng tiếp theo là bổ sung ground truth và benchmark sai số quỹ đạo.
 
-**Số hiệu vệ tinh** trong hệ constellation của nó. Ví dụ:
-- GPS: 1-32 (mỗi số ứng với 1 vệ tinh cụ thể).
-- GLONASS: 1-24.
-- Galileo: 1-30.
-- BeiDou: 1-63.
+### 10.3. Vì sao không dùng trực tiếp visual-inertial odometry hoặc ARCore để định vị?
 
-Kết hợp `svid + constellationType` mới xác định duy nhất một vệ tinh.
+**Trả lời:**  
+Visual-inertial odometry đầy đủ yêu cầu hiệu chuẩn, ước lượng pose, xử lý outlier, tỷ lệ và nhiều điều kiện ổn định hơn. Phạm vi đồ án tập trung vào nguyên mẫu thử nghiệm dựa trên GNSS, Optical Flow và IMU, không đặt mục tiêu xây dựng VIO hoàn chỉnh. ARCore trong đồ án chủ yếu dùng cho quan sát vệ tinh bằng AR, chưa dùng làm lõi định vị.
 
-### 10.3. `constellationType`
+### 10.4. Nếu Optical Flow bị ảnh hưởng bởi vật thể chuyển động ngoài đường, hệ thống có sai không?
 
-Enum `GnssStatus.CONSTELLATION_*`:
-- `CONSTELLATION_GPS` (1)
-- `CONSTELLATION_SBAS` (2)
-- `CONSTELLATION_GLONASS` (3)
-- `CONSTELLATION_QZSS` (4)
-- `CONSTELLATION_BEIDOU` (5)
-- `CONSTELLATION_GALILEO` (6)
-- `CONSTELLATION_IRNSS` (7)
+**Trả lời:**  
+Có thể sai. Vật thể chuyển động độc lập như xe khác hoặc người đi bộ có thể tạo vector không phản ánh chuyển động của camera. Đồ án giảm rủi ro bằng ROI, bám đối tượng và chỉ số chất lượng, nhưng chưa giải quyết triệt để. Hướng phát triển là thêm phân đoạn cảnh, loại outlier và sensor fusion chặt chẽ hơn.
 
-App map sang tên đọc được.
+### 10.5. Vì sao không dùng map matching liên tục để sửa vị trí?
 
-### 10.4. `cn0DbHz` (Carrier-to-Noise density ratio)
+**Trả lời:**  
+Vì map matching liên tục có thể che giấu sai số thật và làm marker bám đường ngay cả khi người dùng đã lệch tuyến. Đồ án chọn SNAP có điều kiện và REAL để cân bằng: có thể giảm trôi hiển thị khi tin cậy, nhưng vẫn giữ khả năng phát hiện lệch tuyến và yêu cầu tính lại đường.
 
-**Cường độ tín hiệu** = tỉ số công suất sóng mang trên mật độ nhiễu, đơn vị dB-Hz.
+### 10.6. Độ nhạy bị khóa 100 trong analytics có làm kết quả thiếu thực tế không?
 
-- **< 20 dB-Hz**: rất yếu, gần như không tracking được.
-- **25-35**: yếu, có thể mất dấu.
-- **35-45**: tốt.
-- **> 45**: xuất sắc, lộ thiên trực tiếp.
+**Trả lời:**  
+Khóa độ nhạy 100 là để so sánh công bằng giữa hai thuật toán trên cùng đầu vào, tránh việc thao tác người dùng làm lệch kết quả. Khi sử dụng thông thường, người dùng vẫn có thể điều chỉnh độ nhạy. Vì vậy analytics ưu tiên tính lặp lại, còn trải nghiệm thực tế được kiểm tra ở chế độ camera bình thường.
 
-CN0 khác **SNR** ở chỗ nó chuẩn hoá theo băng thông (Hz), vì tín hiệu GPS được điều
-chế trải phổ (spread spectrum) trên băng ~2 MHz. CN0 là chỉ số **so sánh được** giữa
-các máy thu khác nhau.
+### 10.7. Nếu server không có mạng hoặc Cloudflare Tunnel lỗi thì chức năng video có dùng được không?
 
-### 10.5. `elevationDegrees`
+**Trả lời:**  
+Chức năng xử lý video bằng RAFT cần backend và kết nối mạng. Nếu server hoặc tunnel lỗi, ứng dụng phải báo lỗi và không tạo kết quả sai. Các chức năng chạy trực tiếp trên thiết bị như camera KLT/Farneback, GNSS viewer và analytics vẫn có thể hoạt động tùy điều kiện quyền và cảm biến.
 
-**Góc ngẩng** = góc giữa vệ tinh và mặt phẳng ngang cục bộ, tại vị trí máy thu.
-- 0° = ngay đường chân trời.
-- 90° = ngay đỉnh đầu (zenith).
+### 10.8. Đồ án có đảm bảo bảo mật khi upload video không?
 
-Vệ tinh elevation < 10° thường bị **atmospheric delay** lớn nhất và multipath từ mặt đất,
-nên máy thu thường loại khỏi lời giải PVT.
+**Trả lời:**  
+Trong phạm vi thử nghiệm, ứng dụng giao tiếp qua HTTPS và backend có dọn tài nguyên tạm. Tuy nhiên Chương 4 cũng nêu khi triển khai thực tế cần bổ sung xác thực API, giới hạn dung lượng, hàng đợi bền vững và giám sát tài nguyên. Vì vậy em không khẳng định mức bảo mật thương mại, mà mới ở mức phù hợp demo và thử nghiệm.
 
-### 10.6. `azimuthDegrees`
+### 10.9. Vì sao Liquid Glass được đưa vào Chương 5, có làm loãng trọng tâm không?
 
-**Góc phương vị** = hướng từ máy thu đến vệ tinh chiếu lên mặt phẳng ngang, đo từ Bắc
-theo chiều kim đồng hồ.
-- 0° = Bắc.
-- 90° = Đông.
-- 180° = Nam.
-- 270° = Tây.
-
-Kết hợp (elevation, azimuth) → **tọa độ ngang địa phương** — đủ để định vị vệ tinh
-trên bầu trời từ góc nhìn máy thu.
-
-### 10.7. `carrierFrequencyHz`
-
-Tần số sóng mang tín hiệu, đơn vị Hz. GNSS phát nhiều băng tần:
-- **GPS L1**: 1575.42 MHz (dân sự C/A).
-- **GPS L2**: 1227.60 MHz (quân sự P(Y), dân sự L2C).
-- **GPS L5**: 1176.45 MHz (aviation safety).
-- **Galileo E1**: 1575.42 MHz (trùng L1).
-- **Galileo E5**: 1191.795 MHz.
-- **GLONASS G1**: 1602 MHz + k·0.5625 MHz (mỗi vệ tinh khác nhau — FDMA).
-
-Nếu N/A → chipset không expose tần số cho vệ tinh đó.
-
-### 10.8. `usedInFix`
-
-Boolean: vệ tinh này **có** được dùng để giải PVT hiện tại không? Nếu `false`, có thể do:
-- Elevation quá thấp.
-- CN0 quá yếu.
-- Chưa decode được ephemeris.
-- Máy thu quyết định không cần (đã đủ 8 vệ tinh khác).
-
-### 10.9. `positionSource`
-
-Nguồn dữ liệu vị trí vệ tinh, một trong:
-- `"PVT"` — từ chipset (chính xác nhất).
-- `"IGS Broadcast"` — từ RINEX file IGS.
-- `"CelesTrak SGP4"` — từ TLE + SGP4.
-- `"CelesTrak GP"` — từ CelesTrak nhưng dùng approximation (Kepler thủ công).
-- `"Approximate"` — fallback cuối.
-
-Cho biết **độ tin cậy** của toạ độ đang hiển thị.
-
-### 10.10. `latitude / longitude / altitude` (của vệ tinh)
-
-Toạ độ **của vệ tinh** trong hệ WGS84:
-- `latitude ∈ [-90°, 90°]` — vĩ độ subpoint (điểm ngay dưới vệ tinh trên mặt Trái Đất).
-- `longitude ∈ [-180°, 180°]` — kinh độ subpoint.
-- `altitude` — độ cao **trên bề mặt Trái Đất** (không phải độ cao trên mực nước biển):
-  - GPS MEO: ~20,200 km.
-  - GLONASS MEO: ~19,100 km.
-  - Galileo MEO: ~23,222 km.
-  - GEO (SBAS, BeiDou GEO): ~35,786 km.
-  - LEO: 400-2000 km.
-
-Format `%,.0f` in số kèm phân tách hàng nghìn (`20,200`).
-
-### 10.11. `speed` (của vệ tinh)
-
-Tốc độ vệ tinh, đơn vị m/s. Hiển thị dưới dạng `km/s` và `km/h`.
-
-Định luật III Kepler: `v = √(μ/r)`. Với μ = 3.986e14 m³/s² (Earth's gravity parameter):
-- GPS MEO (r=26,600 km): v ≈ 3.87 km/s ≈ 13,900 km/h.
-- LEO (r=6800 km): v ≈ 7.66 km/s ≈ 27,600 km/h.
-- GEO (r=42,164 km): v ≈ 3.07 km/s ≈ 11,000 km/h (nhưng so với mặt đất = 0).
-
-App sử dụng `inertialSpeed` (bao gồm cả rotation Trái Đất) để hiển thị đúng "tốc độ thực".
-
-### 10.12. `ephemerisSource` (nội bộ, không hiển thị nhưng có ý nghĩa)
-
-Trong `SatelliteInfo`, có thêm trường `ephemerisSource ∈ {0, 1, 2, 3}` (từ PVT resolver):
-- `0` — Broadcast (từ chính vệ tinh).
-- `1` — Server normal (từ Google Assisted GPS server).
-- `2` — Server long-term (predicted ephemeris, dùng khi mất mạng dài).
-- `3` — Other/unknown.
+**Trả lời:**  
+Liquid Glass không phải trọng tâm định vị, nhưng là một đóng góp kỹ thuật về giao diện thời gian thực trên Android. Nó giải quyết bài toán dựng lớp kính trên nền bản đồ thay đổi liên tục và tương thích nhiều phiên bản Android. Khi bảo vệ, em sẽ trình bày ngắn phần này và tập trung nhiều hơn vào GNSS, LiveRouting, analytics và RAFT.
 
 ---
 
-## 11. AR Rendering
+## 11. Câu hỏi về hướng phát triển
 
-### 11.1. GLSurfaceView và OpenGL ES 3.2 là gì?
+### 11.1. Hướng phát triển quan trọng nhất của đồ án là gì?
 
-- **GLSurfaceView** là view Android cho phép render OpenGL ES ở thread riêng
-  (`GLThread`), không block UI thread.
-- **OpenGL ES 3.2** là chuẩn OpenGL cho embedded (mobile), version 3.2 hỗ trợ:
-  - Compute shaders.
-  - Geometry shaders.
-  - Tessellation.
-  - MSAA render buffer.
-  - Đủ mạnh để render globe + skybox + shading advanced.
+**Trả lời:**  
+Hướng quan trọng nhất là xây dựng đánh giá định lượng có kiểm soát. Cần ghi tập dữ liệu chuẩn, có ground truth hoặc quỹ đạo tham chiếu, rồi đo sai số vị trí, sai số hướng, FPS, thời gian xử lý và độ ổn định trong nhiều điều kiện ánh sáng, thiết bị và tốc độ di chuyển.
 
-### 11.2. Bản chất Model-View-Projection matrix?
+### 11.2. Làm sao cải thiện LiveRouting?
 
-Rendering 3D trong OpenGL cần 3 matrix nối tiếp:
+**Trả lời:**  
+Có thể bổ sung sensor fusion định lượng hơn như Extended Kalman Filter, particle filter hoặc factor graph để mô hình hóa vị trí, vận tốc, hướng và độ bất định. Đồng thời cần thêm ground truth để hiệu chỉnh hệ số Optical Flow, đánh giá sai số quỹ đạo và tối ưu cơ chế SNAP/REAL.
 
-1. **Model matrix M** — biến hình từ **local space** (toạ độ trong định nghĩa mesh)
-   sang **world space** (toạ độ chung của scene). Gồm translate, rotate, scale.
+### 11.3. Làm sao cải thiện phần Optical Flow?
 
-2. **View matrix V** — biến từ world space sang **camera space** (camera ở gốc, nhìn
-   theo trục -Z). `Matrix.setLookAtM(V, 0, eye, center, up)`.
+**Trả lời:**  
+Có thể bổ sung lọc outlier tốt hơn, phân đoạn vùng đường/nền, tách vật thể chuyển động độc lập, benchmark theo độ phân giải và điều kiện ánh sáng. Với RAFT, có thể chuẩn hóa backend, thêm health check, timeout, theo dõi GPU/CPU và tự dọn job cũ.
 
-3. **Projection matrix P** — biến từ camera space (3D) sang **clip space** (4D
-   homogeneous). Sau khi divide by W → NDC ([-1, 1]³). App dùng:
-   ```kotlin
-   Matrix.perspectiveM(P, 0, 45.0f, aspect, 0.1f, 20f)
-   ```
-   - `45°` fov (góc mở dọc).
-   - `aspect = width/height`.
-   - `near = 0.1, far = 20` (world units).
+### 11.4. Làm sao cải thiện phần GNSS và AR?
 
-Trong vertex shader:
-```glsl
-gl_Position = P * V * M * vec4(position, 1.0);
-```
+**Trả lời:**  
+Phần GNSS có thể bổ sung timeline quỹ đạo, phát lại dữ liệu đã ghi và phân loại vệ tinh theo chòm rõ hơn. Phần AR có thể thêm hiệu chỉnh hướng nhìn, bộ lọc làm mượt orientation và cảnh báo độ tin cậy dựa trên C/N0 hoặc số vệ tinh used-in-fix.
 
-### 11.3. Camera trong `EarthRenderer` dùng toạ độ cầu (spherical)?
+### 11.5. Nếu triển khai thực tế, hệ thống cần bổ sung gì?
 
-Xem `EarthRenderer.kt`. Camera có 3 tham số:
-- `theta ∈ [0, 2π]` — góc quay quanh trục Y (kinh độ camera).
-- `phi ∈ [ε, π-ε]` — góc từ cực Bắc xuống (vĩ độ, tránh singularity).
-- `scale` — khoảng cách từ camera đến tâm Earth (zoom).
-
-Chuyển sang Cartesian:
-```
-eye = (r·sin(phi)·cos(theta), r·cos(phi), r·sin(phi)·sin(theta))
-```
-
-Ưu điểm: user pan/zoom bằng touch → chỉ update θ, φ, scale, giữ nguyên `center = (0,0,0)`.
-Không có gimbal lock nhờ kẹp phi.
-
-### 11.4. Bản chất SphereMesh — dựng cầu Earth ra sao?
-
-Xem `SphereMesh.kt`. Tạo mesh cầu bằng **UV subdivision**:
-- Chia longitude `[0, 2π]` thành `n` bước (n=64-128 tuỳ chất lượng).
-- Chia latitude `[-π/2, π/2]` thành `m` bước.
-- Mỗi ô UV → 2 tam giác (2 triangle strip).
-- Vertex: `(cos(lat)·cos(lon), sin(lat), cos(lat)·sin(lon))`.
-- UV: `(lon/2π, lat/π + 0.5)`.
-
-Texture Earth (2K/4K JPG) map vào UV → hiện cả lục địa/đại dương đúng vị trí.
-
-### 11.5. Skybox là gì?
-
-Xem `Skybox.kt`. Skybox = **hình lập phương lớn bao quanh scene**, mặt trong dán texture
-bầu trời sao. Vertex shader triệt tiêu translation của view matrix:
-```glsl
-vec4 pos = P * mat4(mat3(V)) * vec4(position, 1.0);
-gl_Position = pos.xyww;  // depth = 1 (xa nhất)
-```
-
-Kết quả: skybox luôn xa nhất, không bao giờ va chạm objects, camera xoay chỉ thấy sao
-chuyển động → cảm giác không gian rộng.
-
-### 11.6. Atmosphere halo (viền quyển khí) dựng thế nào?
-
-Xem `EarthRenderer`. Trick phổ biến: **fake atmosphere shader**:
-- Vẽ thêm 1 quả cầu bán trong suốt, bán kính lớn hơn Earth ~2-5%.
-- Fragment shader tính `dot(normal, view_dir)`, `dot(normal, sun_dir)`:
-  - Càng gần rìa (silhouette) → alpha càng cao → phần rìa sáng lên.
-  - Kèm màu **Rayleigh scattering** (blueish khi nhìn phía có Mặt Trời).
-
-Không phải volumetric thật, chỉ shader analytic — nhưng nhìn rất đẹp và rẻ.
-
-### 11.7. Country label dựng thế nào?
-
-Xem `EarthRenderer`. Với mỗi quốc gia lớn, có bảng `(lat, lon, name)`. Runtime:
-1. Chuyển `(lat, lon)` → world position trên bề mặt Earth (nhân với bán kính globe).
-2. Chiếu qua MVP → NDC.
-3. Kiểm tra **backface culling**: `dot(normal, view_dir) > 0` → label ẩn phía sau Earth.
-4. Dùng SDF text hoặc bitmap font, vẽ 2D overlay tại screen position.
-
-### 11.8. Vệ tinh render như boxes + solar panels — vì sao?
-
-Vệ tinh có kích thước ~vài mét — nếu vẽ đúng scale, sẽ vô hình so với Earth (12,756 km).
-Vì thế app **exaggerate kích thước** và render dạng biểu tượng:
-- Thân: hộp nhỏ.
-- 2 panel: hình chữ nhật kéo sang bên.
-- Text SVID nổi bên cạnh.
-
-**Altitude compression**: `rSat = 0.15 + 0.02·normalizedAlt` (Earth world radius = 0.1).
-Nếu render đúng khoảng cách thực, GEO cách Earth 5 lần đường kính Earth → không vừa
-màn hình. Compression giữ mọi vệ tinh trong 1 dải hẹp, dễ nhìn.
-
-### 11.9. GNSSARFragment — AR overlay lên camera thực tế?
-
-`GNSSARFragment` mở camera sau, hiển thị **preview live** + overlay các mũi tên chỉ vệ
-tinh. Bản chất:
-1. **Rotation vector** từ `SensorManager.TYPE_ROTATION_VECTOR` → matrix xoay `R` giữa
-   world frame (East-North-Up) và device frame.
-2. Với mỗi vệ tinh (elevation, azimuth), tính vector ENU:
-   ```
-   x = cos(el)·sin(az)   (East)
-   y = cos(el)·cos(az)   (North)
-   z = sin(el)            (Up)
-   ```
-3. Nhân `R⁻¹ · v` để về device frame → dùng làm 3D point trong camera space.
-4. Chiếu qua projection matrix của **camera thật** (có FOV riêng của phone camera).
-5. Nếu z > 0 (trước camera) → vẽ mũi tên tại (screen_x, screen_y).
-
-Kết quả: hướng phone lên trời, thấy các vệ tinh đúng chỗ chúng đang bay.
+**Trả lời:**  
+Cần bổ sung xác thực API, giới hạn dung lượng upload, hàng đợi xử lý bền vững, giám sát tài nguyên server, chính sách timeout, chuẩn hóa mã lỗi backend và kiểm thử trên nhiều thiết bị. Với định vị, cần benchmark định lượng và cơ chế fusion chặt chẽ hơn trước khi dùng trong môi trường thực tế.
 
 ---
 
-## 12. Live Routing & Dead Reckoning
+## 12. Bộ câu hỏi trả lời nhanh trước khi bảo vệ
 
-### 12.1. Live Routing làm gì?
+### 12.1. Đồ án dùng kiến trúc gì?
 
-`LiveRoutingViewModel` tổ chức luồng dữ liệu định vị realtime:
-1. Nhận `Location` từ GPS provider.
-2. So khớp với **route đã plan** (bằng OpenStreetMap/Mapbox).
-3. Hiển thị đường đi thật (path đã đi qua) trên map.
-4. Phát hiện lệch route → prompt reroute.
-5. Xử lý **mất GNSS** bằng dead reckoning.
+**Trả lời nhanh:**  
+Client-server. Android là client, Python/FastAPI là backend xử lý video RAFT.
 
-### 12.2. Weak/Strong markers và red/black paths là gì?
+### 12.2. Android app dùng mô hình tổ chức nào?
 
-- **Strong marker**: điểm GPS chất lượng tốt (accuracy < 15m, có PVT).
-- **Weak marker**: điểm suy đoán (từ dead reckoning, hoặc GPS accuracy > 30m).
-- **Red path**: đoạn đường **có GPS tốt** — vẽ đỏ để nổi bật.
-- **Black path**: đoạn đường **thiếu GPS**, chỉ dựa IMU + optical flow — vẽ đen để user
-  biết đây là ước lượng.
+**Trả lời nhanh:**  
+MVVM kết hợp phân tầng: Fragment/View, ViewModel, repository/business, data Room và native OpenCV.
 
-Ý nghĩa: user thấy rõ đoạn nào đáng tin, đoạn nào cần cẩn trọng.
+### 12.3. Các thư viện Android chính là gì?
 
-### 12.3. Dead reckoning là gì? Vì sao cần?
+**Trả lời nhanh:**  
+Kotlin, CameraX, OpenCV 4.12.0, osmdroid, ARCore, Orekit, WorkManager, Retrofit, OkHttp, Media3 và Room.
 
-**Dead reckoning** = ước lượng vị trí bằng **hướng + tốc độ + thời gian**, không cần GPS.
-```
-new_lat = old_lat + (v·dt·cos(heading)) / R_earth
-new_lon = old_lon + (v·dt·sin(heading)) / (R_earth·cos(lat))
-```
+### 12.4. Backend dùng gì?
 
-Cần khi:
-- Đi qua tunnel (GPS không xuyên).
-- Trong nhà (indoor).
-- Bị che (rừng rậm, đô thị canyon).
+**Trả lời nhanh:**  
+Python, FastAPI, Uvicorn, ONNX Runtime, OpenCV, ffmpeg; có thể dùng Cutie/PyTorch cho ROI video.
 
-Vấn đề: không có nguồn ngoài → sai số **tích luỹ theo thời gian**. IMU thuần drift
-~1-10 m/s. Ta bổ sung optical flow làm visual odometry.
+### 12.5. Thiết bị thử nghiệm là gì?
 
-### 12.4. Visual odometry từ optical flow ra sao?
+**Trả lời nhanh:**  
+Samsung Galaxy S20 Ultra.
 
-Ý tưởng: nếu camera nhìn mặt đường, tốc độ pixel dịch (`translationFlowPxPerSec`) tỷ lệ
-với tốc độ xe:
-```
-v_mps ≈ flow_pxps × dynamicFlowToMpsRatio
-```
+### 12.6. Bốn nguồn phân giải vị trí vệ tinh theo ưu tiên?
 
-`dynamicFlowToMpsRatio` được **học** từ giai đoạn có GPS: khi biết cả `v_gps` và
-`flow_pxps`, tính `ratio = v_gps / flow_pxps`, lấy trung bình trượt. Khi mất GPS → dùng
-ratio đã học × flow hiện tại.
+**Trả lời nhanh:**  
+PVT thật, IGS Broadcast Ephemeris, CelesTrak TLE/SGP4, rồi xấp xỉ từ azimuth/elevation.
 
-Điểm mấu chốt: ratio phụ thuộc **độ cao camera so với mặt đường** và **pitch camera**.
-Nếu user thay đổi tư thế điện thoại → ratio không còn đúng → sai. Vì thế app còn kết
-hợp IMU forward-axis learning để phát hiện đổi tư thế.
+### 12.7. PVT hết hạn sau bao lâu theo Chương 5?
 
-### 12.5. Cog trust speed là gì?
+**Trả lời nhanh:**  
+PVT chỉ dùng khi chưa quá hạn 10 giây.
 
-**COG (Course Over Ground)** = hướng đi thực tế (từ GPS). Khi tốc độ **thấp** (< 1 m/s),
-COG không đáng tin (nhiễu do noise, nhất là khi đứng yên). App gate:
-```
-if (v_gps > COG_TRUST_SPEED_MPS) use_cog_as_heading
-else use_gyro_heading
-```
+### 12.8. Broadcast ephemeris hợp lệ trong ngưỡng nào?
 
-Ngưỡng ~1-2 m/s là chuẩn trong car navigation.
+**Trả lời nhanh:**  
+Thời điểm bản tin gần thời điểm quan sát trong ngưỡng 12 giờ.
 
-### 12.6. Zero-Velocity Update (ZUPT)?
+### 12.9. KLT là sparse hay dense?
 
-Khi phát hiện thiết bị đứng yên (accelerometer variance thấp, gyro thấp) trong ≥1s,
-reset velocity IMU về 0. Giúp giảm drift dài hạn. Kỹ thuật chuẩn của INS.
+**Trả lời nhanh:**  
+Sparse, theo dõi các điểm đặc trưng.
 
-### 12.7. Map matching là gì?
+### 12.10. Farneback là sparse hay dense?
 
-Sau khi có ước lượng vị trí (từ GPS + IMU + VO), nếu điểm nằm gần một đoạn của route đã
-plan (< 20m), **snap** vị trí về gần nhất trên polyline route. Giúp đường đi hiển thị
-mượt, không zigzag do noise GPS.
+**Trả lời nhanh:**  
+Dense, ước lượng trường chuyển động dày đặc hơn trên ảnh.
 
----
+### 12.11. RAFT chạy ở đâu?
 
-## 13. Analytics Benchmark
+**Trả lời nhanh:**  
+Trên backend server, dùng ONNX Runtime để xử lý video ngoại tuyến.
 
-### 13.1. Analytics module làm gì?
+### 12.12. Vì sao không chạy RAFT trực tiếp trên Android?
 
-Cho phép user:
-- Ghi lại các session chạy KLT vs Farneback vs RAFT trên cùng đoạn video.
-- Xem đồ thị FPS, confidence, active vectors theo thời gian.
-- Xuất báo cáo so sánh.
+**Trả lời nhanh:**  
+Vì RAFT nặng về tính toán và bộ nhớ; Android cần phản hồi thời gian thực nên chỉ chạy KLT/Farneback.
 
-Xem `screen/fragment/AnalyticsListFragment.kt`, `AnalyticsViewFragment.kt`,
-`AnalyticsChartView.kt`, `model/AnalyticsModels.kt`.
+### 12.13. LiveRouting đã hoàn thiện chưa?
 
-### 13.2. `AnalyticsChartView` vẽ chart bằng gì?
+**Trả lời nhanh:**  
+Chưa hoàn toàn. Đây là chức năng thử nghiệm, cơ bản đạt nhưng chưa ổn định trong mọi điều kiện.
 
-Custom View kế thừa `View`, override `onDraw(Canvas)`. Bản chất:
-- Nhận list các `AnalyticsSample`, mỗi sample có `time, metric_value`.
-- Tính min/max để chuẩn hoá.
-- Vẽ trục X, Y bằng `canvas.drawLine`.
-- Vẽ đường: `canvas.drawPath(path)` với Path nối các điểm.
-- Vẽ fill dưới đường bằng gradient.
+### 12.14. Đồ án đã có ground truth định vị chưa?
 
-Vì sao không dùng MPAndroidChart? Vì đồ án cần control cụ thể (2-3 line cùng đồ thị,
-tooltip touch, decimation cho long series) — custom View gọn hơn.
+**Trả lời nhanh:**  
+Chưa. Đây là hạn chế lớn; hiện đánh giá chủ yếu là chức năng và quan sát định tính.
 
-### 13.3. Vì sao dùng Room database?
+### 12.15. Chỉ số nào được vẽ chính trong analytics?
 
-Xem migration commit `6072af1` — data storage migrate từ file JSON sang Room DB. Room:
-- ORM chuẩn Google, type-safe (kiểm compile-time).
-- Reactive (Flow, LiveData).
-- Migration schema tự động.
-- Query bằng annotation `@Query("SELECT ...")`.
+**Trả lời nhanh:**  
+FPS, thời gian xử lý và số điểm/vector hoạt động.
 
-Data model gồm: `AnalyticsSession`, `AnalyticsSample`. Session 1-N Sample.
+### 12.16. Độ tin cậy analytics có phải độ chính xác tuyệt đối không?
 
----
+**Trả lời nhanh:**  
+Không. Đó là độ tin cậy tương đối theo kiểm tra tiến-lùi.
 
-## 14. Server FastAPI/ONNX
+### 12.17. SNAP khác REAL thế nào?
 
-### 14.1. FastAPI vì sao chọn?
+**Trả lời nhanh:**  
+SNAP kéo vị trí về tuyến có điều kiện; REAL hiển thị vị trí dead reckoning thật.
 
-- **Async native**: dùng `asyncio` → xử lý concurrent requests hiệu quả.
-- **Type hints native**: tự động validate/document theo Pydantic.
-- **OpenAPI auto**: `/docs` swagger UI miễn phí.
-- **Nhanh**: bench 2-3× Flask.
+### 12.18. Bám đối tượng camera dùng gì?
 
-### 14.2. Endpoints chính?
+**Trả lời nhanh:**  
+CSRT của OpenCV kết hợp template matching.
 
-- `POST /process-video` (sync) — upload nhỏ, xử lý xong trả về link download.
-- `POST /process-video/jobs` (async) — tạo job, trả `jobId`, xử lý background.
-- `POST /process-video/uploads/{id}/chunks` — chunk upload.
-- `POST /process-video/jobs/{id}/cancel` — huỷ job đang chạy.
-- `GET /process-video/jobs/{id}/result` — tải output video.
-- `GET /health` — check server còn sống, dùng cho Android probe.
+### 12.19. Bám đối tượng video ngoại tuyến dùng gì?
 
-### 14.3. VideoJob state machine?
+**Trả lời nhanh:**  
+Backend có thể dùng Cutie để lan truyền mask qua video.
 
-```
-queued → processing → completed
-                    ↓
-                cancelling → cancelled
-                    ↓
-                 failed (exception)
-```
+### 12.20. Hạn chế quan trọng nhất cần nói trung thực?
 
-- `queued`: job vừa tạo, chưa có slot.
-- `processing`: đang chạy inference.
-- `cancelling`: user request cancel, worker đang gracefully dừng.
-- `completed`: xong, có `result_path`.
-- `failed`: có exception, có `error_message`.
-- `cancelled`: đã dừng thành công.
+**Trả lời nhanh:**  
+LiveRouting chưa ổn định định lượng, chưa có benchmark lớn và chưa có ground truth sai số quỹ đạo.
 
-### 14.4. ROI selection trên client ↔ server ra sao?
+### 12.21. Nếu bị hỏi "đóng góp thuật toán mới đâu?", trả lời thế nào?
 
-Client cho user vẽ 4-point ROI trên frame preview. Gửi lên server dưới dạng
-**normalized points**:
-```json
-{"points": [[0.1, 0.2], [0.9, 0.2], [0.9, 0.8], [0.1, 0.8]], "view_aspect_ratio": 1.777}
-```
+**Trả lời nhanh:**  
+Đồ án không tuyên bố phát minh thuật toán mới; đóng góp là tích hợp hệ thống, cơ chế điều phối dữ liệu và thực nghiệm trên Android/backend.
 
-Server nhận, biết `view_aspect_ratio` để scale đúng lên frame gốc (frame video có thể
-rộng hơn/khác aspect với preview). Sau đó mask hoặc crop.
+### 12.22. Hướng phát triển chính?
 
-Đồ án có tuỳ chọn dùng **Cutie** (Vision-Language Object Segmentation model) để tự
-segment vùng ROI thay vì user vẽ tay.
-
-### 14.5. Prepare blob cho ONNX ra sao?
-
-```python
-# 1. BGR → RGB
-img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-# 2. Resize about 480×360
-img_resized = cv2.resize(img_rgb, (480, 360), interpolation=cv2.INTER_LINEAR)
-# 3. HWC → CHW
-img_chw = np.transpose(img_resized, (2, 0, 1))
-# 4. Batch dim: [3, 360, 480] → [1, 3, 360, 480]
-img_batch = np.expand_dims(img_chw, axis=0).astype(np.float32)
-```
-
-Lý do:
-- OpenCV mặc định BGR, PyTorch/ONNX train ở RGB → phải convert.
-- ONNX PyTorch dùng NCHW (batch, channels, height, width).
-- Cần thêm batch dim vì model expect input 4D.
-
-### 14.6. `infer()` có 2 input hay 1 input?
-
-Một số RAFT ONNX **concatenate** 2 frame thành tensor 6 kênh `[1, 6, H, W]`. Số khác
-giữ 2 input riêng `frame1, frame2`. Server tự detect từ `session.get_inputs()`:
-- Nếu 2 input names → feed dict `{name1: blob1, name2: blob2}`.
-- Nếu 1 input → concat: `np.concatenate([blob1, blob2], axis=1)`.
+**Trả lời nhanh:**  
+Bổ sung benchmark định lượng, ground truth, sensor fusion bằng EKF/particle filter/factor graph và chuẩn hóa backend.
 
 ---
 
-## 15. Câu hỏi tổng hợp
+## Ghi chú ôn bảo vệ
 
-### 15.1. Tại sao đề tài của bạn có ý nghĩa? (Vấn đề trọng tâm)
-
-Bài toán cốt lõi là **duy trì tốc độ và vị trí chính xác khi GNSS mất tín hiệu**
-(tunnel, indoor, urban canyon). GPS-only rất phổ biến nhưng có điểm mù. Đề tài kết hợp:
-- Optical flow (visual odometry).
-- IMU (inertial).
-- GNSS chính xác cao khi có.
-
-Là **cascaded VIO** (Visual-Inertial Odometry) đơn giản hoá, không đầy đủ như VINS-Mono
-nhưng đủ cho mobile deployment.
-
-### 15.2. Ưu điểm và giới hạn của cách tiếp cận?
-
-**Ưu**:
-- Đa nguồn dữ liệu, robust hơn single-source.
-- Tận dụng cả CPU và GPU trên phone.
-- Server fallback cho case cần độ chính xác cao (RAFT).
-
-**Nhược**:
-- Optical flow phụ thuộc texture — không hoạt động trên bề mặt phẳng, tối.
-- IMU drift nhanh — chỉ tin cậy vài giây.
-- Chưa có tight-coupled fusion (Kalman filter đầy đủ) — mỗi module tương đối độc lập.
-- RAFT server yêu cầu mạng — không phải giải pháp offline hoàn toàn.
-
-### 15.3. Vì sao chọn OpenCV thay vì tự implement optical flow?
-
-- OpenCV được **kiểm định bởi cộng đồng ~10 triệu dev**, tránh bug ẩn.
-- **NEON/SIMD optimize** cho ARM — nhanh gấp 10× so với Kotlin thuần.
-- **Time to market** — focus vào phần đóng góp (integration, sensor fusion, UI), không
-  reinventing wheel.
-
-### 15.4. Vì sao dùng Orekit thay vì tự implement SGP4?
-
-Orekit là library **chuẩn ngành hàng không vũ trụ** (dùng bởi ESA, CNES, JAXA). Chuyển
-đổi datum, IAU rotation, GLONASS PZ-90.11 → WGS84 rất phức tạp. Tự implement dễ sai
-1-2 km. Orekit đảm bảo chính xác < 1 m.
-
-### 15.5. Kotlin coroutines dùng cho gì?
-
-- `Dispatchers.Default` — CPU-bound (optical flow processing).
-- `Dispatchers.IO` — mạng, disk (upload chunk, save video).
-- `Dispatchers.Main` — cập nhật UI.
-- `withContext(...)` — switch dispatcher trong hàm suspend.
-- `Flow` — reactive stream (location, sensor updates).
-
-Ưu điểm so với RxJava: syntax gọn, tích hợp Kotlin gốc, cancellation tự động khi
-scope huỷ (ViewModelScope).
-
-### 15.6. WorkManager dùng cho gì?
-
-`function/video/worker/VideoProcessingWorker.kt` — xử lý video ở background, có thể:
-- Chạy tiếp khi app bị kill.
-- Retry khi mất mạng.
-- Constraint (chỉ chạy khi có Wi-Fi + đang sạc).
-- Post notification progress.
-
-### 15.7. Nếu hội đồng hỏi "code này có gì mới so với có sẵn?" thì trả lời ra sao?
-
-- **Phần mới**:
-  - **Tích hợp** 4 tầng ưu tiên vị trí vệ tinh (PVT → IGS → SGP4 → Approx) trong một
-    resolver duy nhất — cách này chưa thấy trong app dân sự.
-  - **Visualization** globe 3D interactive với Sun/Moon Meeus + skybox — dùng OpenGL
-    ES 3.2 raw thay vì library.
-  - **Cascaded VIO cho mobile**: kết hợp KLT/Farneback + IMU + map matching tuỳ biến,
-    không phải import ARCore/SLAM library.
-  - **Server RAFT tự deploy**: chọn provider CUDA/DirectML/CPU automatic, chunked upload
-    tự implement — không dùng managed service.
-- **Phần chuẩn hoá**: math (Kepler, Meeus, WGS84), optical flow (LK, Farneback) là kinh
-  điển — không sáng chế lại.
-
-### 15.8. Kết luận cho đề tài
-
-Đề tài chứng minh rằng **smartphone hiện đại đủ sức thực hiện GNSS analysis + visual
-odometry ở mức nghiên cứu**, kết hợp cùng backend AI (RAFT) khi cần độ chính xác. Có
-tiềm năng ứng dụng trong navigation cho vùng thiếu GPS, drone chỉ dùng camera + IMU,
-hoặc giáo dục về orbital mechanics.
-
----
-
-*Hết. Nếu có câu hỏi ngoài phạm vi trên, hãy dựa vào mã nguồn thực tế và giải thích
-theo tinh thần: "bản chất là gì → công thức toán → code thực hiện thế nào → tại sao
-chọn tham số/cách tiếp cận đó".*
-
+- Khi nói về Chương 5, ưu tiên trình bày theo cấu trúc: bài toán, giải pháp, kết quả, hạn chế.
+- Không khẳng định hệ thống đạt độ chính xác định vị công nghiệp.
+- Với các phần chưa có số liệu định lượng, trả lời: "Trong phạm vi đồ án, em mới đánh giá ở mức chức năng và quan sát định tính; đây là hướng cần mở rộng".
+- Với LiveRouting, nhấn mạnh đây là hỗ trợ ngắn hạn khi GNSS suy giảm, không phải thay thế GNSS hay VIO đầy đủ.
+- Với RAFT, nhấn mạnh lý do đưa lên backend là chi phí tính toán cao và nhu cầu xử lý video ngoại tuyến.
